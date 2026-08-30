@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="Map Lab"
+    Manufacturer="Map Lab"
+    Version="$(var.ProductVersion)"
+    UpgradeCode="7C642D73-845B-4DB7-89A4-F37FE4114870"
+    Scope="perMachine">
+
+    <SummaryInformation Description="Map Lab installer" Manufacturer="Map Lab" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Map Lab is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="Map Lab" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="MapLabProgramMenuFolder" Name="Map Lab">
+        <Component Id="StartMenuShortcutComponent" Guid="*">
+          <Shortcut
+            Id="StartMenuShortcut"
+            Name="Map Lab"
+            Description="Open Map Lab"
+            Target="[INSTALLFOLDER]MapLab.exe"
+            WorkingDirectory="INSTALLFOLDER" />
+          <RemoveFolder Id="RemoveMapLabProgramMenuFolder" On="uninstall" />
+          <RegistryValue Root="HKCU" Key="Software\Map Lab" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcutComponent" Guid="*">
+        <Shortcut
+          Id="DesktopShortcut"
+          Name="Map Lab"
+          Description="Open Map Lab"
+          Target="[INSTALLFOLDER]MapLab.exe"
+          WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKCU" Key="Software\Map Lab" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="MapLabFeature" Title="Map Lab" Level="1">
+      <Files Include="$(var.PublishDir)\**" Directory="INSTALLFOLDER" />
+      <ComponentRef Id="StartMenuShortcutComponent" />
+      <ComponentRef Id="DesktopShortcutComponent" />
+    </Feature>
+  </Package>
+</Wix>
