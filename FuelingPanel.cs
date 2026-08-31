@@ -78,7 +78,7 @@ public sealed class FuelingPanel : Grid
         var tools = new StackPanel { Orientation = Orientation.Horizontal };
         tools.Children.Add(ControlGroup("FUEL SETUP TOOLS", Button("◒  VE Setup", OpenVeSetup, true)));
         tools.Children.Add(MatrixAxisGroup());
-        tools.Children.Add(ControlGroup("CELL EDITING", Button("⧉  Copy", (_, _) => CopySelection()), Button("▣  Paste", (_, _) => PasteSelection())));
+        tools.Children.Add(ControlGroup("CELL EDITING", Button("⧉  Copy", (_, _) => CopySelection()), Button("▣  Paste", (_, _) => PasteSelection()), Button("△  Delta", DeltaCompare)));
         tools.Children.Add(ControlGroup("SMOOTHING", Button("⌁  Interpolate", InterpolateSelection), Button("⚙  Smooth Selected…", AdvancedSmooth, true), Button("↕  Columns", SmoothColumns), Button("↔  Rows", SmoothRows)));
         tools.Children.Add(ControlGroup("VIEW & OUTPUT", Button("▦  3D Map", View3D), Button("⇩  Export CSV", ExportCsv), Button("▤  Export Excel", ExportExcel, true)));
         tools.Children.Add(ControlGroup("HISTORY", Button("↶  Undo", (_, _) => Undo()), Button("↷  Redo", (_, _) => Redo())));
@@ -454,7 +454,7 @@ public sealed class FuelingPanel : Grid
             for (var col = left; col <= right; col++) { if (col > left) text.Append('\t'); text.Append(cells[row, col].Text); }
             if (row < bottom) text.AppendLine();
         }
-        try { Clipboard.SetText(text.ToString()); status.Text = $"Copied {right - left + 1} × {bottom - top + 1} fuel cells"; }
+        try { Clipboard.SetText(text.ToString()); ClearFuelSelection(); status.Text = $"Copied {right - left + 1} × {bottom - top + 1} fuel cells  •  selection cleared"; }
         catch { Info("The clipboard is currently unavailable."); }
     }
 
@@ -483,6 +483,111 @@ public sealed class FuelingPanel : Grid
             end = (Math.Min(map.Length - 1, top + rows.Length - 1), Math.Min(rpm.Length - 1, left + rows.Max(row => row.Length) - 1));
         }
         Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Fuel values pasted from clipboard  •  selection cleared";
+    }
+
+    private void DeltaCompare(object? sender, RoutedEventArgs e)
+    {
+        if (showFuelFlow) { Info("Delta compare works on VE percentages. Clear 'View as lb/hr' before comparing fuel-table values."); return; }
+        if (!TryReadClipboardTable(out var pasted)) return;
+        if (!TryCreateDeltaTarget(pasted, out var target, out var top, out var bottom, out var left, out var right)) return;
+
+        var deltas = new List<double>();
+        for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) deltas.Add(target[row, col] - ve[row, col]);
+        var window = new DeltaCompareWindow(
+            "Fuel Delta Compare",
+            bottom - top + 1,
+            right - left + 1,
+            deltas.Min(),
+            deltas.Max(),
+            deltas.Average(),
+            deltas.Average(Math.Abs),
+            (mode, strength, passes) => ApplyDeltaCompare(target, top, bottom, left, right, mode, strength, passes))
+        { Owner = Window.GetWindow(this) };
+        window.ShowDialog();
+    }
+
+    private bool TryReadClipboardTable(out double[][] values)
+    {
+        values = [];
+        string text; try { if (!Clipboard.ContainsText()) { Info("Copy a numeric table to the clipboard first."); return false; } text = Clipboard.GetText().Trim(); } catch { Info("The clipboard is currently unavailable."); return false; }
+        var rows = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Split(line.Contains('\t') ? '\t' : ',', StringSplitOptions.TrimEntries)).ToArray();
+        if (rows.Length == 0) { Info("Copy a numeric table to the clipboard first."); return false; }
+        values = new double[rows.Length][];
+        for (var row = 0; row < rows.Length; row++)
+        {
+            values[row] = new double[rows[row].Length];
+            for (var col = 0; col < rows[row].Length; col++)
+                if (!double.TryParse(rows[row][col], NumberStyles.Float, CultureInfo.InvariantCulture, out values[row][col]) || !double.IsFinite(values[row][col]))
+                { Info("Clipboard cells must contain numeric values."); return false; }
+        }
+        return true;
+    }
+
+    private bool TryCreateDeltaTarget(double[][] pasted, out double[,] target, out int top, out int bottom, out int left, out int right)
+    {
+        target = (double[,])ve.Clone();
+        if (Bounds(out top, out bottom, out left, out right))
+        {
+            if (pasted.Length == 1 && pasted[0].Length == 1)
+            {
+                for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) target[row, col] = pasted[0][0];
+                return true;
+            }
+            if (top + pasted.Length > map.Length || left + pasted.Max(row => row.Length) > rpm.Length)
+            { Info("The pasted table is too large for the selected starting fuel cell."); return false; }
+            bottom = top + pasted.Length - 1; right = left + pasted.Max(row => row.Length) - 1;
+            for (var sourceRow = 0; sourceRow < pasted.Length; sourceRow++)
+            for (var sourceCol = 0; sourceCol < pasted[sourceRow].Length; sourceCol++)
+                target[top + sourceRow, left + sourceCol] = pasted[sourceRow][sourceCol];
+            return true;
+        }
+
+        if (pasted.Length != map.Length || pasted.Any(row => row.Length != rpm.Length))
+        { Info("Select a destination fuel cell, or copy a full-size table that matches the Fueling matrix."); return false; }
+        top = 0; bottom = map.Length - 1; left = 0; right = rpm.Length - 1;
+        for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++) target[row, col] = pasted[row][col];
+        return true;
+    }
+
+    private void ApplyDeltaCompare(double[,] target, int top, int bottom, int left, int right, DeltaCompareApplyMode mode, double strength, int passes)
+    {
+        PushUndo();
+        var next = mode switch
+        {
+            DeltaCompareApplyMode.SmoothDelta => SmoothDeltaBlock(target, top, bottom, left, right, strength, passes),
+            _ => (double[,])target.Clone()
+        };
+        for (var row = 0; row < ve.GetLength(0); row++) for (var col = 0; col < ve.GetLength(1); col++) ve[row, col] = Math.Round(next[row, col], 1);
+        Save(); RefreshAll(); ClearFuelSelection();
+        status.Text = mode switch
+        {
+            DeltaCompareApplyMode.SmoothDelta => $"Smoothed pasted delta across {right - left + 1} x {bottom - top + 1} fuel cells",
+            _ => $"Applied pasted target to {right - left + 1} x {bottom - top + 1} fuel cells"
+        };
+    }
+
+    private double[,] SmoothDeltaBlock(double[,] target, int top, int bottom, int left, int right, double strength, int passes)
+    {
+        var result = (double[,])target.Clone();
+        for (var pass = 0; pass < passes; pass++)
+        {
+            var next = (double[,])result.Clone();
+            for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++)
+            {
+                double sum = 0, weight = 0;
+                for (var dr = -1; dr <= 1; dr++) for (var dc = -1; dc <= 1; dc++)
+                {
+                    var rr = row + dr; var cc = col + dc;
+                    if (rr < top || rr > bottom || cc < left || cc > right) continue;
+                    var w = (dr == 0 ? 2 : 1) * (dc == 0 ? 2 : 1);
+                    sum += result[rr, cc] * w; weight += w;
+                }
+                next[row, col] = result[row, col] + (sum / Math.Max(.0001, weight) - result[row, col]) * strength;
+            }
+            result = next;
+        }
+        return result;
     }
 
     private void ClearFuelSelection()

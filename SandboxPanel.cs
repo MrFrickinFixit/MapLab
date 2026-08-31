@@ -259,7 +259,8 @@ public sealed class SandboxPanel : Grid
     {
         if (!Bounds(out var t, out var b, out var l, out var r)) return; var text = new StringBuilder();
         for (var row = t; row <= b; row++) { for (var c = l; c <= r; c++) { if (c > l) text.Append('\t'); text.Append(values[row, c].ToString("0.###", CultureInfo.InvariantCulture)); } if (row < b) text.AppendLine(); }
-        Clipboard.SetText(text.ToString()); status.Text = "Copied sandbox selection";
+        try { Clipboard.SetText(text.ToString()); ClearCellSelection(); status.Text = "Copied sandbox selection  •  selection cleared"; }
+        catch { Info("The clipboard is currently unavailable."); }
     }
     private void Paste()
     {

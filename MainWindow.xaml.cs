@@ -60,9 +60,10 @@ public partial class MainWindow : Window
     private bool axisSelecting, axisDragIsMap;
     private int axisDragStart;
     private int mapUnitIndex;
-    private string MapUnit => ApplicationBox.SelectedIndex == 0 ? "kPa absolute" : "PSI gauge";
-    private double MapAxisIncrement => ApplicationBox.SelectedIndex == 1 ? .1 : 1;
-    private string MapAxisFormat => ApplicationBox.SelectedIndex == 1 ? "0.0" : "0";
+    private bool syncingMapUnitControls;
+    private string MapUnit => mapUnitIndex == 0 ? "kPa absolute" : "PSI gauge";
+    private double MapAxisIncrement => mapUnitIndex == 1 ? .1 : 1;
+    private string MapAxisFormat => mapUnitIndex == 1 ? "0.0" : "0";
     private double RoundMapValue(double value) => Math.Round(value / MapAxisIncrement) * MapAxisIncrement;
     private string FormatMap(double value) => value.ToString(MapAxisFormat, CultureInfo.InvariantCulture);
     private double idleTransitionRpm = 1200, wotTransitionMap = 85;
@@ -89,12 +90,24 @@ public partial class MainWindow : Window
 
     private void Application_Changed(object sender, SelectionChangedEventArgs e)
     {
-        if (!IsLoaded || loadingState) return;
-        var targetIndex = ApplicationBox.SelectedIndex;
+        if (syncingMapUnitControls) return;
+        ChangeTimingMapUnit(ApplicationBox.SelectedIndex);
+    }
+
+    private void TimingMapUnit_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (syncingMapUnitControls) return;
+        ChangeTimingMapUnit(TimingMapUnitBox.SelectedIndex);
+    }
+
+    private void ChangeTimingMapUnit(int targetIndex)
+    {
+        if (!IsLoaded || loadingState || targetIndex is not (0 or 1)) return;
         if (targetIndex == mapUnitIndex) return;
         var fromPsi = mapUnitIndex == 1;
         var toPsi = targetIndex == 1;
-        var boosted = toPsi;
+        mapUnitIndex = targetIndex;
+        SyncTimingMapUnitControls();
 
         for (var index = 0; index < mapAxis.Length; index++)
             mapAxis[index] = RoundMapValue(ConvertMapUnit(mapAxis[index], fromPsi, toPsi));
@@ -107,11 +120,7 @@ public partial class MainWindow : Window
             HighMap = ConvertMapUnit(profile.HighMap, fromPsi, toPsi)
         }).ToArray();
 
-        mapUnitIndex = targetIndex;
-        MinMapLabel.Text = boosted ? "MIN MAP (PSI GAUGE)" : "MIN MAP (kPa ABS)";
-        MaxMapLabel.Text = boosted ? "MAX MAP (PSI GAUGE)" : "MAX MAP (kPa ABS)";
-        IdleMapLabel.Text = boosted ? "IDLE → CRUISE MAP (PSI)" : "IDLE → CRUISE MAP (kPa)";
-        WotMapLabel.Text = boosted ? "PART THROTTLE / WOT BOUNDARY (PSI)" : "PART THROTTLE / WOT BOUNDARY (kPa)";
+        RefreshTimingMapUnitPresentation();
         if (mapAxis.Length > 0)
         {
             MinMapBox.Text = FormatMap(mapAxis[^1]);
@@ -120,14 +129,31 @@ public partial class MainWindow : Window
                 if (mapAxisCells[index] is not null) mapAxisCells[index].Text = mapAxis[index].ToString(MapAxisFormat, CultureInfo.InvariantCulture);
         }
         if (double.TryParse(IdleMapBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var idleMap))
-            IdleMapBox.Text = ConvertMapUnit(idleMap, fromPsi, toPsi).ToString("0.0", CultureInfo.InvariantCulture);
-        WotMapBox.Text = wotTransitionMap.ToString("0.0", CultureInfo.InvariantCulture);
-        AxisHelpText.Text = boosted ? "MAP PSI gauge (Y) and RPM (X) axes are editable  •  Drag across timing cells to select" : "MAP kPa absolute (Y) and RPM (X) axes are editable  •  Drag across timing cells to select";
-        if (mapAxisTitle is not null) mapAxisTitle.Text = boosted ? "MAP (PSIG)" : "MAP (kPa)";
+            IdleMapBox.Text = FormatMap(ConvertMapUnit(idleMap, fromPsi, toPsi));
+        WotMapBox.Text = FormatMap(wotTransitionMap);
         selectedMapAxis.Clear(); if (activeAxisIsMap == true) activeAxisIsMap = null;
         UpdateAxisSelectionVisuals(); ApplyRegionVisualization(); SaveState();
         SyncFuelingAxes();
         StatusText.Text = $"MAP scale converted to {MapUnit}  •  timing values preserved";
+    }
+
+    private void SyncTimingMapUnitControls()
+    {
+        syncingMapUnitControls = true;
+        ApplicationBox.SelectedIndex = mapUnitIndex;
+        TimingMapUnitBox.SelectedIndex = mapUnitIndex;
+        syncingMapUnitControls = false;
+    }
+
+    private void RefreshTimingMapUnitPresentation()
+    {
+        var boosted = mapUnitIndex == 1;
+        MinMapLabel.Text = boosted ? "MIN MAP (PSI GAUGE)" : "MIN MAP (kPa ABS)";
+        MaxMapLabel.Text = boosted ? "MAX MAP (PSI GAUGE)" : "MAX MAP (kPa ABS)";
+        IdleMapLabel.Text = boosted ? "IDLE -> CRUISE MAP (PSI)" : "IDLE -> CRUISE MAP (kPa)";
+        WotMapLabel.Text = boosted ? "PART THROTTLE / WOT BOUNDARY (PSI)" : "PART THROTTLE / WOT BOUNDARY (kPa)";
+        AxisHelpText.Text = boosted ? "MAP PSI gauge (Y) and RPM (X) axes are editable  •  Drag across timing cells to select" : "MAP kPa absolute (Y) and RPM (X) axes are editable  •  Drag across timing cells to select";
+        if (mapAxisTitle is not null) mapAxisTitle.Text = boosted ? "MAP (PSIG)" : "MAP (kPa)";
     }
 
     private static double ConvertMapUnit(double value, bool fromPsi, bool toPsi)
@@ -243,7 +269,7 @@ public partial class MainWindow : Window
                 Grid.SetRow(cell, row); Grid.SetColumn(cell, col + 2); TableGrid.Children.Add(cell);
             }
         }
-        AddAxisTitle(ApplicationBox.SelectedIndex == 0 ? "MAP (kPa)" : "MAP (PSIG)", true);
+        AddAxisTitle(mapUnitIndex == 0 ? "MAP (kPa)" : "MAP (PSIG)", true);
         for (var col = 0; col < ColumnCount; col++) AddAxisEditor(rpmAxis[col], RowCount, col + 2, false, col);
         AddAxisTitle("Engine RPM", false);
         SyncFuelingAxes();
@@ -716,7 +742,7 @@ public partial class MainWindow : Window
             }
             if (row < bottom) text.AppendLine();
         }
-        try { Clipboard.SetText(text.ToString()); StatusText.Text = $"Copied {right - left + 1} × {bottom - top + 1} cells"; }
+        try { Clipboard.SetText(text.ToString()); ClearTimingSelection(); StatusText.Text = $"Copied {right - left + 1} × {bottom - top + 1} cells  •  selection cleared"; }
         catch (Exception) { MessageBox.Show("The clipboard is currently unavailable. Try again.", "Copy failed", MessageBoxButton.OK, MessageBoxImage.Warning); }
     }
 
@@ -939,7 +965,7 @@ public partial class MainWindow : Window
     private void BoostRetard_Click(object sender, RoutedEventArgs e)
     {
         if (ModelessWindowManager.ActivateIfOpen("Timing.Boost")) return;
-        if (ApplicationBox.SelectedIndex != 1)
+        if (mapUnitIndex != 1)
         {
             MessageBox.Show("Boost timing retard is available in Boosted / Forced Induction mode, where MAP is displayed in PSI gauge.", "Boosted mode required", MessageBoxButton.OK, MessageBoxImage.Information); return;
         }
@@ -1515,7 +1541,7 @@ public partial class MainWindow : Window
             }
             var state = new AutosaveState
             {
-                ApplicationIndex = ApplicationBox.SelectedIndex,
+                ApplicationIndex = mapUnitIndex,
                 MinRpm = MinRpmBox.Text, MaxRpm = MaxRpmBox.Text, MinMap = MinMapBox.Text, MaxMap = MaxMapBox.Text,
                 LowTiming = LowTimingBox.Text, HighTiming = HighTimingBox.Text,
                 IdleRpm = IdleRpmBox.Text, IdleMap = IdleMapBox.Text, WotRpm = WotRpmBox.Text, WotMap = WotMapBox.Text,
@@ -1546,14 +1572,9 @@ public partial class MainWindow : Window
             loadingState = true;
             ColumnCount = state.RpmAxis.Length; RowCount = state.MapAxis.Length;
             MatrixXSizeBox.Text = ColumnCount.ToString(CultureInfo.InvariantCulture); MatrixYSizeBox.Text = RowCount.ToString(CultureInfo.InvariantCulture);
-            ApplicationBox.SelectedIndex = Math.Clamp(state.ApplicationIndex, 0, 1);
-            mapUnitIndex = ApplicationBox.SelectedIndex;
-            var boosted = ApplicationBox.SelectedIndex == 1;
-            MinMapLabel.Text = boosted ? "MIN MAP (PSI GAUGE)" : "MIN MAP (kPa ABS)";
-            MaxMapLabel.Text = boosted ? "MAX MAP (PSI GAUGE)" : "MAX MAP (kPa ABS)";
-            IdleMapLabel.Text = boosted ? "IDLE → CRUISE MAP (PSI)" : "IDLE → CRUISE MAP (kPa)";
-            WotMapLabel.Text = boosted ? "PART THROTTLE / WOT BOUNDARY (PSI)" : "PART THROTTLE / WOT BOUNDARY (kPa)";
-            AxisHelpText.Text = boosted ? "MAP PSI gauge (Y) and RPM (X) axes are editable  •  Drag across timing cells to select" : "MAP kPa absolute (Y) and RPM (X) axes are editable  •  Drag across timing cells to select";
+            mapUnitIndex = Math.Clamp(state.ApplicationIndex, 0, 1);
+            SyncTimingMapUnitControls();
+            RefreshTimingMapUnitPresentation();
             MinRpmBox.Text = state.MinRpm; MaxRpmBox.Text = state.MaxRpm; MinMapBox.Text = state.MinMap; MaxMapBox.Text = state.MaxMap;
             LowTimingBox.Text = state.LowTiming; HighTimingBox.Text = state.HighTiming;
             useCustomHeatColors = state.UseCustomHeatColors;
