@@ -20,7 +20,9 @@ public sealed class Surface3DWindow : Window
     private readonly double[,] values;
     private readonly int rows, cols;
     private readonly double[] rpmAxis, mapAxis;
-    private readonly string mapUnit, valueAxisTitle;
+    private readonly string mapUnit, valueAxisTitle, mapAxisTitle, rpmAxisTitle, rpmFormat;
+    private string MapFormat => mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? "0.0" : mapUnit.Contains("kPa", StringComparison.OrdinalIgnoreCase) ? "0" : "0.###";
+    private string FormatMap(double value) => value.ToString(MapFormat, System.Globalization.CultureInfo.InvariantCulture);
     private readonly Func<int, int, int, int, double[,]> smoothSelection;
     private readonly Action<SurfaceSelectionAction, int, int, int, int, IReadOnlyCollection<(int Row, int Col)>, Action<double[,]>>? selectionAction;
     private readonly ModelVisual3D selectionVisual = new();
@@ -39,10 +41,10 @@ public sealed class Surface3DWindow : Window
     private (int Row, int Col)? hoverCell;
     private readonly List<(TextBlock Label, Point3D LocalPosition)> scaleOverlayLabels = [];
 
-    public Surface3DWindow(double[,] values, double[] rpm, double[] map, string mapUnit, bool useCustomColors, Color lowColor, Color highColor, Func<int, int, int, int, double[,]> smoothSelection, string windowTitle = "3D Timing Map", string valueAxisTitle = "SPARK TIMING (°)", Action<SurfaceSelectionAction, int, int, int, int, IReadOnlyCollection<(int Row, int Col)>, Action<double[,]>>? selectionAction = null)
+    public Surface3DWindow(double[,] values, double[] rpm, double[] map, string mapUnit, bool useCustomColors, Color lowColor, Color highColor, Func<int, int, int, int, double[,]> smoothSelection, string windowTitle = "3D Timing Map", string valueAxisTitle = "SPARK TIMING (°)", Action<SurfaceSelectionAction, int, int, int, int, IReadOnlyCollection<(int Row, int Col)>, Action<double[,]>>? selectionAction = null, string mapAxisTitle = "MAP", string rpmAxisTitle = "ENGINE RPM", string rpmFormat = "0")
     {
         this.values = values; rows = values.GetLength(0); cols = values.GetLength(1); this.smoothSelection = smoothSelection;
-        rpmAxis = rpm.ToArray(); mapAxis = map.ToArray(); this.mapUnit = mapUnit; this.valueAxisTitle = valueAxisTitle;
+        rpmAxis = rpm.ToArray(); mapAxis = map.ToArray(); this.mapUnit = mapUnit; this.valueAxisTitle = valueAxisTitle; this.mapAxisTitle = mapAxisTitle; this.rpmAxisTitle = rpmAxisTitle; this.rpmFormat = rpmFormat;
         this.selectionAction = selectionAction;
         this.useCustomColors = useCustomColors; this.lowColor = lowColor; this.highColor = highColor;
         Title = windowTitle; Width = 1100; Height = 760; MinWidth = 720; MinHeight = 520;
@@ -54,7 +56,7 @@ public sealed class Surface3DWindow : Window
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var heading = new StackPanel { Margin = new Thickness(4, 0, 0, 14) };
         heading.Children.Add(new TextBlock { Text = windowTitle.ToUpperInvariant(), Foreground = new SolidColorBrush(Color.FromRgb(85, 214, 190)), FontSize = 12, FontWeight = FontWeights.Bold });
-        heading.Children.Add(new TextBlock { Text = $"{rpm.First():0}–{rpm.Last():0} RPM  •  {map.Last():0}–{map.First():0} {mapUnit}", Foreground = Brushes.White, FontSize = 22, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 0) });
+        heading.Children.Add(new TextBlock { Text = $"{rpm.First().ToString(rpmFormat)}–{rpm.Last().ToString(rpmFormat)} {rpmAxisTitle}  •  {FormatMap(map.Last())}–{FormatMap(map.First())} {mapUnit}", Foreground = Brushes.White, FontSize = 22, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 0) });
         var selectionControls = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
         var undoButton = new Button { Content = "↶  Undo", Padding = new Thickness(12, 6, 12, 6), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White };
         var redoButton = new Button { Content = "↷  Redo", Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(8, 0, 0, 0), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White };
@@ -95,7 +97,7 @@ public sealed class Surface3DWindow : Window
         viewport.Children.Add(new ModelVisual3D { Content = scene });
         selectionVisual.Transform = transforms; viewport.Children.Add(selectionVisual);
         hoverVisual.Transform = transforms; viewport.Children.Add(hoverVisual);
-        AddRotatingScaleLabels(viewport, transforms, values, rpm, map, mapUnit, valueAxisTitle);
+        AddRotatingScaleLabels(viewport, transforms, values, rpm, map, mapUnit, valueAxisTitle, mapAxisTitle, rpmAxisTitle, rpmFormat);
 
         hoverText = new TextBlock { Foreground = Brushes.White, FontSize = 12, FontWeight = FontWeights.SemiBold, LineHeight = 18 };
         hoverTip = new Border { Background = new SolidColorBrush(Color.FromArgb(235, 15, 24, 36)), BorderBrush = new SolidColorBrush(Color.FromRgb(85, 214, 190)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Padding = new Thickness(9, 6, 9, 6), Child = hoverText, Visibility = Visibility.Collapsed };
@@ -174,7 +176,7 @@ public sealed class Surface3DWindow : Window
         var timingScale = MakeVerticalScale("SPARK TIMING (°)", timingMax, timingMin, "0.0");
         Grid.SetColumn(timingScale, 0); Grid.SetRow(timingScale, 0); overlay.Children.Add(timingScale);
 
-        var mapScale = MakeVerticalScale($"MAP ({mapUnit})", map[0], map[^1], "0");
+        var mapScale = MakeVerticalScale($"MAP ({mapUnit})", map[0], map[^1], mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? "0.0" : "0");
         Grid.SetColumn(mapScale, 2); Grid.SetRow(mapScale, 0); overlay.Children.Add(mapScale);
 
         var rpmScale = new Grid { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(12, 0, 12, 0) };
@@ -211,22 +213,24 @@ public sealed class Surface3DWindow : Window
         Background = new SolidColorBrush(Color.FromArgb(145, 5, 9, 14)), Padding = new Thickness(3, 1, 3, 1)
     };
 
-    private void AddRotatingScaleLabels(Viewport3D viewport, Transform3D transform, double[,] values, double[] rpm, double[] map, string mapUnit, string valueAxisTitle)
+    private void AddRotatingScaleLabels(Viewport3D viewport, Transform3D transform, double[,] values, double[] rpm, double[] map, string mapUnit, string valueAxisTitle, string axisTitle, string xAxisTitle, string xFormat)
     {
         var timingMin = values.Cast<double>().Min(); var timingMax = values.Cast<double>().Max();
-        AddScaleOverlay("ENGINE RPM", new Point3D(0, -.15, 9.25), true);
-        AddScaleOverlay("ENGINE RPM", new Point3D(0, -.15, -9.25), true);
+        AddScaleOverlay(xAxisTitle, new Point3D(0, -.15, 9.25), true);
+        AddScaleOverlay(xAxisTitle, new Point3D(0, -.15, -9.25), true);
         for (var labelIndex = 0; labelIndex < 7; labelIndex++)
         {
             var fraction = labelIndex / 6d;
             var axisIndex = (int)Math.Round(fraction * (rpm.Length - 1));
             var x = -9.5 + 19 * fraction;
-            var label = rpm[axisIndex].ToString("0");
+            var label = rpm[axisIndex].ToString(xFormat);
             AddScaleOverlay(label, new Point3D(x, -.15, 8.65));
             AddScaleOverlay(label, new Point3D(x, -.15, -8.65));
         }
 
-        var mapTitle = mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? "MAP (PSIG)" : "MAP (kPa)";
+        var mapTitle = axisTitle == "MAP"
+            ? mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? "MAP (PSIG)" : "MAP (kPa)"
+            : mapUnit.Equals("Unitless", StringComparison.OrdinalIgnoreCase) ? axisTitle : $"{axisTitle} ({mapUnit})";
         AddFloorLabel(viewport, transform, mapTitle, 11.25, 0, 1.25, 5.8, true, -90);
         AddFloorLabel(viewport, transform, mapTitle, -11.25, 0, 1.25, 5.8, true, 90);
         for (var labelIndex = 0; labelIndex < 7; labelIndex++)
@@ -234,7 +238,7 @@ public sealed class Surface3DWindow : Window
             var fraction = labelIndex / 6d;
             var axisIndex = (int)Math.Round(fraction * (map.Length - 1));
             var z = -7.7 + 15.4 * fraction;
-            var label = map[axisIndex].ToString("0");
+            var label = FormatMap(map[axisIndex]);
             AddScaleOverlay(label, new Point3D(10.7, -.15, z));
             AddScaleOverlay(label, new Point3D(-10.7, -.15, z));
         }
@@ -472,7 +476,7 @@ public sealed class Surface3DWindow : Window
         {
             hoverCell = cell;
             hoverVisual.Content = CreateHoverCrosshair(cell.Value.Row, cell.Value.Col);
-            hoverText.Text = $"RPM: {rpmAxis[cell.Value.Col]:0}\nMAP: {mapAxis[cell.Value.Row]:0} {mapUnit}\n{valueAxisTitle}: {values[cell.Value.Row, cell.Value.Col]:0.0}";
+            hoverText.Text = $"{rpmAxisTitle}: {rpmAxis[cell.Value.Col].ToString(rpmFormat)}\n{mapAxisTitle}: {FormatMap(mapAxis[cell.Value.Row])} {mapUnit}\n{valueAxisTitle}: {values[cell.Value.Row, cell.Value.Col]:0.0}";
             hoverTip.Visibility = Visibility.Visible;
             hoverTip.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         }

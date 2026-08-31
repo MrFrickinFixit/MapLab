@@ -14,6 +14,7 @@ namespace TimingTableCalculator;
 public partial class MainWindow : Window
 {
     private readonly FuelingPanel fuelingPanel;
+    private readonly SandboxPanel sandboxPanel;
     private int RowCount = 31, ColumnCount = 31;
     private static readonly double[] DefaultRpmAxis =
     [
@@ -60,6 +61,10 @@ public partial class MainWindow : Window
     private int axisDragStart;
     private int mapUnitIndex;
     private string MapUnit => ApplicationBox.SelectedIndex == 0 ? "kPa absolute" : "PSI gauge";
+    private double MapAxisIncrement => ApplicationBox.SelectedIndex == 1 ? .1 : 1;
+    private string MapAxisFormat => ApplicationBox.SelectedIndex == 1 ? "0.0" : "0";
+    private double RoundMapValue(double value) => Math.Round(value / MapAxisIncrement) * MapAxisIncrement;
+    private string FormatMap(double value) => value.ToString(MapAxisFormat, CultureInfo.InvariantCulture);
     private double idleTransitionRpm = 1200, wotTransitionMap = 85;
     private RegionPointPick regionPointPick;
     private int idleMarkerCol, wotMarkerRow;
@@ -67,7 +72,9 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        fuelingPanel = new FuelingPanel(ResizeMatrixFromFuel, AutoFillAxisFromFuel, PasteAxisFromFuel, ChangeMapUnitFromFuel, SetRegionBoundariesFromFuel, EditAxisFromFuel, RescaleMapAxisFromFuel); FuelingHost.Content = fuelingPanel;
+        fuelingPanel = new FuelingPanel(ResizeMatrixFromFuel, AutoFillAxisFromFuel, PasteAxisFromFuel, SetRegionBoundariesFromFuel, EditAxisFromFuel); FuelingHost.Content = fuelingPanel;
+        sandboxPanel = new SandboxPanel(); SandboxHost.Content = sandboxPanel;
+        HelpHost.Content = new HelpPanel();
         PreviewKeyDown += MainWindow_PreviewKeyDown;
         Loaded += (_, _) =>
         {
@@ -90,7 +97,7 @@ public partial class MainWindow : Window
         var boosted = toPsi;
 
         for (var index = 0; index < mapAxis.Length; index++)
-            mapAxis[index] = ConvertMapUnit(mapAxis[index], fromPsi, toPsi);
+            mapAxis[index] = RoundMapValue(ConvertMapUnit(mapAxis[index], fromPsi, toPsi));
         wotTransitionMap = ConvertMapUnit(wotTransitionMap, fromPsi, toPsi);
         boostRetardLowMap = ConvertMapUnit(boostRetardLowMap, fromPsi, toPsi);
         boostRetardHighMap = ConvertMapUnit(boostRetardHighMap, fromPsi, toPsi);
@@ -107,10 +114,10 @@ public partial class MainWindow : Window
         WotMapLabel.Text = boosted ? "PART THROTTLE / WOT BOUNDARY (PSI)" : "PART THROTTLE / WOT BOUNDARY (kPa)";
         if (mapAxis.Length > 0)
         {
-            MinMapBox.Text = mapAxis[^1].ToString("0.0", CultureInfo.InvariantCulture);
-            MaxMapBox.Text = mapAxis[0].ToString("0.0", CultureInfo.InvariantCulture);
+            MinMapBox.Text = FormatMap(mapAxis[^1]);
+            MaxMapBox.Text = FormatMap(mapAxis[0]);
             for (var index = 0; index < mapAxis.Length; index++)
-                if (mapAxisCells[index] is not null) mapAxisCells[index].Text = mapAxis[index].ToString("0", CultureInfo.InvariantCulture);
+                if (mapAxisCells[index] is not null) mapAxisCells[index].Text = mapAxis[index].ToString(MapAxisFormat, CultureInfo.InvariantCulture);
         }
         if (double.TryParse(IdleMapBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var idleMap))
             IdleMapBox.Text = ConvertMapUnit(idleMap, fromPsi, toPsi).ToString("0.0", CultureInfo.InvariantCulture);
@@ -156,14 +163,15 @@ public partial class MainWindow : Window
             if (showErrors) MessageBox.Show("Enter a MAP minimum lower than the maximum.", "Check MAP range", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
-        var scaled = BuildWholeNumberAxis(minimum, maximum, RowCount, false, true);
-        if (scaled is null) { if (showErrors) MessageBox.Show("The MAP range is too narrow for this matrix size using whole-number breakpoints.", "Check MAP range", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
+        var scaled = BuildWholeNumberAxis(minimum, maximum, RowCount, false, true, MapAxisIncrement);
+        if (scaled is null) { if (showErrors) MessageBox.Show($"The MAP range is too narrow for this matrix size using {(MapAxisIncrement < 1 ? "0.1 PSI" : "whole-number kPa")} breakpoints.", "Check MAP range", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
         mapAxis = scaled;
-        for (var i = 0; i < RowCount; i++) if (mapAxisCells[i] is not null) mapAxisCells[i].Text = mapAxis[i].ToString("0", CultureInfo.InvariantCulture);
+        for (var i = 0; i < RowCount; i++) if (mapAxisCells[i] is not null) mapAxisCells[i].Text = mapAxis[i].ToString(MapAxisFormat, CultureInfo.InvariantCulture);
+        MinMapBox.Text = FormatMap(mapAxis[^1]); MaxMapBox.Text = FormatMap(mapAxis[0]);
         selectedMapAxis.Clear(); if (activeAxisIsMap == true) activeAxisIsMap = null;
         UpdateAxisSelectionVisuals(); ApplyRegionVisualization();
         SyncFuelingAxes();
-        StatusText.Text = $"MAP axis updated  •  {minimum:0.0}–{maximum:0.0} {MapUnit}  •  timing preserved";
+        StatusText.Text = $"MAP axis updated  •  {FormatMap(mapAxis[^1])}–{FormatMap(mapAxis[0])} {MapUnit}  •  timing preserved";
     }
 
     private void RecalculateTimingValues()
@@ -191,7 +199,7 @@ public partial class MainWindow : Window
     {
         if (!TryReadInputs(out var minRpm, out var maxRpm, out var minMap, out var maxMap, out var lowTiming, out var highTiming)) return;
         rpmAxis = DefaultRpmAxis.ToArray();
-        mapAxis = BuildWholeNumberAxis(minMap, maxMap, RowCount, false, true) ?? EvenRange(maxMap, minMap, RowCount).Select(value => Math.Round(value)).ToArray();
+        mapAxis = BuildWholeNumberAxis(minMap, maxMap, RowCount, false, true, MapAxisIncrement) ?? EvenRange(maxMap, minMap, RowCount).Select(RoundMapValue).ToArray();
         selectedRpmAxis.Clear(); selectedMapAxis.Clear(); activeAxisIsMap = null; lastAxisIndex = null;
         selectionStart = selectionEnd = null;
         BuildGrid(lowTiming, highTiming, minMap, maxMap);
@@ -367,7 +375,7 @@ public partial class MainWindow : Window
         if (newColumns == ColumnCount && newRows == RowCount) return;
         var oldRows = RowCount; var oldColumns = ColumnCount; var oldRpm = rpmAxis; var oldMap = mapAxis; var oldTiming = ReadTimingValues();
         var resizedRpm = BuildWholeNumberAxis(oldRpm[0], oldRpm[^1], newColumns, true, false);
-        var resizedMap = BuildWholeNumberAxis(oldMap[^1], oldMap[0], newRows, false, true);
+        var resizedMap = BuildWholeNumberAxis(oldMap[^1], oldMap[0], newRows, false, true, MapAxisIncrement);
         if (resizedRpm is null || resizedMap is null)
         {
             MessageBox.Show("Each axis range must contain at least one whole-number step per breakpoint. Increase the axis range or reduce the matrix size.", "Cannot resize with whole-number axes", MessageBoxButton.OK, MessageBoxImage.Warning); return;
@@ -610,7 +618,7 @@ public partial class MainWindow : Window
             regionPointPick = RegionPointPick.None; TableGrid.Cursor = Cursors.Arrow; SetRegionBoundariesButton.Content = "⌖  Set region boundaries";
             ApplyRegionVisualization(); StatusText.Text = "Boundary selection cancelled"; e.Handled = true; return;
         }
-        if (fuelingPanel.IsKeyboardFocusWithin) return;
+        if (fuelingPanel.IsKeyboardFocusWithin || sandboxPanel.IsKeyboardFocusWithin) return;
         if (Keyboard.Modifiers != ModifierKeys.Control) return;
         if (e.Key == Key.Z) { Undo(); e.Handled = true; }
         else if (e.Key == Key.Y) { Redo(); e.Handled = true; }
@@ -648,7 +656,7 @@ public partial class MainWindow : Window
             {
                 MessageBox.Show("The copied axis column must contain only numeric values.", "Cannot paste axis", MessageBoxButton.OK, MessageBoxImage.Warning); return;
             }
-            else pasted[i] = Math.Round(pasted[i]);
+            else pasted[i] = isMap ? RoundMapValue(pasted[i]) : Math.Round(pasted[i]);
 
         var axis = isMap ? mapAxis : rpmAxis;
         var selected = (isMap ? selectedMapAxis : selectedRpmAxis).OrderBy(i => i).ToArray();
@@ -677,9 +685,9 @@ public partial class MainWindow : Window
         for (var i = 0; i < targets.Length; i++)
         {
             axis[targets[i]] = pasted[i];
-            editors[targets[i]].Text = pasted[i].ToString("0", CultureInfo.InvariantCulture);
+            editors[targets[i]].Text = pasted[i].ToString(isMap ? MapAxisFormat : "0", CultureInfo.InvariantCulture);
         }
-        if (isMap) { MinMapBox.Text = mapAxis[^1].ToString("0.0", CultureInfo.InvariantCulture); MaxMapBox.Text = mapAxis[0].ToString("0.0", CultureInfo.InvariantCulture); }
+        if (isMap) { MinMapBox.Text = FormatMap(mapAxis[^1]); MaxMapBox.Text = FormatMap(mapAxis[0]); }
         selectedMapAxis.Clear(); selectedRpmAxis.Clear();
         foreach (var target in targets) (isMap ? selectedMapAxis : selectedRpmAxis).Add(target);
         activeAxisIsMap = isMap; lastAxisIndex = targets[^1];
@@ -802,16 +810,16 @@ public partial class MainWindow : Window
         }
         if (pick is RegionPointPick.CruiseToWot or RegionPointPick.Both)
         {
-            WotMapBox.Text = mapAxis[row].ToString("0.0", CultureInfo.InvariantCulture);
+            WotMapBox.Text = FormatMap(mapAxis[row]);
         }
         selectionStart = selectionEnd = null;
         ReadAndApplyRegions(false);
         TableGrid.Cursor = Cursors.Arrow; SetRegionBoundariesButton.Content = "⌖  Set region boundaries";
         StatusText.Text = pick switch
         {
-            RegionPointPick.Both => $"Region boundaries locked at {rpmAxis[col]:0} RPM and {mapAxis[row]:0.0} {MapUnit}",
+            RegionPointPick.Both => $"Region boundaries locked at {rpmAxis[col]:0} RPM and {FormatMap(mapAxis[row])} {MapUnit}",
             RegionPointPick.IdleToCruise => $"Idle vertical boundary set at {rpmAxis[col]:0} RPM",
-            _ => $"Low / High MAP horizontal boundary set at {mapAxis[row]:0.0} {MapUnit}"
+            _ => $"Low / High MAP horizontal boundary set at {FormatMap(mapAxis[row])} {MapUnit}"
         };
     }
 
@@ -844,7 +852,7 @@ public partial class MainWindow : Window
     private void PreviewRegionBoundaries(int row, int col)
     {
         idleMarkerCol = col; wotMarkerRow = row; RenderRegionVisualization();
-        StatusText.Text = $"Preview: Idle regions through {rpmAxis[col]:0} RPM • High-MAP regions from {mapAxis[row]:0.0} {MapUnit} • click to lock";
+        StatusText.Text = $"Preview: Idle regions through {rpmAxis[col]:0} RPM • High-MAP regions from {FormatMap(mapAxis[row])} {MapUnit} • click to lock";
     }
 
     private void RenderRegionVisualization()
@@ -854,7 +862,7 @@ public partial class MainWindow : Window
             var region = RegionDisplayName(RegionNameAtMarkers(row, col));
             var idlePoint = col == idleMarkerCol; var wotPoint = row == wotMarkerRow;
             var marker = idlePoint && wotPoint ? "  •  Boundary intersection" : idlePoint ? "  •  Idle vertical boundary" : wotPoint ? "  •  Low / High MAP horizontal boundary" : "";
-            valueCells[row, col].ToolTip = $"{region}  •  {rpmAxis[col]:0} RPM  •  {mapAxis[row]:0.0} {MapUnit}{marker}";
+            valueCells[row, col].ToolTip = $"{region}  •  {rpmAxis[col]:0} RPM  •  {FormatMap(mapAxis[row])} {MapUnit}{marker}";
             valueCells[row, col].BorderBrush = idlePoint || wotPoint ? Brushes.Black : RegionBrush(row, col);
             valueCells[row, col].BorderThickness = new Thickness(idlePoint || wotPoint ? 3 : .7);
         }
@@ -1091,7 +1099,7 @@ public partial class MainWindow : Window
     {
         var editor = new TextBox
         {
-            Tag = (isMap, index), Text = value.ToString("0", CultureInfo.InvariantCulture),
+            Tag = (isMap, index), Text = value.ToString(isMap ? MapAxisFormat : "0", CultureInfo.InvariantCulture),
             Foreground = new SolidColorBrush(Color.FromRgb(127, 227, 208)),
             Background = new SolidColorBrush(isMap ? Color.FromRgb(16, 31, 45) : Color.FromRgb(15, 40, 51)),
             BorderBrush = new SolidColorBrush(Color.FromRgb(38, 58, 76)), BorderThickness = new Thickness(.5),
@@ -1106,7 +1114,13 @@ public partial class MainWindow : Window
         axisMenu.Items.Add(ContextItem("Paste axis values", (_, _) => PasteAxisValues(isMap, index)));
         axisMenu.Items.Add(ContextItem("Auto-fill selected axis values", AutoFillAxis_Click)); editor.ContextMenu = axisMenu;
         editor.LostKeyboardFocus += AxisEditor_LostFocus;
-        editor.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Keyboard.ClearFocus(); e.Handled = true; } };
+        editor.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter) return;
+            CommitAxisEditor(editor);
+            Keyboard.ClearFocus();
+            e.Handled = true;
+        };
         if (isMap) mapAxisCells[index] = editor; else rpmAxisCells[index] = editor;
         Grid.SetRow(editor, row); Grid.SetColumn(editor, column); TableGrid.Children.Add(editor);
     }
@@ -1222,10 +1236,10 @@ public partial class MainWindow : Window
         if (selected.Length < 2) { MessageBox.Show("Select at least two axis values. Ctrl-click individual values or Shift-click a range.", "Select more values", MessageBoxButton.OK, MessageBoxImage.Information); return; }
         var axis = isMap ? mapAxis : rpmAxis; var candidate = (double[])axis.Clone();
         var minimum = selected.Min(i => axis[i]); var maximum = selected.Max(i => axis[i]);
-        var wholeValues = BuildWholeNumberAxis(minimum, maximum, selected.Length, !isMap, isMap);
+        var wholeValues = BuildWholeNumberAxis(minimum, maximum, selected.Length, !isMap, isMap, isMap ? MapAxisIncrement : 1);
         if (wholeValues is null)
         {
-            MessageBox.Show("The selected range is too narrow to assign a unique whole number to every breakpoint.", "Cannot auto-fill axis", MessageBoxButton.OK, MessageBoxImage.Warning); return;
+            MessageBox.Show($"The selected range is too narrow to assign a unique {(isMap && MapAxisIncrement < 1 ? "0.1 PSI value" : "whole number")} to every breakpoint.", "Cannot auto-fill axis", MessageBoxButton.OK, MessageBoxImage.Warning); return;
         }
         for (var position = 0; position < selected.Length; position++) candidate[selected[position]] = wholeValues[position];
         for (var i = 1; i < axis.Length; i++)
@@ -1237,7 +1251,7 @@ public partial class MainWindow : Window
         }
         PushUndo();
         var editors = isMap ? mapAxisCells : rpmAxisCells;
-        foreach (var index in selected) { axis[index] = candidate[index]; editors[index].Text = axis[index].ToString("0", CultureInfo.InvariantCulture); }
+        foreach (var index in selected) { axis[index] = candidate[index]; editors[index].Text = axis[index].ToString(isMap ? MapAxisFormat : "0", CultureInfo.InvariantCulture); }
         UpdateAxisSelectionVisuals(); ApplyRegionVisualization();
         SyncFuelingAxes();
         StatusText.Text = $"Auto-filled {selected.Length} {(isMap ? "MAP" : "RPM")} breakpoints from {minimum:0.0} to {maximum:0.0}";
@@ -1245,6 +1259,7 @@ public partial class MainWindow : Window
 
     private void AutoFillAxisFromFuel(bool isMap, int[] selectedIndices)
     {
+        if (isMap) return;
         selectedMapAxis.Clear(); selectedRpmAxis.Clear(); var selected = isMap ? selectedMapAxis : selectedRpmAxis;
         foreach (var index in selectedIndices.Where(index => index >= 0 && index < (isMap ? RowCount : ColumnCount))) selected.Add(index);
         activeAxisIsMap = isMap; lastAxisIndex = selected.Count > 0 ? selected.Max() : null; UpdateAxisSelectionVisuals();
@@ -1253,6 +1268,7 @@ public partial class MainWindow : Window
 
     private void PasteAxisFromFuel(bool isMap, int? focusedIndex, int[] selectedIndices)
     {
+        if (isMap) return;
         selectedMapAxis.Clear(); selectedRpmAxis.Clear(); var selected = isMap ? selectedMapAxis : selectedRpmAxis;
         foreach (var index in selectedIndices.Where(index => index >= 0 && index < (isMap ? RowCount : ColumnCount))) selected.Add(index);
         activeAxisIsMap = isMap; lastAxisIndex = selected.Count > 0 ? selected.Max() : focusedIndex; UpdateAxisSelectionVisuals();
@@ -1261,7 +1277,8 @@ public partial class MainWindow : Window
 
     private double[]? EditAxisFromFuel(bool isMap, int index, double value)
     {
-        var updated = UpdateSharedAxisValue(isMap, index, value, false);
+        if (isMap) return null;
+        var updated = UpdateSharedAxisValue(false, index, value, false);
         if (updated is not null)
             StatusText.Text = index == (isMap ? 0 : updated.Length - 1) || index == (isMap ? updated.Length - 1 : 0)
                 ? $"Rescaled the shared {(isMap ? "MAP" : "RPM")} axis from Fueling"
@@ -1269,26 +1286,11 @@ public partial class MainWindow : Window
         return updated;
     }
 
-    private double[]? RescaleMapAxisFromFuel(double minimum, double maximum)
-    {
-        var rebuilt = BuildWholeNumberAxis(minimum, maximum, mapAxis.Length, false, true);
-        if (rebuilt is null) return null;
-        if (rebuilt.SequenceEqual(mapAxis)) return mapAxis.ToArray();
-        PushUndo(); Array.Copy(rebuilt, mapAxis, mapAxis.Length);
-        var boundaryRow = ClosestIndex(mapAxis, Math.Clamp(wotTransitionMap, mapAxis[^1], mapAxis[0]));
-        wotTransitionMap = mapAxis[boundaryRow]; WotMapBox.Text = wotTransitionMap.ToString("0.0", CultureInfo.InvariantCulture);
-        MinMapBox.Text = mapAxis[^1].ToString("0.0", CultureInfo.InvariantCulture); MaxMapBox.Text = mapAxis[0].ToString("0.0", CultureInfo.InvariantCulture);
-        for (var index = 0; index < mapAxis.Length; index++) if (mapAxisCells[index] is not null) mapAxisCells[index].Text = mapAxis[index].ToString("0", CultureInfo.InvariantCulture);
-        ApplyRegionVisualization(); SaveState(); SyncFuelingAxes();
-        StatusText.Text = $"MAP axis rescaled to {mapAxis[^1]:0}–{mapAxis[0]:0} {MapUnit}  •  region boundary adjusted to {wotTransitionMap:0}";
-        return mapAxis.ToArray();
-    }
-
     private double[]? UpdateSharedAxisValue(bool isMap, int index, double value, bool syncFueling)
     {
         var axis = isMap ? mapAxis : rpmAxis;
         if (index < 0 || index >= axis.Length || !double.IsFinite(value)) return null;
-        value = Math.Round(value);
+        value = isMap ? RoundMapValue(value) : Math.Round(value);
         var minimumIndex = isMap ? axis.Length - 1 : 0;
         var maximumIndex = isMap ? 0 : axis.Length - 1;
         var changingMinimum = index == minimumIndex;
@@ -1310,9 +1312,11 @@ public partial class MainWindow : Window
         double[]? rebuilt = null;
         if (changingMinimum || changingMaximum)
         {
-            var minimum = Math.Round(changingMinimum ? value : isMap ? axis[^1] : axis[0]);
-            var maximum = Math.Round(changingMaximum ? value : isMap ? axis[0] : axis[^1]);
-            rebuilt = BuildWholeNumberAxis(minimum, maximum, axis.Length, !isMap, isMap);
+            var rawMinimum = changingMinimum ? value : isMap ? axis[^1] : axis[0];
+            var rawMaximum = changingMaximum ? value : isMap ? axis[0] : axis[^1];
+            var minimum = isMap ? RoundMapValue(rawMinimum) : Math.Round(rawMinimum);
+            var maximum = isMap ? RoundMapValue(rawMaximum) : Math.Round(rawMaximum);
+            rebuilt = BuildWholeNumberAxis(minimum, maximum, axis.Length, !isMap, isMap, isMap ? MapAxisIncrement : 1);
             if (rebuilt is null) return null;
         }
         if (Math.Abs(axis[index] - value) < .000001 && rebuilt is null) return axis.ToArray();
@@ -1325,11 +1329,11 @@ public partial class MainWindow : Window
 
         var timingEditors = isMap ? mapAxisCells : rpmAxisCells;
         for (var position = 0; position < axis.Length && position < timingEditors.Length; position++)
-            if (timingEditors[position] is not null) timingEditors[position].Text = axis[position].ToString("0", CultureInfo.InvariantCulture);
+            if (timingEditors[position] is not null) timingEditors[position].Text = axis[position].ToString(isMap ? MapAxisFormat : "0", CultureInfo.InvariantCulture);
         if (isMap)
         {
-            MinMapBox.Text = mapAxis[^1].ToString("0.0", CultureInfo.InvariantCulture);
-            MaxMapBox.Text = mapAxis[0].ToString("0.0", CultureInfo.InvariantCulture);
+            MinMapBox.Text = FormatMap(mapAxis[^1]);
+            MaxMapBox.Text = FormatMap(mapAxis[0]);
         }
         else
         {
@@ -1341,17 +1345,12 @@ public partial class MainWindow : Window
         SaveState(); return axis.ToArray();
     }
 
-    private void ChangeMapUnitFromFuel(int unitIndex)
-    {
-        if (unitIndex is 0 or 1) ApplicationBox.SelectedIndex = unitIndex;
-    }
-
     private void SetRegionBoundariesFromFuel(int row, int col)
     {
         if (row < 0 || row >= RowCount || col < 0 || col >= ColumnCount) return;
-        PushUndo(); IdleRpmBox.Text = rpmAxis[col].ToString("0", CultureInfo.InvariantCulture); WotMapBox.Text = mapAxis[row].ToString("0.0", CultureInfo.InvariantCulture);
+        PushUndo(); IdleRpmBox.Text = rpmAxis[col].ToString("0", CultureInfo.InvariantCulture); WotMapBox.Text = FormatMap(mapAxis[row]);
         selectionStart = selectionEnd = null; ReadAndApplyRegions(false);
-        StatusText.Text = $"Region boundaries locked at {rpmAxis[col]:0} RPM and {mapAxis[row]:0.0} {MapUnit}";
+        StatusText.Text = $"Region boundaries locked at {rpmAxis[col]:0} RPM and {FormatMap(mapAxis[row])} {MapUnit}";
     }
 
     private static double ScaledRpmFraction(int position, int count)
@@ -1366,18 +1365,18 @@ public partial class MainWindow : Window
         return (referenceValue - DefaultRpmAxis[0]) / (DefaultRpmAxis[^1] - DefaultRpmAxis[0]);
     }
 
-    private static double[]? BuildWholeNumberAxis(double minimum, double maximum, int count, bool scaledRpm, bool descending)
+    private static double[]? BuildWholeNumberAxis(double minimum, double maximum, int count, bool scaledRpm, bool descending, double increment = 1)
     {
-        minimum = Math.Round(minimum); maximum = Math.Round(maximum);
-        if (count < 2 || maximum - minimum < count - 1) return null;
+        increment = Math.Max(.000001, increment); minimum = Math.Round(minimum / increment) * increment; maximum = Math.Round(maximum / increment) * increment;
+        if (count < 2 || maximum - minimum + .0000001 < increment * (count - 1)) return null;
         var ascending = new double[count];
         for (var position = 0; position < count; position++)
         {
             var fraction = scaledRpm ? ScaledRpmFraction(position, count) : position / (double)(count - 1);
-            var ideal = Math.Round(minimum + (maximum - minimum) * fraction);
-            var lowerBound = position == 0 ? minimum : ascending[position - 1] + 1;
-            var upperBound = maximum - (count - 1 - position);
-            ascending[position] = Math.Clamp(ideal, lowerBound, upperBound);
+            var ideal = Math.Round((minimum + (maximum - minimum) * fraction) / increment) * increment;
+            var lowerBound = position == 0 ? minimum : ascending[position - 1] + increment;
+            var upperBound = maximum - increment * (count - 1 - position);
+            ascending[position] = Math.Round(Math.Clamp(ideal, lowerBound, upperBound) / increment) * increment;
         }
         if (!descending) return ascending;
         Array.Reverse(ascending); return ascending;
@@ -1385,21 +1384,30 @@ public partial class MainWindow : Window
 
     private void AxisEditor_LostFocus(object sender, KeyboardFocusChangedEventArgs e)
     {
-        if (sender is not TextBox editor || editor.Tag is not ValueTuple<bool, int> tag) return;
+        if (sender is TextBox editor) CommitAxisEditor(editor);
+    }
+
+    private bool CommitAxisEditor(TextBox editor)
+    {
+        if (editor.Tag is not ValueTuple<bool, int> tag) return false;
         var (isMap, index) = tag; var axis = isMap ? mapAxis : rpmAxis;
         var updated = double.TryParse(editor.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
             ? UpdateSharedAxisValue(isMap, index, value, true) : null;
         if (updated is null)
         {
-            editor.Text = axis[index].ToString("0", CultureInfo.InvariantCulture);
+            editor.Text = axis[index].ToString(isMap ? MapAxisFormat : "0", CultureInfo.InvariantCulture);
             editor.Background = new SolidColorBrush(Color.FromRgb(100, 30, 38));
-            StatusText.Text = isMap ? "MAP values must decrease from top to bottom" : "RPM values must increase from left to right";
-            return;
+            StatusText.Text = isMap
+                ? $"MAP value must remain between its neighboring breakpoints ({MapUnit})"
+                : "RPM value must remain between its neighboring breakpoints";
+            return false;
         }
+        editor.Background = new SolidColorBrush(isMap ? Color.FromRgb(16, 31, 45) : Color.FromRgb(15, 40, 51));
         var endpoint = index == (isMap ? 0 : updated.Length - 1) ? "maximum" : index == (isMap ? updated.Length - 1 : 0) ? "minimum" : null;
         StatusText.Text = endpoint is not null
-            ? $"Rescaled the {(isMap ? "MAP" : "RPM")} axis to a {updated[index]:0} {endpoint}"
+            ? $"Rescaled the {(isMap ? "MAP" : "RPM")} axis to a {(isMap ? FormatMap(updated[index]) : updated[index].ToString("0", CultureInfo.InvariantCulture))} {endpoint}"
             : $"Updated {(isMap ? "MAP" : "RPM")} breakpoint {index + 1}";
+        return true;
     }
     private static double[] EvenRange(double start, double end, int count) => Enumerable.Range(0, count).Select(i => start + (end - start) * i / (count - 1)).ToArray();
     private void Clear_Click(object sender, RoutedEventArgs e) { PushUndo(); foreach (var cell in valueCells) if (cell is not null) { cell.Text = "0.0"; RefreshCellColor(cell); } StatusText.Text = "Timing values cleared"; }
@@ -1407,7 +1415,7 @@ public partial class MainWindow : Window
     {
         if (rpmAxis.Length == 0) return; var dialog = new SaveFileDialog { Filter = "CSV file (*.csv)|*.csv", FileName = "timing-table.csv" }; if (dialog.ShowDialog() != true) return;
         var csv = new StringBuilder();
-        for (var row = 0; row < RowCount; row++) { csv.Append(mapAxis[row].ToString("0.0", CultureInfo.InvariantCulture)); for (var col = 0; col < ColumnCount; col++) csv.Append(',').Append(valueCells[row, col].Text); csv.AppendLine(); }
+        for (var row = 0; row < RowCount; row++) { csv.Append(FormatMap(mapAxis[row])); for (var col = 0; col < ColumnCount; col++) csv.Append(',').Append(valueCells[row, col].Text); csv.AppendLine(); }
         csv.Append("Engine RPM"); foreach (var rpm in rpmAxis) csv.Append(',').Append(rpm.ToString("0", CultureInfo.InvariantCulture)); csv.AppendLine();
         File.WriteAllText(dialog.FileName, csv.ToString()); StatusText.Text = $"Saved {Path.GetFileName(dialog.FileName)}";
     }
@@ -1562,7 +1570,10 @@ public partial class MainWindow : Window
             IdleRpmBox.Text = state.IdleRpm; IdleMapBox.Text = state.IdleMap; WotRpmBox.Text = state.WotRpm; WotMapBox.Text = state.WotMap;
             rpmAxis = IsLegacyDefaultRpmAxis(state.RpmAxis) ? DefaultRpmAxis.ToArray() : state.RpmAxis;
             if (IsLegacyDefaultRpmAxis(state.RpmAxis)) { MinRpmBox.Text = "500"; MaxRpmBox.Text = "7000"; }
-            mapAxis = state.MapAxis;
+            mapAxis = state.MapAxis.Select(RoundMapValue).ToArray();
+            MinMapBox.Text = FormatMap(mapAxis[^1]); MaxMapBox.Text = FormatMap(mapAxis[0]);
+            if (double.TryParse(WotMapBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var loadedWotMap)) WotMapBox.Text = FormatMap(RoundMapValue(loadedWotMap));
+            if (double.TryParse(IdleMapBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var loadedIdleMap)) IdleMapBox.Text = FormatMap(RoundMapValue(loadedIdleMap));
             var lowTiming = double.TryParse(state.LowTiming, NumberStyles.Float, CultureInfo.InvariantCulture, out var low) ? low : 42;
             var highTiming = double.TryParse(state.HighTiming, NumberStyles.Float, CultureInfo.InvariantCulture, out var high) ? high : 12;
             BuildGrid(lowTiming, highTiming, mapAxis[^1], mapAxis[0]);

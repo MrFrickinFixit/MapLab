@@ -12,7 +12,7 @@ internal static class ExcelTimingExporter
 {
     public static void Export(string path, double[] rpm, double[] map, double[,] timing, string mapUnit,
         Color lowColor, Color middleColor, Color highColor, bool twoColorScale,
-        string sheetName = "Timing Map", string documentTitle = "Ignition Timing Map")
+        string sheetName = "Timing Map", string documentTitle = "Ignition Timing Map", string xAxisTitle = "Engine RPM")
     {
         using var output = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
         using var archive = new ZipArchive(output, ZipArchiveMode.Create);
@@ -23,11 +23,11 @@ internal static class ExcelTimingExporter
         WriteEntry(archive, "xl/styles.xml", Styles);
         WriteEntry(archive, "docProps/app.xml", AppProperties);
         WriteEntry(archive, "docProps/core.xml", BuildCoreProperties(documentTitle));
-        WriteEntry(archive, "xl/worksheets/sheet1.xml", BuildSheet(rpm, map, timing, mapUnit, lowColor, middleColor, highColor, twoColorScale));
+        WriteEntry(archive, "xl/worksheets/sheet1.xml", BuildSheet(rpm, map, timing, mapUnit, lowColor, middleColor, highColor, twoColorScale, xAxisTitle));
     }
 
     private static string BuildSheet(double[] rpm, double[] map, double[,] timing, string mapUnit,
-        Color low, Color middle, Color high, bool twoColor)
+        Color low, Color middle, Color high, bool twoColor, string xAxisTitle)
     {
         var lastColumn = ColumnName(rpm.Length + 1);
         var lastRow = map.Length + 1;
@@ -44,7 +44,7 @@ internal static class ExcelTimingExporter
                 NumberCell(xml, $"{ColumnName(col + 2)}{excelRow}", timing[row, col], 0);
             xml.Append("</row>");
         }
-        xml.Append("<row r=\"").Append(lastRow).Append("\"><c r=\"A").Append(lastRow).Append("\" t=\"inlineStr\" s=\"1\"><is><t>Engine RPM</t></is></c>");
+        xml.Append("<row r=\"").Append(lastRow).Append("\"><c r=\"A").Append(lastRow).Append("\" t=\"inlineStr\" s=\"1\"><is><t>").Append(Escape(xAxisTitle)).Append("</t></is></c>");
         for (var col = 0; col < rpm.Length; col++) NumberCell(xml, $"{ColumnName(col + 2)}{lastRow}", rpm[col], 1);
         xml.Append("</row></sheetData><conditionalFormatting sqref=\"").Append(dataRange).Append("\"><cfRule type=\"colorScale\" priority=\"1\"><colorScale>");
         if (twoColor)

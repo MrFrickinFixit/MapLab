@@ -23,7 +23,7 @@ public sealed class VeSetupSettings
     public double WotVe { get; set; } = 98;
     public double HighRpmVe { get; set; } = 88;
     public double BoostVe { get; set; } = 112;
-    public int RegionValueMode { get; set; } = 1;
+    public int RegionValueMode { get; set; } = 2;
     public double IdleAfr { get; set; } = 13.8;
     public double CruiseAfr { get; set; } = 14.7;
     public double WotAfr { get; set; } = 12.8;
@@ -33,13 +33,14 @@ public sealed class VeSetupSettings
     public bool SelectedCellsOnly { get; set; }
     public int ApplyMode { get; set; }
     public double BlendStrength { get; set; } = .7;
-    public bool EnableBoundarySmoothing { get; set; } = true;
+    public double ContourStrength { get; set; } = .7;
+    public bool EnableBoundarySmoothing { get; set; }
     public AdvancedSmoothingAlgorithm BoundarySmoothingAlgorithm { get; set; } = AdvancedSmoothingAlgorithm.ConstrainedSurface;
     public double BoundarySmoothingStrength { get; set; } = .6;
     public int BoundarySmoothingPasses { get; set; } = 3;
     public int HorizontalSmoothCells { get; set; } = 3;
     public int VerticalSmoothCells { get; set; } = 3;
-    public bool PreserveOuterValues { get; set; } = true;
+    public bool PreserveOuterValues { get; set; }
 }
 
 public readonly record struct VeSelection(int Top, int Bottom, int Left, int Right);
@@ -50,7 +51,7 @@ public sealed class VeSetupWizard : Window
     private readonly double[,] current;
     private readonly double[] rpm;
     private double[] map;
-    private readonly string mapUnit;
+    private string mapUnit;
     private readonly VeSelection? selection;
     private VeRegionBoundary regionBoundary;
     private readonly Action requestBoundaryPick;
@@ -62,16 +63,17 @@ public sealed class VeSetupWizard : Window
     private readonly Button backButton, nextButton, applyButton;
     private readonly List<FrameworkElement> pages = [];
     private readonly Dictionary<string, TextBox> inputs = [];
-    private TextBlock maximumMapLabel = null!, idleMapLabel = null!, idleHighMapLabel = null!;
+    private TextBlock maximumMapLabel = null!, idleMapLabel = null!, idleHighMapLabel = null!, wotVeLabel = null!, boostVeLabel = null!, wotAfrLabel = null!, boostAfrLabel = null!, applicationModeNote = null!;
     private CheckBox boostedBox = null!, selectedOnlyBox = null!, preserveOuterBox = null!, smoothBoundariesBox = null!;
     private ComboBox applyModeBox = null!, smoothingAlgorithmBox = null!, regionValueModeBox = null!;
-    private Slider blendSlider = null!;
+    private Slider blendSlider = null!, contourSlider = null!;
     private int pageIndex;
 
     public VeSetupWizard(double[,] current, double[] rpm, double[] map, string mapUnit, VeSelection? selection, VeRegionBoundary regionBoundary, VeSetupSettings initial, Action requestBoundaryPick, Func<double, double, double[]?> rescaleMapAxis, Action<double[,], VeSetupSettings> apply)
     {
         this.current = (double[,])current.Clone(); this.rpm = rpm.ToArray(); this.map = map.ToArray(); this.mapUnit = mapUnit; this.selection = selection; this.regionBoundary = regionBoundary; this.requestBoundaryPick = requestBoundaryPick; this.rescaleMapAxis = rescaleMapAxis; this.apply = apply;
         settings = Clone(initial);
+        if (settings.RegionValueMode != 2) { settings.RegionValueMode = 2; settings.EnableBoundarySmoothing = false; settings.PreserveOuterValues = false; }
         SetBoundaryDerivedMapValues();
         Title = "VE Setup Wizard"; Width = 920; Height = Math.Min(860, SystemParameters.WorkArea.Height - 40); MinWidth = 760; MinHeight = Math.Min(700, Height); WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Background = new SolidColorBrush(Color.FromRgb(243, 243, 243)); FontFamily = new FontFamily("Segoe UI");
@@ -107,6 +109,13 @@ public sealed class VeSetupWizard : Window
         if (pageIndex == pages.Count - 1) ShowPage(pageIndex);
     }
 
+    public void UpdateMapAxisAndUnit(double[] mapAxis, string updatedMapUnit, VeRegionBoundary boundary)
+    {
+        mapUnit = updatedMapUnit;
+        UpdateBoundaryMapValues(mapAxis, boundary);
+        RefreshMapPresentation();
+    }
+
     public void CompleteBoundaryPick(double[] mapAxis, VeRegionBoundary boundary)
     {
         UpdateBoundaryMapValues(mapAxis, boundary); RestoreAfterBoundaryPick();
@@ -132,55 +141,70 @@ public sealed class VeSetupWizard : Window
 
     private void SetInput(string key, double value)
     {
-        if (inputs.TryGetValue(key, out var input)) input.Text = value.ToString("0.###", CultureInfo.InvariantCulture);
+        if (inputs.TryGetValue(key, out var input)) input.Text = FormatDisplayMap(value);
     }
 
     private bool NativeMapIsPsi => mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase);
     private bool DisplayMapAsPsi => boostedBox?.IsChecked == true;
     private string DisplayMapUnit => DisplayMapAsPsi ? "PSI gauge" : "kPa absolute";
+    private string DisplayMapFormat => DisplayMapAsPsi ? "0.0" : "0";
+    private string FormatDisplayMap(double value) => value.ToString(DisplayMapFormat, CultureInfo.InvariantCulture);
     private static double ConvertMapUnit(double value, bool fromPsi, bool toPsi) => fromPsi == toPsi ? value : toPsi ? (value - 101.325) / 6.894757293168361 : value * 6.894757293168361 + 101.325;
     private double ToDisplayMap(double nativeValue) => ConvertMapUnit(nativeValue, NativeMapIsPsi, DisplayMapAsPsi);
     private double FromDisplayMap(double displayValue) => ConvertMapUnit(displayValue, DisplayMapAsPsi, NativeMapIsPsi);
 
     private void RefreshMapPresentation()
     {
-        if (maximumMapLabel is not null) maximumMapLabel.Text = $"MAXIMUM MAP — TABLE TOP ({DisplayMapUnit})";
+        var boosted = DisplayMapAsPsi;
+        if (maximumMapLabel is not null) maximumMapLabel.Text = boosted ? $"MAXIMUM BOOST MAP — TABLE TOP ({DisplayMapUnit})" : $"MAXIMUM MAP — TABLE TOP ({DisplayMapUnit})";
         if (idleMapLabel is not null) idleMapLabel.Text = $"MINIMUM MAP / IDLE LOW MAP — TABLE BOTTOM ({DisplayMapUnit})";
         if (idleHighMapLabel is not null) idleHighMapLabel.Text = $"IDLE HIGH MAP — HORIZONTAL BOUNDARY ({DisplayMapUnit})";
+        if (wotVeLabel is not null) wotVeLabel.Text = boosted ? "VE AT 0 PSI (%)" : "WOT VE AT ATMOSPHERIC MAP (%)";
+        if (wotAfrLabel is not null) wotAfrLabel.Text = boosted ? "AFR AT 0 PSI" : "WOT TARGET AFR";
+        SetFieldVisibility(boostVeLabel, "boostVe", boosted); SetFieldVisibility(boostAfrLabel, "boostAfr", boosted);
+        if (applicationModeNote is not null) applicationModeNote.Text = boosted
+            ? "BOOSTED SETUP  •  MAP is shown in PSI gauge. VE and AFR targets above 0 PSI are enabled."
+            : "NATURALLY ASPIRATED SETUP  •  MAP is shown in kPa absolute. Boost-only VE and AFR targets are hidden.";
         SetInput("idleMap", ToDisplayMap(settings.IdleMap)); SetInput("idleHighMap", ToDisplayMap(settings.IdleHighMap)); SetInput("maxMap", ToDisplayMap(settings.MaximumMap));
+    }
+
+    private void SetFieldVisibility(TextBlock? label, string key, bool visible)
+    {
+        var visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (label is not null) label.Visibility = visibility;
+        if (inputs.TryGetValue(key, out var input)) input.Visibility = visibility;
     }
 
     private void BuildPages()
     {
         var engine = Page("1. Engine Setup", "These values position the VE curve. Displacement is saved for future fuel-flow diagnostics; it does not alter the percentage calculation in this version.");
-        AddField(engine, "Displacement (cu in)", "displacement", settings.DisplacementCi); boostedBox = new CheckBox { Content = "Forced induction / boosted", IsChecked = settings.Boosted, Margin = new Thickness(0, 5, 0, 12) }; engine.Children.Add(boostedBox);
+        AddField(engine, "Displacement (cu in)", "displacement", settings.DisplacementCi); boostedBox = new CheckBox { Content = "Forced induction / boosted", IsChecked = settings.Boosted, Margin = new Thickness(0, 5, 0, 5) }; engine.Children.Add(boostedBox);
+        applicationModeNote = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(0, 103, 192)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 12) }; engine.Children.Add(applicationModeNote);
         AddField(engine, "Idle RPM", "idleRpm", settings.IdleRpm); AddField(engine, "Peak torque RPM", "peakRpm", settings.PeakTorqueRpm); AddField(engine, "Maximum RPM", "maxRpm", settings.MaximumRpm);
         idleMapLabel = AddField(engine, $"Minimum MAP / Idle Low MAP — table bottom ({mapUnit})", "idleMap", settings.IdleMap);
         maximumMapLabel = AddField(engine, $"Maximum MAP — table top ({mapUnit})", "maxMap", settings.MaximumMap);
         var applyMapRange = MakeButton("Apply MAP Range", true); applyMapRange.Margin = new Thickness(0, 2, 0, 0); applyMapRange.Click += (_, _) => ApplyMapRange(true); engine.Children.Add(applyMapRange);
         engine.Children.Add(new TextBlock { Text = "Rescales all MAP breakpoints. The horizontal region boundary moves to the nearest new breakpoint and can be adjusted again in Step 2.", TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, Margin = new Thickness(0, 7, 0, 0) }); pages.Add(engine);
 
-        var anchors = Page("2. VE Reference Points", "MAP setpoints come from the current table and locked horizontal boundary. Move the table boundary to change the low/high-load transition used by this wizard.");
+        var anchors = Page("2. Shape the VE Surface", "Set the key VE anchors and let Map Lab contour one continuous surface through the idle, cruise, part-throttle, atmospheric, and boost areas.");
         var boundaryControls = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 14) };
         var setBoundaries = MakeButton("⌖  Set Boundaries on Fuel Table", true); setBoundaries.Margin = new Thickness(0); setBoundaries.Click += (_, _) => BeginBoundaryPick(); boundaryControls.Children.Add(setBoundaries);
         boundaryControls.Children.Add(new TextBlock { Text = "Hover over the table and click the intersection to lock", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) }); anchors.Children.Add(boundaryControls);
-        anchors.Children.Add(Label("REGION VALUE MODE"));
-        regionValueModeBox = new ComboBox { Width = 390, HorizontalAlignment = HorizontalAlignment.Left, SelectedIndex = Math.Clamp(settings.RegionValueMode, 0, 1), Margin = new Thickness(0, 0, 0, 6), Foreground = Brushes.Black, Background = Brushes.White, Padding = new Thickness(8, 5, 8, 5) };
-        regionValueModeBox.Items.Add(new ComboBoxItem { Content = "Fill quadrants with region values", Foreground = Brushes.Black });
-        regionValueModeBox.Items.Add(new ComboBoxItem { Content = "Interpolate complete map with fixed boundary lines", Foreground = Brushes.Black }); anchors.Children.Add(regionValueModeBox);
-        anchors.Children.Add(new TextBlock { Text = "Fill uses Idle Low, Idle High, Cruise, and WOT as the four quadrant values. Interpolate uses all load and RPM reference points, then interpolates every quadrant to the unchanged vertical and horizontal boundary cells.", TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, Margin = new Thickness(0, 0, 0, 12) });
+        regionValueModeBox = new ComboBox { Width = 390, HorizontalAlignment = HorizontalAlignment.Left, SelectedIndex = 2, Visibility = Visibility.Collapsed };
+        regionValueModeBox.Items.Add(new ComboBoxItem { Content = "Fill quadrants with region values", Foreground = Brushes.Black }); regionValueModeBox.Items.Add(new ComboBoxItem { Content = "Interpolate complete map with fixed boundary lines", Foreground = Brushes.Black }); regionValueModeBox.Items.Add(new ComboBoxItem { Content = "Continuous contoured surface", Foreground = Brushes.Black }); anchors.Children.Add(regionValueModeBox);
+        anchors.Children.Add(Label("CONTOUR STRENGTH")); contourSlider = new Slider { Minimum = 0, Maximum = 1, Value = settings.ContourStrength, TickFrequency = .1, IsSnapToTickEnabled = true, Width = 340, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 4) }; anchors.Children.Add(contourSlider);
+        anchors.Children.Add(new TextBlock { Text = "Lower values hold the region anchors more tightly. Higher values create broader, softer transitions between regions.", TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, Margin = new Thickness(0, 0, 0, 12) });
         idleHighMapLabel = AddField(anchors, $"Idle High MAP — horizontal boundary ({mapUnit})", "idleHighMap", settings.IdleHighMap, true); AddField(anchors, "VE at Idle Low MAP (%)", "idleVe", settings.IdleVe); AddField(anchors, "VE at Idle High MAP (%)", "idleHighVe", settings.IdleHighVe);
         AddField(anchors, "Cruise VE — lower-right region (%)", "cruiseVe", settings.CruiseVe); AddField(anchors, "Part-throttle VE (%)", "partVe", settings.PartThrottleVe);
-        AddField(anchors, "WOT / upper-right fill VE (%)", "wotVe", settings.WotVe); AddField(anchors, "High-RPM WOT VE (%)", "highVe", settings.HighRpmVe); AddField(anchors, "Maximum-boost VE (%)", "boostVe", settings.BoostVe); pages.Add(anchors);
-        void UpdateRegionValueFields() { var interpolate = regionValueModeBox.SelectedIndex == 1; inputs["partVe"].IsEnabled = interpolate; inputs["highVe"].IsEnabled = interpolate; inputs["boostVe"].IsEnabled = interpolate; }
-        regionValueModeBox.SelectionChanged += (_, _) => UpdateRegionValueFields(); UpdateRegionValueFields();
+        wotVeLabel = AddField(anchors, "WOT VE at atmospheric MAP (%)", "wotVe", settings.WotVe); AddField(anchors, "High-RPM WOT VE (%)", "highVe", settings.HighRpmVe); boostVeLabel = AddField(anchors, "VE at maximum boost (%)", "boostVe", settings.BoostVe); pages.Add(anchors);
         boostedBox.Checked += (_, _) => RefreshMapPresentation(); boostedBox.Unchecked += (_, _) => RefreshMapPresentation(); RefreshMapPresentation();
 
         var conversion = Page("3. Fuel Flow Conversion", "These values calculate an estimated total fuel demand in lb/hr. VE remains the stored and editable table.");
-        AddField(conversion, "Idle target AFR", "idleAfr", settings.IdleAfr); AddField(conversion, "Cruise target AFR", "cruiseAfr", settings.CruiseAfr); AddField(conversion, "WOT target AFR", "wotAfr", settings.WotAfr); AddField(conversion, "Boost target AFR", "boostAfr", settings.BoostAfr);
+        AddField(conversion, "Idle target AFR", "idleAfr", settings.IdleAfr); AddField(conversion, "Cruise target AFR", "cruiseAfr", settings.CruiseAfr); wotAfrLabel = AddField(conversion, "AFR at 0 PSI", "wotAfr", settings.WotAfr); boostAfrLabel = AddField(conversion, "Boost target AFR", "boostAfr", settings.BoostAfr);
         AddField(conversion, "Reference intake-air temperature (°F)", "iatF", settings.IntakeAirTemperatureF); AddField(conversion, "Barometric pressure (psi absolute)", "baro", settings.BarometricPressurePsi); pages.Add(conversion);
+        RefreshMapPresentation();
 
-        var application = Page("4. Application & Transitions", "Choose how the generated values are applied and whether the region/setup boundaries remain sharp or are smoothed.");
+        var application = Page("4. Application & Transitions", "Choose how the generated values are applied. Additional boundary refinement is optional because the normal generator already produces one continuous surface.");
         selectedOnlyBox = new CheckBox { Content = selection is null ? "Selected cells only (no fuel-cell selection is active)" : $"Selected cells only ({selection.Value.Right - selection.Value.Left + 1} × {selection.Value.Bottom - selection.Value.Top + 1})", IsChecked = selection is not null && settings.SelectedCellsOnly, IsEnabled = selection is not null, Margin = new Thickness(0, 5, 0, 16) }; application.Children.Add(selectedOnlyBox);
         application.Children.Add(Label("APPLICATION MODE")); applyModeBox = new ComboBox { Width = 260, HorizontalAlignment = HorizontalAlignment.Left, SelectedIndex = Math.Clamp(settings.ApplyMode, 0, 2), Margin = new Thickness(0, 0, 0, 16) };
         applyModeBox.Items.Add("Replace current values"); applyModeBox.Items.Add("Blend with current values"); applyModeBox.Items.Add("Fill zero/empty values only"); application.Children.Add(applyModeBox);
@@ -188,22 +212,15 @@ public sealed class VeSetupWizard : Window
         blendOptions.Children.Add(Label("BLEND STRENGTH")); blendSlider = new Slider { Minimum = .1, Maximum = 1, Value = settings.BlendStrength, TickFrequency = .1, IsSnapToTickEnabled = true, Width = 320, HorizontalAlignment = HorizontalAlignment.Left }; blendOptions.Children.Add(blendSlider); application.Children.Add(blendOptions);
         applyModeBox.SelectionChanged += (_, _) => blendOptions.Visibility = applyModeBox.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
         application.Children.Add(new Border { Height = 1, Background = new SolidColorBrush(Color.FromRgb(220, 220, 220)), Margin = new Thickness(0, 8, 0, 16) });
-        application.Children.Add(Label("REGION TRANSITIONS"));
-        smoothBoundariesBox = new CheckBox { Content = "Smooth values across region/setup boundaries", IsChecked = settings.EnableBoundarySmoothing, Margin = new Thickness(0, 2, 0, 4), FontWeight = FontWeights.SemiBold };
-        application.Children.Add(smoothBoundariesBox);
-        application.Children.Add(new TextBlock { Text = "Boundary-line cells remain fixed anchors; smoothing changes only the cells on both sides.", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, Margin = new Thickness(20, 0, 0, 10) });
-        var smoothingOptions = new StackPanel { Visibility = settings.EnableBoundarySmoothing ? Visibility.Visible : Visibility.Collapsed };
-        smoothingOptions.Children.Add(Label("SMOOTHING ALGORITHM"));
+        var advancedTransitions = new StackPanel(); smoothBoundariesBox = new CheckBox { Content = "Smooth values across region/setup boundaries", IsChecked = settings.EnableBoundarySmoothing, Margin = new Thickness(0, 2, 0, 4), FontWeight = FontWeights.SemiBold }; advancedTransitions.Children.Add(smoothBoundariesBox);
+        advancedTransitions.Children.Add(new TextBlock { Text = "The continuous contour normally needs no additional boundary smoothing. Enable this only for extra local refinement.", TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, Margin = new Thickness(20, 0, 0, 10) });
+        var smoothingOptions = new StackPanel { Visibility = settings.EnableBoundarySmoothing ? Visibility.Visible : Visibility.Collapsed }; smoothingOptions.Children.Add(Label("SMOOTHING ALGORITHM"));
         smoothingAlgorithmBox = new ComboBox { Width = 300, HorizontalAlignment = HorizontalAlignment.Left, SelectedIndex = (int)settings.BoundarySmoothingAlgorithm, Margin = new Thickness(0, 0, 0, 12), Foreground = Brushes.Black, Background = Brushes.White, Padding = new Thickness(8, 5, 8, 5) };
-        foreach (var name in new[] { "Shape-preserving interpolation", "Constrained surface smoothing", "Spike removal (median)", "Edge-preserving smoothing", "Weighted center / perimeter" }) smoothingAlgorithmBox.Items.Add(new ComboBoxItem { Content = name, Foreground = Brushes.Black });
-        smoothingOptions.Children.Add(smoothingAlgorithmBox);
-        AddField(smoothingOptions, "Cells on each side of vertical boundary (minimum 3)", "horizontal", settings.HorizontalSmoothCells);
-        AddField(smoothingOptions, "Cells on each side of horizontal boundary (minimum 3)", "vertical", settings.VerticalSmoothCells);
-        AddField(smoothingOptions, "Smoothing strength (1–100%)", "smoothStrength", settings.BoundarySmoothingStrength * 100);
-        AddField(smoothingOptions, "Smoothing passes (1–20)", "smoothPasses", settings.BoundarySmoothingPasses);
+        foreach (var name in new[] { "Shape-preserving interpolation", "Constrained surface smoothing", "Spike removal (median)", "Edge-preserving smoothing", "Weighted center / perimeter", "Standard weighted smoothing" }) smoothingAlgorithmBox.Items.Add(new ComboBoxItem { Content = name, Foreground = Brushes.Black }); smoothingOptions.Children.Add(smoothingAlgorithmBox);
+        AddField(smoothingOptions, "Cells on each side of vertical boundary (minimum 3)", "horizontal", settings.HorizontalSmoothCells); AddField(smoothingOptions, "Cells on each side of horizontal boundary (minimum 3)", "vertical", settings.VerticalSmoothCells); AddField(smoothingOptions, "Smoothing strength (1–100%)", "smoothStrength", settings.BoundarySmoothingStrength * 100); AddField(smoothingOptions, "Smoothing passes (1–20)", "smoothPasses", settings.BoundarySmoothingPasses);
         preserveOuterBox = new CheckBox { Content = "Preserve the outermost values of the applied area", IsChecked = settings.PreserveOuterValues, Margin = new Thickness(0, 8, 0, 0) };
         smoothBoundariesBox.Checked += (_, _) => smoothingOptions.Visibility = Visibility.Visible; smoothBoundariesBox.Unchecked += (_, _) => smoothingOptions.Visibility = Visibility.Collapsed;
-        application.Children.Add(smoothingOptions); application.Children.Add(preserveOuterBox); pages.Add(application);
+        advancedTransitions.Children.Add(smoothingOptions); advancedTransitions.Children.Add(preserveOuterBox); application.Children.Add(new Expander { Header = "Advanced boundary refinement", IsExpanded = false, Content = advancedTransitions, Margin = new Thickness(0, 0, 0, 8), Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)) }); pages.Add(application);
         pages.Add(new StackPanel());
     }
 
@@ -231,13 +248,13 @@ public sealed class VeSetupWizard : Window
         var previousBoundary = settings.IdleHighMap;
         var updated = rescaleMapAxis(minimum, maximum);
         if (updated is null)
-        { validationText.Text = "The requested MAP range is too narrow for the current number of whole-number MAP breakpoints."; return false; }
+        { validationText.Text = $"The requested MAP range is too narrow for the current number of {(DisplayMapAsPsi ? "0.1 PSI" : "whole-number kPa")} breakpoints."; return false; }
         map = updated.ToArray();
         var adjustedBoundary = Math.Clamp(previousBoundary, map[^1], map[0]); var boundaryRow = 0; var distance = double.MaxValue;
         for (var row = 0; row < map.Length; row++) { var currentDistance = Math.Abs(map[row] - adjustedBoundary); if (currentDistance < distance) { boundaryRow = row; distance = currentDistance; } }
         regionBoundary = new VeRegionBoundary(regionBoundary.IdleColumn, boundaryRow); SetBoundaryDerivedMapValues(); RefreshMapPresentation();
         validationText.Foreground = new SolidColorBrush(Color.FromRgb(25, 120, 70));
-        validationText.Text = showConfirmation ? $"MAP scale updated to {ToDisplayMap(map[^1]):0.#}–{ToDisplayMap(map[0]):0.#} {DisplayMapUnit}. The boundary was moved to the nearest breakpoint." : "";
+        validationText.Text = showConfirmation ? $"MAP scale updated to {FormatDisplayMap(ToDisplayMap(map[^1]))}–{FormatDisplayMap(ToDisplayMap(map[0]))} {DisplayMapUnit}. The boundary was moved to the nearest breakpoint." : "";
         return true;
     }
 
@@ -253,9 +270,7 @@ public sealed class VeSetupWizard : Window
         bool Read(string key, out double value) => double.TryParse(inputs[key].Text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) && double.IsFinite(value);
         var smoothingEnabled = smoothBoundariesBox.IsChecked == true;
         var horizontal = (double)settings.HorizontalSmoothCells; var vertical = (double)settings.VerticalSmoothCells; var smoothStrength = settings.BoundarySmoothingStrength * 100; var smoothPasses = (double)settings.BoundarySmoothingPasses;
-        var smoothingValuesValid = !smoothingEnabled ||
-            Read("horizontal", out horizontal) && Read("vertical", out vertical) && horizontal >= 3 && vertical >= 3 &&
-            Read("smoothStrength", out smoothStrength) && smoothStrength is >= 1 and <= 100 && Read("smoothPasses", out smoothPasses) && smoothPasses is >= 1 and <= 20;
+        var smoothingValuesValid = !smoothingEnabled || Read("horizontal", out horizontal) && Read("vertical", out vertical) && horizontal >= 3 && vertical >= 3 && Read("smoothStrength", out smoothStrength) && smoothStrength is >= 1 and <= 100 && Read("smoothPasses", out smoothPasses) && smoothPasses is >= 1 and <= 20;
         if (!Read("displacement", out var displacement) || displacement <= 0 || !Read("idleRpm", out var idleRpm) || !Read("peakRpm", out var peakRpm) || !Read("maxRpm", out var maxRpm) || idleRpm >= peakRpm || peakRpm >= maxRpm ||
             !Read("idleMap", out var idleMap) || !Read("idleHighMap", out var idleHighMap) || !Read("maxMap", out var maxMap) || idleMap > idleHighMap || idleHighMap > maxMap ||
             !Read("idleVe", out var idleVe) || !Read("idleHighVe", out var idleHighVe) || !Read("cruiseVe", out var cruiseVe) || !Read("partVe", out var partVe) || !Read("wotVe", out var wotVe) || !Read("highVe", out var highVe) || !Read("boostVe", out var boostVe) ||
@@ -266,7 +281,7 @@ public sealed class VeSetupWizard : Window
         idleMap = FromDisplayMap(idleMap); idleHighMap = FromDisplayMap(idleHighMap); maxMap = FromDisplayMap(maxMap);
         settings.DisplacementCi = displacement; settings.Boosted = boostedBox.IsChecked == true; settings.IdleRpm = idleRpm; settings.PeakTorqueRpm = peakRpm; settings.MaximumRpm = maxRpm; settings.IdleMap = idleMap; settings.MaximumMap = maxMap;
         settings.IdleVe = idleVe; settings.IdleHighMap = idleHighMap; settings.IdleHighVe = idleHighVe; settings.CruiseVe = cruiseVe; settings.PartThrottleVe = partVe; settings.WotVe = wotVe; settings.HighRpmVe = highVe; settings.BoostVe = boostVe;
-        settings.RegionValueMode = Math.Clamp(regionValueModeBox.SelectedIndex, 0, 1);
+        settings.RegionValueMode = 2; settings.ContourStrength = contourSlider.Value;
         settings.IdleAfr = idleAfr; settings.CruiseAfr = cruiseAfr; settings.WotAfr = wotAfr; settings.BoostAfr = boostAfr; settings.IntakeAirTemperatureF = iatF; settings.BarometricPressurePsi = baro;
         settings.SelectedCellsOnly = selectedOnlyBox.IsChecked == true && selection is not null; settings.ApplyMode = applyModeBox.SelectedIndex; settings.BlendStrength = blendSlider.Value;
         settings.EnableBoundarySmoothing = smoothingEnabled; settings.BoundarySmoothingAlgorithm = (AdvancedSmoothingAlgorithm)Math.Max(0, smoothingAlgorithmBox.SelectedIndex); settings.BoundarySmoothingStrength = smoothStrength / 100; settings.BoundarySmoothingPasses = (int)Math.Round(smoothPasses);
@@ -285,9 +300,10 @@ public sealed class VeSetupWizard : Window
         var scope = settings.SelectedCellsOnly && selection is not null ? "selected cells" : "entire table"; var mode = new[] { "replace", "blend", "fill zeros" }[settings.ApplyMode];
         panel.Children.Add(new TextBlock { Text = $"Scope: {scope}  •  Mode: {mode}  •  VE: {proposed.Cast<double>().Min():0.0}–{proposed.Cast<double>().Max():0.0}%  •  Fuel flow: {fuelFlow.Cast<double>().Min():0.0}–{fuelFlow.Cast<double>().Max():0.0} lb/hr", Foreground = new SolidColorBrush(Color.FromRgb(0, 103, 192)), FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 14, 0, 0) }); pageHost.Children.Add(panel);
         var idleColumn = Math.Clamp(regionBoundary.IdleColumn, 0, rpm.Length - 1); var wotRow = Math.Clamp(regionBoundary.WotRow, 0, map.Length - 1);
-        panel.Children.Add(new TextBlock { Text = $"Regions: Idle Low MAP below and Idle High MAP above {ToDisplayMap(map[wotRow]):0.#} {DisplayMapUnit} on the left of {rpm[idleColumn]:0} RPM  •  Cruise below and Part Throttle/WOT above on the right", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), Margin = new Thickness(0, 5, 0, 0) });
-        panel.Children.Add(new TextBlock { Text = settings.EnableBoundarySmoothing ? $"Boundary smoothing: {settings.BoundarySmoothingAlgorithm}  •  {settings.BoundarySmoothingPasses} passes  •  {settings.BoundarySmoothingStrength:P0}" : "Boundary smoothing: Off — sharp region/setup boundaries", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), Margin = new Thickness(0, 3, 0, 0) });
-        panel.Children.Add(new TextBlock { Text = settings.RegionValueMode == 0 ? "Region values: Fill quadrants" : "Region values: Complete-map interpolation with fixed boundary lines", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), Margin = new Thickness(0, 3, 0, 0) });
+        panel.Children.Add(new TextBlock { Text = $"Regions: Idle Low MAP below and Idle High MAP above {FormatDisplayMap(ToDisplayMap(map[wotRow]))} {DisplayMapUnit} on the left of {rpm[idleColumn]:0} RPM  •  Cruise below and Part Throttle/WOT above on the right", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), Margin = new Thickness(0, 5, 0, 0) });
+        panel.Children.Add(new TextBlock { Text = settings.EnableBoundarySmoothing ? $"Advanced boundary refinement: {settings.BoundarySmoothingAlgorithm}  •  {settings.BoundarySmoothingPasses} passes  •  {settings.BoundarySmoothingStrength:P0}" : "Advanced boundary refinement: Off", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), Margin = new Thickness(0, 3, 0, 0) });
+        panel.Children.Add(new TextBlock { Text = $"Surface contour: Continuous  •  Strength {settings.ContourStrength:P0}", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), Margin = new Thickness(0, 3, 0, 0) });
+        panel.Children.Add(new TextBlock { Text = "Final post-processing: Select all cells  →  Smooth Columns  →  Smooth Rows", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 3, 0, 0) });
     }
 
     private Border PreviewCard(string title, double[,] values, string suffix)
@@ -298,7 +314,7 @@ public sealed class VeSetupWizard : Window
         for (var rowIndex = 0; rowIndex < grid.Rows; rowIndex++) for (var colIndex = 0; colIndex < grid.Columns; colIndex++)
         {
             var row = (int)Math.Round(rowIndex * (values.GetLength(0) - 1d) / Math.Max(1, grid.Rows - 1)); var col = (int)Math.Round(colIndex * (values.GetLength(1) - 1d) / Math.Max(1, grid.Columns - 1));
-            grid.Children.Add(new Border { Background = new SolidColorBrush(Heat((values[row, col] - min) / Math.Max(.1, max - min))), BorderBrush = new SolidColorBrush(Color.FromRgb(30, 40, 52)), BorderThickness = new Thickness(.35), ToolTip = $"{rpm[col]:0} RPM • {ToDisplayMap(map[row]):0.#} {DisplayMapUnit} • {values[row, col]:0.0}{suffix}" });
+            grid.Children.Add(new Border { Background = new SolidColorBrush(Heat((values[row, col] - min) / Math.Max(.1, max - min))), BorderBrush = new SolidColorBrush(Color.FromRgb(30, 40, 52)), BorderThickness = new Thickness(.35), ToolTip = $"{rpm[col]:0} RPM • {FormatDisplayMap(ToDisplayMap(map[row]))} {DisplayMapUnit} • {values[row, col]:0.0}{suffix}" });
         }
         stack.Children.Add(grid); return new Border { BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(10), Child = stack };
     }
@@ -315,7 +331,11 @@ public sealed class VeSetupWizard : Window
         var rows = source.GetLength(0); var cols = source.GetLength(1); var generated = new double[rows, cols]; var wotMap = mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? 0 : 100;
         var idleColumn = Math.Clamp(regionBoundary.IdleColumn, 0, cols - 1); var wotRow = Math.Clamp(regionBoundary.WotRow, 0, rows - 1);
         var cruiseLowMap = map[^1]; var regionMap = map[wotRow];
-        for (var row = 0; row < rows; row++) for (var col = 0; col < cols; col++)
+        if (settings.RegionValueMode == 2)
+        {
+            generated = GenerateContinuousSurface(rpm, map, settings, idleColumn, regionMap, wotMap);
+        }
+        else for (var row = 0; row < rows; row++) for (var col = 0; col < cols; col++)
         {
             var fillQuadrants = settings.RegionValueMode == 0;
             var isIdleSide = col <= idleColumn;
@@ -342,7 +362,74 @@ public sealed class VeSetupWizard : Window
             for (var col = scope.Left; col <= scope.Right; col++) { result[scope.Top, col] = source[scope.Top, col]; result[scope.Bottom, col] = source[scope.Bottom, col]; }
             for (var row = scope.Top; row <= scope.Bottom; row++) { result[row, scope.Left] = source[row, scope.Left]; result[row, scope.Right] = source[row, scope.Right]; }
         }
-        for (var row = scope.Top; row <= scope.Bottom; row++) for (var col = scope.Left; col <= scope.Right; col++) result[row, col] = Math.Round(result[row, col], 1);
+        if (settings.RegionValueMode == 2)
+        {
+            result = SmoothAllColumns(result, map);
+            result = SmoothAllRows(result, rpm);
+        }
+        var roundingArea = settings.RegionValueMode == 2 ? new VeSelection(0, rows - 1, 0, cols - 1) : scope;
+        for (var row = roundingArea.Top; row <= roundingArea.Bottom; row++) for (var col = roundingArea.Left; col <= roundingArea.Right; col++) result[row, col] = Math.Round(result[row, col], 1);
+        return result;
+    }
+
+    private static double[,] SmoothAllColumns(double[,] source, double[] map)
+    {
+        var rows = source.GetLength(0); var cols = source.GetLength(1); var result = (double[,])source.Clone();
+        if (rows < 3 || Math.Abs(map[0] - map[^1]) < .000001) return result;
+        for (var col = 0; col < cols; col++) for (var row = 1; row < rows - 1; row++)
+        {
+            var fraction = Smooth((map[0] - map[row]) / (map[0] - map[^1]));
+            result[row, col] = Lerp(source[0, col], source[rows - 1, col], fraction);
+        }
+        return result;
+    }
+
+    private static double[,] SmoothAllRows(double[,] source, double[] rpm)
+    {
+        var rows = source.GetLength(0); var cols = source.GetLength(1); var result = (double[,])source.Clone();
+        if (cols < 3 || Math.Abs(rpm[^1] - rpm[0]) < .000001) return result;
+        for (var row = 0; row < rows; row++) for (var col = 1; col < cols - 1; col++)
+        {
+            var fraction = Smooth((rpm[col] - rpm[0]) / (rpm[^1] - rpm[0]));
+            result[row, col] = Lerp(source[row, 0], source[row, cols - 1], fraction);
+        }
+        return result;
+    }
+
+    private static double[,] GenerateContinuousSurface(double[] rpm, double[] map, VeSetupSettings settings, int idleColumn, double regionMap, double zeroPsiMap)
+    {
+        var rows = map.Length; var cols = rpm.Length; var result = new double[rows, cols];
+        var contour = Math.Clamp(settings.ContourStrength, 0, 1);
+        var transitionRadius = Math.Max(1, (int)Math.Round((1 + contour * Math.Max(2, cols / 8d))));
+        var transitionLeft = Math.Max(0, idleColumn - transitionRadius); var transitionRight = Math.Min(cols - 1, idleColumn + transitionRadius);
+        var minimumMap = map[^1]; var maximumMap = map[0];
+
+        double Curve(double value) => Lerp(value, Smooth(value), contour);
+        for (var row = 0; row < rows; row++)
+        {
+            var currentMap = map[row];
+            var lowLoadProgress = Curve(Normalize(currentMap, minimumMap, regionMap));
+            var idleLoad = Lerp(settings.IdleVe, settings.IdleHighVe, lowLoadProgress);
+            var drivingLoad = currentMap <= regionMap
+                ? Lerp(settings.CruiseVe, settings.PartThrottleVe, lowLoadProgress)
+                : PowerRegionVe(currentMap, settings, zeroPsiMap, regionMap);
+            if (currentMap > regionMap)
+            {
+                var upperProgress = Curve(Normalize(currentMap, regionMap, maximumMap));
+                idleLoad = Lerp(settings.IdleHighVe, drivingLoad, upperProgress * .35);
+            }
+            var overallLoad = Curve(Normalize(currentMap, minimumMap, maximumMap));
+
+            for (var col = 0; col < cols; col++)
+            {
+                var regionBlend = Curve(Normalize(col, transitionLeft, transitionRight));
+                var value = Lerp(idleLoad, drivingLoad, regionBlend);
+                var highRpmProgress = Curve(Normalize(rpm[col], settings.PeakTorqueRpm, settings.MaximumRpm));
+                var highRpmTarget = Lerp(drivingLoad * .96, settings.HighRpmVe, overallLoad);
+                value = Lerp(value, highRpmTarget, highRpmProgress);
+                result[row, col] = value;
+            }
+        }
         return result;
     }
 
@@ -434,7 +521,7 @@ public sealed class VeSetupWizard : Window
     private static double Normalize(double value, double low, double high) => Math.Clamp((value - low) / Math.Max(.0001, high - low), 0, 1);
     private static double Smooth(double value) => value * value * (3 - 2 * value);
     private static double Lerp(double a, double b, double t) => a + (b - a) * Math.Clamp(t, 0, 1);
-    private static VeSetupSettings Clone(VeSetupSettings value) => new() { DisplacementCi = value.DisplacementCi, Boosted = value.Boosted, IdleRpm = value.IdleRpm, PeakTorqueRpm = value.PeakTorqueRpm, MaximumRpm = value.MaximumRpm, IdleMap = value.IdleMap, MaximumMap = value.MaximumMap, IdleVe = value.IdleVe, IdleHighMap = value.IdleHighMap, IdleHighVe = value.IdleHighVe, CruiseVe = value.CruiseVe, PartThrottleVe = value.PartThrottleVe, WotVe = value.WotVe, HighRpmVe = value.HighRpmVe, BoostVe = value.BoostVe, RegionValueMode = value.RegionValueMode, IdleAfr = value.IdleAfr, CruiseAfr = value.CruiseAfr, WotAfr = value.WotAfr, BoostAfr = value.BoostAfr, IntakeAirTemperatureF = value.IntakeAirTemperatureF, BarometricPressurePsi = value.BarometricPressurePsi, SelectedCellsOnly = value.SelectedCellsOnly, ApplyMode = value.ApplyMode, BlendStrength = value.BlendStrength, EnableBoundarySmoothing = value.EnableBoundarySmoothing, BoundarySmoothingAlgorithm = value.BoundarySmoothingAlgorithm, BoundarySmoothingStrength = value.BoundarySmoothingStrength, BoundarySmoothingPasses = value.BoundarySmoothingPasses, HorizontalSmoothCells = value.HorizontalSmoothCells, VerticalSmoothCells = value.VerticalSmoothCells, PreserveOuterValues = value.PreserveOuterValues };
+    private static VeSetupSettings Clone(VeSetupSettings value) => new() { DisplacementCi = value.DisplacementCi, Boosted = value.Boosted, IdleRpm = value.IdleRpm, PeakTorqueRpm = value.PeakTorqueRpm, MaximumRpm = value.MaximumRpm, IdleMap = value.IdleMap, MaximumMap = value.MaximumMap, IdleVe = value.IdleVe, IdleHighMap = value.IdleHighMap, IdleHighVe = value.IdleHighVe, CruiseVe = value.CruiseVe, PartThrottleVe = value.PartThrottleVe, WotVe = value.WotVe, HighRpmVe = value.HighRpmVe, BoostVe = value.BoostVe, RegionValueMode = value.RegionValueMode, IdleAfr = value.IdleAfr, CruiseAfr = value.CruiseAfr, WotAfr = value.WotAfr, BoostAfr = value.BoostAfr, IntakeAirTemperatureF = value.IntakeAirTemperatureF, BarometricPressurePsi = value.BarometricPressurePsi, SelectedCellsOnly = value.SelectedCellsOnly, ApplyMode = value.ApplyMode, BlendStrength = value.BlendStrength, ContourStrength = value.ContourStrength, EnableBoundarySmoothing = value.EnableBoundarySmoothing, BoundarySmoothingAlgorithm = value.BoundarySmoothingAlgorithm, BoundarySmoothingStrength = value.BoundarySmoothingStrength, BoundarySmoothingPasses = value.BoundarySmoothingPasses, HorizontalSmoothCells = value.HorizontalSmoothCells, VerticalSmoothCells = value.VerticalSmoothCells, PreserveOuterValues = value.PreserveOuterValues };
     private static Color Heat(double t) => Hsl(Math.Clamp(t, 0, 1) * 300, .96, .52);
     private static Color Hsl(double h, double s, double l) { var c = (1 - Math.Abs(2 * l - 1)) * s; var x = c * (1 - Math.Abs(h / 60 % 2 - 1)); var m = l - c / 2; var (r, g, b) = h switch { < 60 => (c, x, 0d), < 120 => (x, c, 0d), < 180 => (0d, c, x), < 240 => (0d, x, c), < 300 => (x, 0d, c), _ => (c, 0d, x) }; return Color.FromRgb((byte)((r + m) * 255), (byte)((g + m) * 255), (byte)((b + m) * 255)); }
 }

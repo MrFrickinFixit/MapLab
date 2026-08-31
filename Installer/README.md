@@ -1,5 +1,9 @@
 # Map Lab Windows installer
 
+The MSI uses the standard Windows setup wizard. It includes destination-folder
+selection, installation progress and completion pages, and modify/repair/remove
+maintenance options when the package is run after installation.
+
 Run the following command from the repository root:
 
 ```powershell

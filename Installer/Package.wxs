@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package
     Name="Map Lab"
     Manufacturer="Map Lab"
@@ -10,6 +11,13 @@
     <SummaryInformation Description="Map Lab installer" Manufacturer="Map Lab" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of Map Lab is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <Icon Id="MapLabIcon.ico" SourceFile="$(var.ProjectRoot)\Assets\MapLab.ico" />
+    <Property Id="ARPPRODUCTICON" Value="MapLabIcon.ico" />
+
+    <!-- Standard Windows setup wizard with destination-folder selection and
+         modify/repair/remove support when the installer is run again. -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.ProjectRoot)\Installer\License.rtf" />
 
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="INSTALLFOLDER" Name="Map Lab" />
@@ -23,6 +31,7 @@
             Name="Map Lab"
             Description="Open Map Lab"
             Target="[INSTALLFOLDER]MapLab.exe"
+            Icon="MapLabIcon.ico"
             WorkingDirectory="INSTALLFOLDER" />
           <RemoveFolder Id="RemoveMapLabProgramMenuFolder" On="uninstall" />
           <RegistryValue Root="HKCU" Key="Software\Map Lab" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
@@ -37,6 +46,7 @@
           Name="Map Lab"
           Description="Open Map Lab"
           Target="[INSTALLFOLDER]MapLab.exe"
+          Icon="MapLabIcon.ico"
           WorkingDirectory="INSTALLFOLDER" />
         <RegistryValue Root="HKCU" Key="Software\Map Lab" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>

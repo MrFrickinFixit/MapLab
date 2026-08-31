@@ -18,10 +18,8 @@ public sealed class FuelingPanel : Grid
     private readonly Action<int, int> resizeMatrix;
     private readonly Action<bool, int[]> autoFillAxis;
     private readonly Action<bool, int?, int[]> pasteAxis;
-    private readonly Action<int> changeMapUnit;
     private readonly Action<int, int> setRegionBoundaries;
     private readonly Func<bool, int, double, double[]?> editAxis;
-    private readonly Func<double, double, double[]?> rescaleMapAxis;
     private ComboBox mapUnitBox = null!;
     private CheckBox conversionViewBox = null!;
     private TextBlock fuelTableTitle = null!;
@@ -36,6 +34,8 @@ public sealed class FuelingPanel : Grid
     private double[,] ve = new double[0, 0];
     private double[] rpm = [], map = [];
     private string mapUnit = "kPa absolute";
+    private string MapFormat => mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? "0.0" : "0";
+    private string FormatMap(double value) => value.ToString(MapFormat, CultureInfo.InvariantCulture);
     private double idleBoundaryRpm, wotBoundaryMap;
     private int idleBoundaryCol, wotBoundaryRow;
     private (int Row, int Col)? start, end;
@@ -55,9 +55,9 @@ public sealed class FuelingPanel : Grid
     private readonly Dictionary<TextBox, string> editOriginals = [];
     private static string SavePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimingTableCalculator", "fueling-autosave.json");
 
-    public FuelingPanel(Action<int, int> resizeMatrix, Action<bool, int[]> autoFillAxis, Action<bool, int?, int[]> pasteAxis, Action<int> changeMapUnit, Action<int, int> setRegionBoundaries, Func<bool, int, double, double[]?> editAxis, Func<double, double, double[]?> rescaleMapAxis)
+    public FuelingPanel(Action<int, int> resizeMatrix, Action<bool, int[]> autoFillAxis, Action<bool, int?, int[]> pasteAxis, Action<int, int> setRegionBoundaries, Func<bool, int, double, double[]?> editAxis)
     {
-        this.resizeMatrix = resizeMatrix; this.autoFillAxis = autoFillAxis; this.pasteAxis = pasteAxis; this.changeMapUnit = changeMapUnit; this.setRegionBoundaries = setRegionBoundaries; this.editAxis = editAxis; this.rescaleMapAxis = rescaleMapAxis;
+        this.resizeMatrix = resizeMatrix; this.autoFillAxis = autoFillAxis; this.pasteAxis = pasteAxis; this.setRegionBoundaries = setRegionBoundaries; this.editAxis = editAxis;
         matrixXBox = MatrixSizeBox("31"); matrixYBox = MatrixSizeBox("31");
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition());
         mapUnitBox = CreateMapUnitBox();
@@ -91,20 +91,40 @@ public sealed class FuelingPanel : Grid
     public void UpdateAxes(double[] newRpm, double[] newMap, string newMapUnit, double idleRpm, double wotMap)
     {
         if (newRpm.Length == 0 || newMap.Length == 0) return;
-        syncingMapUnit = true; mapUnitBox.SelectedIndex = newMapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? 1 : 0; syncingMapUnit = false;
         matrixXBox.Text = newRpm.Length.ToString(CultureInfo.InvariantCulture); matrixYBox.Text = newMap.Length.ToString(CultureInfo.InvariantCulture);
-        idleBoundaryRpm = idleRpm; wotBoundaryMap = wotMap;
+        var incomingBoundaryCol = Closest(newRpm, idleRpm);
+        var incomingBoundaryRow = Closest(newMap, wotMap);
         if (ve.Length == 0)
         {
             rpm = newRpm.ToArray(); map = newMap.ToArray(); mapUnit = newMapUnit;
-            if (!Load()) GenerateValues(); Build(); return;
+            if (!Load()) GenerateValues();
+            idleBoundaryCol = Math.Clamp(incomingBoundaryCol, 0, rpm.Length - 1);
+            wotBoundaryRow = Math.Clamp(incomingBoundaryRow, 0, map.Length - 1);
+            idleBoundaryRpm = rpm[idleBoundaryCol]; wotBoundaryMap = map[wotBoundaryRow];
+            SyncMapUnitControl(); Build(); return;
         }
         if (ve.GetLength(0) != newMap.Length || ve.GetLength(1) != newRpm.Length)
         {
             ve = Resample(ve, newMap.Length, newRpm.Length);
             undoHistory.Clear(); redoHistory.Clear();
         }
-        rpm = newRpm.ToArray(); map = newMap.ToArray(); mapUnit = newMapUnit; Build(); Save();
+        rpm = newRpm.ToArray();
+        if (map.Length != newMap.Length)
+        {
+            var resized = BuildMapAxis(map[^1], map[0], newMap.Length);
+            map = resized ?? EvenMapAxis(map[0], map[^1], newMap.Length);
+        }
+        idleBoundaryCol = Math.Clamp(incomingBoundaryCol, 0, rpm.Length - 1);
+        wotBoundaryRow = Math.Clamp(incomingBoundaryRow, 0, map.Length - 1);
+        idleBoundaryRpm = rpm[idleBoundaryCol]; wotBoundaryMap = map[wotBoundaryRow];
+        SyncMapUnitControl(); Build(); Save();
+    }
+
+    private void SyncMapUnitControl()
+    {
+        syncingMapUnit = true;
+        mapUnitBox.SelectedIndex = mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        syncingMapUnit = false;
     }
 
     private Border MatrixAxisGroup()
@@ -122,8 +142,132 @@ public sealed class FuelingPanel : Grid
     {
         var box = new ComboBox { Width = 112, Height = 32, Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(Color.FromRgb(184, 184, 184)), Padding = new Thickness(6, 3, 6, 3), SelectedIndex = 0 };
         box.Items.Add(new ComboBoxItem { Content = "kPa absolute", Foreground = Brushes.Black }); box.Items.Add(new ComboBoxItem { Content = "PSI gauge", Foreground = Brushes.Black }); box.SelectedIndex = 0;
-        box.SelectionChanged += (_, _) => { if (!syncingMapUnit && box.SelectedIndex >= 0) changeMapUnit(box.SelectedIndex); };
+        box.SelectionChanged += (_, _) => { if (!syncingMapUnit && box.SelectedIndex >= 0) ChangeFuelMapUnit(box.SelectedIndex); };
         return box;
+    }
+
+    private double FuelMapIncrement => mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? .1 : 1;
+    private double RoundFuelMap(double value) => Math.Round(value / FuelMapIncrement) * FuelMapIncrement;
+
+    private void ChangeFuelMapUnit(int unitIndex)
+    {
+        if (unitIndex is not (0 or 1) || map.Length == 0) return;
+        var fromPsi = mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase);
+        var toPsi = unitIndex == 1;
+        if (fromPsi == toPsi) return;
+        for (var index = 0; index < map.Length; index++) map[index] = RoundForUnit(ConvertMapUnit(map[index], fromPsi, toPsi), toPsi);
+        veSetupSettings.IdleMap = ConvertMapUnit(veSetupSettings.IdleMap, fromPsi, toPsi);
+        veSetupSettings.IdleHighMap = ConvertMapUnit(veSetupSettings.IdleHighMap, fromPsi, toPsi);
+        veSetupSettings.MaximumMap = ConvertMapUnit(veSetupSettings.MaximumMap, fromPsi, toPsi);
+        mapUnit = toPsi ? "PSI gauge" : "kPa absolute";
+        wotBoundaryRow = Math.Clamp(wotBoundaryRow, 0, map.Length - 1); wotBoundaryMap = map[wotBoundaryRow];
+        SyncMapUnitControl(); Build(); Save(); veSetupWizard?.UpdateMapAxisAndUnit(map, mapUnit, new VeRegionBoundary(idleBoundaryCol, wotBoundaryRow));
+        status.Text = $"Fuel MAP scale converted to {mapUnit}  •  timing MAP scale unchanged";
+    }
+
+    private static double ConvertMapUnit(double value, bool fromPsi, bool toPsi)
+    {
+        if (fromPsi == toPsi) return value;
+        return toPsi ? (value - 101.325) / 6.894757293168361 : value * 6.894757293168361 + 101.325;
+    }
+
+    private static double RoundForUnit(double value, bool psi) => psi ? Math.Round(value, 1) : Math.Round(value);
+
+    private double[]? BuildMapAxis(double minimum, double maximum, int count)
+    {
+        var increment = FuelMapIncrement;
+        minimum = RoundFuelMap(minimum); maximum = RoundFuelMap(maximum);
+        if (count < 2 || maximum - minimum + .0000001 < increment * (count - 1)) return null;
+        var ascending = new double[count];
+        for (var position = 0; position < count; position++)
+        {
+            var ideal = RoundFuelMap(minimum + (maximum - minimum) * position / (count - 1d));
+            var lower = position == 0 ? minimum : ascending[position - 1] + increment;
+            var upper = maximum - increment * (count - 1 - position);
+            ascending[position] = RoundFuelMap(Math.Clamp(ideal, lower, upper));
+        }
+        Array.Reverse(ascending); return ascending;
+    }
+
+    private double[] EvenMapAxis(double maximum, double minimum, int count) =>
+        Enumerable.Range(0, count).Select(index => RoundFuelMap(maximum + (minimum - maximum) * index / Math.Max(1d, count - 1d))).ToArray();
+
+    private double[]? RescaleFuelMapAxis(double minimum, double maximum)
+    {
+        var updated = BuildMapAxis(minimum, maximum, map.Length); if (updated is null) return null;
+        var previousBoundary = wotBoundaryMap;
+        map = updated; wotBoundaryRow = Closest(map, Math.Clamp(previousBoundary, map[^1], map[0])); wotBoundaryMap = map[wotBoundaryRow];
+        RefreshFuelMapAxisEditors(); ApplyBoundaries(); Save();
+        veSetupWizard?.UpdateBoundaryMapValues(map, new VeRegionBoundary(idleBoundaryCol, wotBoundaryRow));
+        return map.ToArray();
+    }
+
+    private double[]? EditFuelMapAxisValue(int index, double value)
+    {
+        if (index < 0 || index >= map.Length || !double.IsFinite(value)) return null;
+        value = RoundFuelMap(value);
+        double[] updated;
+        if (index == 0 || index == map.Length - 1)
+        {
+            var minimum = index == map.Length - 1 ? value : map[^1];
+            var maximum = index == 0 ? value : map[0];
+            updated = BuildMapAxis(minimum, maximum, map.Length) ?? [];
+            if (updated.Length == 0) return null;
+        }
+        else
+        {
+            if (value >= map[index - 1] || value <= map[index + 1]) return null;
+            updated = map.ToArray(); updated[index] = value;
+        }
+        map = updated; wotBoundaryMap = map[Math.Clamp(wotBoundaryRow, 0, map.Length - 1)];
+        RefreshFuelMapAxisEditors(); ApplyBoundaries(); Save();
+        veSetupWizard?.UpdateBoundaryMapValues(map, new VeRegionBoundary(idleBoundaryCol, wotBoundaryRow));
+        return map.ToArray();
+    }
+
+    private void AutoFillFuelMapAxis(int[] selected)
+    {
+        var minimum = selected.Min(index => map[index]); var maximum = selected.Max(index => map[index]);
+        var values = BuildMapAxis(minimum, maximum, selected.Length);
+        if (values is null) { Info("The selected MAP range is too narrow for the number of fuel breakpoints."); return; }
+        var candidate = map.ToArray(); for (var position = 0; position < selected.Length; position++) candidate[selected[position]] = values[position];
+        if (Enumerable.Range(1, candidate.Length - 1).Any(index => candidate[index] >= candidate[index - 1]))
+        { Info("That fill would cross an unselected neighboring fuel MAP value."); return; }
+        map = candidate; wotBoundaryMap = map[Math.Clamp(wotBoundaryRow, 0, map.Length - 1)]; RefreshFuelMapAxisEditors(); ApplyBoundaries(); Save();
+        veSetupWizard?.UpdateBoundaryMapValues(map, new VeRegionBoundary(idleBoundaryCol, wotBoundaryRow));
+    }
+
+    private void PasteFuelMapAxis(int focusedIndex, int[] selected)
+    {
+        if (!Clipboard.ContainsText()) { Info("The clipboard does not contain MAP values."); return; }
+        var tokens = Clipboard.GetText().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        var pasted = new double[tokens.Length];
+        for (var index = 0; index < tokens.Length; index++)
+            if (!double.TryParse(tokens[index], NumberStyles.Float, CultureInfo.InvariantCulture, out pasted[index]) || !double.IsFinite(pasted[index]))
+            { Info("The copied MAP column must contain only numeric values."); return; }
+            else pasted[index] = RoundFuelMap(pasted[index]);
+        int[] targets;
+        if (selected.Length > 1 && selected.Length == pasted.Length) targets = selected;
+        else
+        {
+            var first = selected.Length > 0 ? selected[0] : focusedIndex;
+            if (first < 0 || first + pasted.Length > map.Length) { Info("The copied MAP column is too large for the remaining fuel MAP positions."); return; }
+            targets = Enumerable.Range(first, pasted.Length).ToArray();
+        }
+        var candidate = map.ToArray(); for (var index = 0; index < targets.Length; index++) candidate[targets[index]] = pasted[index];
+        if (Enumerable.Range(1, candidate.Length - 1).Any(index => candidate[index] >= candidate[index - 1]))
+        { Info("Pasted fuel MAP values must decrease from top to bottom."); return; }
+        map = candidate; wotBoundaryMap = map[Math.Clamp(wotBoundaryRow, 0, map.Length - 1)];
+        selectedMapAxis.Clear(); foreach (var target in targets) selectedMapAxis.Add(target);
+        RefreshFuelMapAxisEditors(); ApplyBoundaries(); Save(); status.Text = $"Pasted {targets.Length} fuel MAP breakpoints  •  timing MAP scale unchanged";
+        veSetupWizard?.UpdateBoundaryMapValues(map, new VeRegionBoundary(idleBoundaryCol, wotBoundaryRow));
+    }
+
+    private void RefreshFuelMapAxisEditors()
+    {
+        for (var index = 0; index < map.Length && index < mapAxisCells.Length; index++)
+            if (mapAxisCells[index] is not null) mapAxisCells[index].Text = FormatMap(map[index]);
+        UpdateAxisSelectionVisuals();
     }
 
     private void ToggleBoundarySetting(object? sender, RoutedEventArgs e)
@@ -165,9 +309,8 @@ public sealed class FuelingPanel : Grid
 
     private double[]? RescaleWizardMapAxis(double minimum, double maximum)
     {
-        var updated = rescaleMapAxis(minimum, maximum); if (updated is null) return null;
-        map = updated.ToArray(); wotBoundaryRow = Closest(map, wotBoundaryMap); ApplyBoundaries(); Save();
-        status.Text = $"MAP axis rescaled to {map[^1]:0}–{map[0]:0} {mapUnit}  •  boundary moved to nearest breakpoint"; return map.ToArray();
+        var updated = RescaleFuelMapAxis(minimum, maximum); if (updated is null) return null;
+        status.Text = $"MAP axis rescaled to {FormatMap(map[^1])}–{FormatMap(map[0])} {mapUnit}  •  boundary moved to nearest breakpoint"; return map.ToArray();
     }
 
     private void ApplyVeSetup(double[,] updated, VeSetupSettings appliedSettings)
@@ -233,7 +376,9 @@ public sealed class FuelingPanel : Grid
         if (settingBoundaries)
         {
             settingBoundaries = false; boundaryButton.Content = "⌖  Set boundaries"; Cursor = Cursors.Arrow;
-            setRegionBoundaries(p.Item1, p.Item2); status.Text = $"Region boundaries locked at {rpm[p.Item2]:0} RPM and {map[p.Item1]:0.0} {mapUnit}";
+            idleBoundaryCol = p.Item2; wotBoundaryRow = p.Item1;
+            idleBoundaryRpm = rpm[idleBoundaryCol]; wotBoundaryMap = map[wotBoundaryRow]; ApplyBoundaries(); Save();
+            setRegionBoundaries(p.Item1, p.Item2); status.Text = $"Region boundaries locked at {rpm[p.Item2]:0} RPM and {FormatMap(map[p.Item1])} {mapUnit}";
             if (boundaryPickFromWizard) { boundaryPickFromWizard = false; veSetupWizard?.CompleteBoundaryPick(map, new VeRegionBoundary(p.Item2, p.Item1)); }
             e.Handled = true; return;
         }
@@ -245,7 +390,7 @@ public sealed class FuelingPanel : Grid
         if (control) PinActiveFuelSelection(); else pinnedFuelSelection.Clear();
         start = end = p; selecting = true; UpdateSelection(); cell.Focus(); e.Handled = true;
     }
-    private void CellEnter(object sender, MouseEventArgs e) { if (sender is not TextBox { Tag: ValueTuple<int, int> p }) return; if (settingBoundaries) { idleBoundaryCol = p.Item2; wotBoundaryRow = p.Item1; RenderBoundaries(); status.Text = $"Preview: Idle regions through {rpm[p.Item2]:0} RPM • High-MAP regions from {map[p.Item1]:0.0} {mapUnit}"; return; } if (!selecting || e.LeftButton != MouseButtonState.Pressed) return; end = p; UpdateSelection(); }
+    private void CellEnter(object sender, MouseEventArgs e) { if (sender is not TextBox { Tag: ValueTuple<int, int> p }) return; if (settingBoundaries) { idleBoundaryCol = p.Item2; wotBoundaryRow = p.Item1; RenderBoundaries(); status.Text = $"Preview: Idle regions through {rpm[p.Item2]:0} RPM • High-MAP regions from {FormatMap(map[p.Item1])} {mapUnit}"; return; } if (!selecting || e.LeftButton != MouseButtonState.Pressed) return; end = p; UpdateSelection(); }
     private void CellRightClick(object sender, MouseButtonEventArgs e) { if (sender is not TextBox { Tag: ValueTuple<int, int> p }) return; if (!IsFuelCellSelected(p.Item1, p.Item2)) { pinnedFuelSelection.Clear(); start = end = p; selecting = false; UpdateSelection(); } }
     private ContextMenu CreateContextMenu()
     {
@@ -423,7 +568,7 @@ public sealed class FuelingPanel : Grid
         var csv = new StringBuilder();
         for (var row = 0; row < map.Length; row++)
         {
-            csv.Append(map[row].ToString("0.0", CultureInfo.InvariantCulture));
+            csv.Append(FormatMap(map[row]));
             for (var col = 0; col < rpm.Length; col++) csv.Append(',').Append(ve[row, col].ToString("0.0", CultureInfo.InvariantCulture));
             csv.AppendLine();
         }
@@ -504,7 +649,7 @@ public sealed class FuelingPanel : Grid
             var region = col <= idleBoundaryCol
                 ? row <= wotBoundaryRow ? "Idle High MAP" : "Idle Low MAP"
                 : row <= wotBoundaryRow ? "Part Throttle to WOT" : "Cruise to Part Throttle";
-            cells[row, col].ToolTip = $"{region}  •  {rpm[col]:0} RPM  •  {map[row]:0.0} {mapUnit}  •  {displayed[row, col]:0.0}{suffix}";
+            cells[row, col].ToolTip = $"{region}  •  {rpm[col]:0} RPM  •  {FormatMap(map[row])} {mapUnit}  •  {displayed[row, col]:0.0}{suffix}";
         }
         if (start is not null) UpdateSelection();
     }
@@ -514,11 +659,11 @@ public sealed class FuelingPanel : Grid
     {
         var editor = new TextBox
         {
-            Tag = (isMap, index), Text = value.ToString("0", CultureInfo.InvariantCulture),
+            Tag = (isMap, index), Text = value.ToString(isMap ? MapFormat : "0", CultureInfo.InvariantCulture),
             Foreground = new SolidColorBrush(Color.FromRgb(127, 227, 208)), Background = new SolidColorBrush(isMap ? Color.FromRgb(16, 31, 45) : Color.FromRgb(15, 40, 51)),
             BorderBrush = new SolidColorBrush(Color.FromRgb(38, 58, 76)), BorderThickness = new Thickness(.5), TextAlignment = TextAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center, FontSize = isMap ? 11 : 10, FontWeight = FontWeights.Bold, Padding = new Thickness(2),
-            ToolTip = isMap ? $"Edit shared MAP breakpoint ({mapUnit})" : "Edit shared RPM breakpoint"
+            ToolTip = isMap ? $"Edit fuel MAP breakpoint ({mapUnit})" : "Edit shared RPM breakpoint"
         };
         editor.GotKeyboardFocus += (_, _) => { start = end = null; selecting = false; RenderBoundaries(); editor.Text = (isMap ? map[index] : rpm[index]).ToString(isMap ? "0.###" : "0", CultureInfo.InvariantCulture); editor.SelectAll(); };
         editor.PreviewMouseLeftButtonDown += AxisEditorMouseDown;
@@ -577,13 +722,14 @@ public sealed class FuelingPanel : Grid
     {
         var selected = (isMap ? selectedMapAxis : selectedRpmAxis).OrderBy(i => i).ToArray();
         if (selected.Length < 2) { Info("Select at least two MAP or RPM scale values before using Auto-fill."); return; }
-        autoFillAxis(isMap, selected); status.Text = $"Auto-filled {selected.Length} shared {(isMap ? "MAP" : "RPM")} breakpoints";
+        if (isMap) AutoFillFuelMapAxis(selected); else autoFillAxis(false, selected);
+        status.Text = $"Auto-filled {selected.Length} {(isMap ? "fuel MAP" : "shared RPM")} breakpoints";
     }
 
     private void PasteSelectedAxis(bool isMap, int focusedIndex)
     {
         var selected = (isMap ? selectedMapAxis : selectedRpmAxis).OrderBy(i => i).ToArray();
-        pasteAxis(isMap, focusedIndex, selected);
+        if (isMap) PasteFuelMapAxis(focusedIndex, selected); else pasteAxis(false, focusedIndex, selected);
     }
 
     private void ClearAxisSelection()
@@ -612,10 +758,10 @@ public sealed class FuelingPanel : Grid
         var (isMap, index) = tag;
         var axis = isMap ? map : rpm;
         var updatedAxis = double.TryParse(editor.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) && double.IsFinite(value)
-            ? editAxis(isMap, index, value) : null;
+            ? isMap ? EditFuelMapAxisValue(index, value) : editAxis(false, index, value) : null;
         if (updatedAxis is null)
         {
-            editor.Text = axis[index].ToString("0", CultureInfo.InvariantCulture);
+            editor.Text = axis[index].ToString(isMap ? MapFormat : "0", CultureInfo.InvariantCulture);
             editor.Background = new SolidColorBrush(Color.FromRgb(100, 30, 38));
             status.Text = isMap ? "MAP values must decrease from top to bottom" : "RPM values must increase from left to right";
             return;
@@ -623,12 +769,12 @@ public sealed class FuelingPanel : Grid
         if (isMap) map = updatedAxis; else rpm = updatedAxis;
         var editors = isMap ? mapAxisCells : rpmAxisCells;
         for (var i = 0; i < updatedAxis.Length && i < editors.Length; i++)
-            if (editors[i] is not null) editors[i].Text = updatedAxis[i].ToString("0", CultureInfo.InvariantCulture);
+            if (editors[i] is not null) editors[i].Text = updatedAxis[i].ToString(isMap ? MapFormat : "0", CultureInfo.InvariantCulture);
         ApplyBoundaries();
         var endpoint = index == (isMap ? 0 : updatedAxis.Length - 1) ? "maximum" : index == (isMap ? updatedAxis.Length - 1 : 0) ? "minimum" : null;
         status.Text = endpoint is not null
-            ? $"Rescaled the shared {(isMap ? "MAP" : "RPM")} axis to a {updatedAxis[index]:0} {endpoint}"
-            : $"Updated shared {(isMap ? "MAP" : "RPM")} breakpoint {index + 1}";
+            ? $"Rescaled the {(isMap ? "fuel MAP" : "shared RPM")} axis to a {updatedAxis[index]:0} {endpoint}"
+            : $"Updated {(isMap ? "fuel MAP" : "shared RPM")} breakpoint {index + 1}";
     }
     private static Border ControlGroup(string title, params UIElement[] controls)
     {
@@ -645,8 +791,73 @@ public sealed class FuelingPanel : Grid
     private static Color Hsl(double h, double s, double l) { var c = (1 - Math.Abs(2 * l - 1)) * s; var x = c * (1 - Math.Abs(h / 60 % 2 - 1)); var m = l - c / 2; var (r, g, b) = h switch { < 60 => (c, x, 0d), < 120 => (x, c, 0d), < 180 => (0d, c, x), < 240 => (0d, x, c), < 300 => (x, 0d, c), _ => (c, 0d, x) }; return Color.FromRgb((byte)((r + m) * 255), (byte)((g + m) * 255), (byte)((b + m) * 255)); }
     private static double Ease(double x) { var t = Math.Clamp(x, 0, 1); return t * t * (3 - 2 * t); }
     private static double[,] Resample(double[,] source, int rows, int cols) { var result = new double[rows, cols]; var oldRows = source.GetLength(0); var oldCols = source.GetLength(1); for (var r = 0; r < rows; r++) for (var c = 0; c < cols; c++) { var sr = r * (oldRows - 1d) / (rows - 1); var sc = c * (oldCols - 1d) / (cols - 1); var r0 = (int)Math.Floor(sr); var r1 = Math.Min(oldRows - 1, r0 + 1); var c0 = (int)Math.Floor(sc); var c1 = Math.Min(oldCols - 1, c0 + 1); var a = source[r0, c0] + (source[r0, c1] - source[r0, c0]) * (sc - c0); var b = source[r1, c0] + (source[r1, c1] - source[r1, c0]) * (sc - c0); result[r, c] = a + (b - a) * (sr - r0); } return result; }
-    private void Save() { if (loading || ve.Length == 0) return; try { var rows = new double[ve.GetLength(0)][]; for (var r = 0; r < rows.Length; r++) { rows[r] = new double[ve.GetLength(1)]; for (var c = 0; c < rows[r].Length; c++) rows[r][c] = ve[r, c]; } Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!); File.WriteAllText(SavePath, JsonSerializer.Serialize(new FuelState { Values = rows, DirectionalOuterToInner = directionalOuterToInner, DirectionalStrength = directionalStrength, DirectionalPasses = directionalPasses, RefinementStrength = refinementStrength, RefinementPasses = refinementPasses, AdvancedOptions = advancedSmoothingOptions, SelectionOffsetAmount = selectionOffsetAmount, SelectionOffsetIsPercentage = selectionOffsetIsPercentage, VeSetup = veSetupSettings, ShowFuelFlow = showFuelFlow })); } catch { } }
-    private bool Load() { try { if (!File.Exists(SavePath)) return false; var state = JsonSerializer.Deserialize<FuelState>(File.ReadAllText(SavePath)); if (state?.Values is null || state.Values.Length == 0 || state.Values.Any(r => r.Length != state.Values[0].Length)) return false; var loaded = new double[state.Values.Length, state.Values[0].Length]; for (var r = 0; r < loaded.GetLength(0); r++) for (var c = 0; c < loaded.GetLength(1); c++) loaded[r, c] = state.Values[r][c]; ve = loaded.GetLength(0) == map.Length && loaded.GetLength(1) == rpm.Length ? loaded : Resample(loaded, map.Length, rpm.Length); directionalOuterToInner = state.DirectionalOuterToInner; directionalStrength = state.DirectionalStrength; directionalPasses = state.DirectionalPasses; refinementStrength = state.RefinementStrength; refinementPasses = state.RefinementPasses; advancedSmoothingOptions = state.AdvancedOptions ?? advancedSmoothingOptions; selectionOffsetAmount = state.SelectionOffsetAmount; selectionOffsetIsPercentage = state.SelectionOffsetIsPercentage; veSetupSettings = state.VeSetup ?? veSetupSettings; showFuelFlow = state.ShowFuelFlow; syncingConversion = true; conversionViewBox.IsChecked = showFuelFlow; syncingConversion = false; fuelTableTitle.Text = showFuelFlow ? "Fuel Table — Estimated Fuel Flow (lb/hr)" : "Fuel Table — VE (%)"; return true; } catch { syncingConversion = false; return false; } }
+    private void Save()
+    {
+        if (loading || ve.Length == 0) return;
+        try
+        {
+            var rows = new double[ve.GetLength(0)][];
+            for (var r = 0; r < rows.Length; r++)
+            {
+                rows[r] = new double[ve.GetLength(1)];
+                for (var c = 0; c < rows[r].Length; c++) rows[r][c] = ve[r, c];
+            }
+            var state = new FuelState
+            {
+                Values = rows, MapAxis = map.ToArray(), MapUnit = mapUnit,
+                DirectionalOuterToInner = directionalOuterToInner, DirectionalStrength = directionalStrength, DirectionalPasses = directionalPasses,
+                RefinementStrength = refinementStrength, RefinementPasses = refinementPasses, AdvancedOptions = advancedSmoothingOptions,
+                SelectionOffsetAmount = selectionOffsetAmount, SelectionOffsetIsPercentage = selectionOffsetIsPercentage,
+                VeSetup = veSetupSettings, ShowFuelFlow = showFuelFlow
+            };
+            Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!);
+            File.WriteAllText(SavePath, JsonSerializer.Serialize(state));
+        }
+        catch { }
+    }
+
+    private bool Load()
+    {
+        try
+        {
+            if (!File.Exists(SavePath)) return false;
+            var state = JsonSerializer.Deserialize<FuelState>(File.ReadAllText(SavePath));
+            if (state?.Values is null || state.Values.Length == 0 || state.Values.Any(row => row.Length != state.Values[0].Length)) return false;
+            if (state.MapAxis is { Length: > 1 })
+            {
+                mapUnit = state.MapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? "PSI gauge" : "kPa absolute";
+                map = state.MapAxis.Length == map.Length
+                    ? state.MapAxis.Select(RoundFuelMap).ToArray()
+                    : BuildMapAxis(state.MapAxis[^1], state.MapAxis[0], map.Length) ?? map;
+            }
+            var loaded = new double[state.Values.Length, state.Values[0].Length];
+            for (var r = 0; r < loaded.GetLength(0); r++) for (var c = 0; c < loaded.GetLength(1); c++) loaded[r, c] = state.Values[r][c];
+            ve = loaded.GetLength(0) == map.Length && loaded.GetLength(1) == rpm.Length ? loaded : Resample(loaded, map.Length, rpm.Length);
+            directionalOuterToInner = state.DirectionalOuterToInner; directionalStrength = state.DirectionalStrength; directionalPasses = state.DirectionalPasses;
+            refinementStrength = state.RefinementStrength; refinementPasses = state.RefinementPasses; advancedSmoothingOptions = state.AdvancedOptions ?? advancedSmoothingOptions;
+            selectionOffsetAmount = state.SelectionOffsetAmount; selectionOffsetIsPercentage = state.SelectionOffsetIsPercentage;
+            veSetupSettings = state.VeSetup ?? veSetupSettings; showFuelFlow = state.ShowFuelFlow;
+            syncingConversion = true; conversionViewBox.IsChecked = showFuelFlow; syncingConversion = false;
+            fuelTableTitle.Text = showFuelFlow ? "Fuel Table — Estimated Fuel Flow (lb/hr)" : "Fuel Table — VE (%)";
+            return true;
+        }
+        catch { syncingConversion = false; return false; }
+    }
     private static void Info(string text) => MessageBox.Show(text, "Fueling selection", MessageBoxButton.OK, MessageBoxImage.Information);
-    private sealed class FuelState { public double[][] Values { get; set; } = []; public bool DirectionalOuterToInner { get; set; } = true; public double DirectionalStrength { get; set; } = .65; public int DirectionalPasses { get; set; } = 2; public double RefinementStrength { get; set; } = .45; public int RefinementPasses { get; set; } = 4; public AdvancedSmoothingOptions? AdvancedOptions { get; set; } public double SelectionOffsetAmount { get; set; } = 1; public bool SelectionOffsetIsPercentage { get; set; } public VeSetupSettings? VeSetup { get; set; } public bool ShowFuelFlow { get; set; } }
+    private sealed class FuelState
+    {
+        public double[][] Values { get; set; } = [];
+        public double[] MapAxis { get; set; } = [];
+        public string MapUnit { get; set; } = "kPa absolute";
+        public bool DirectionalOuterToInner { get; set; } = true;
+        public double DirectionalStrength { get; set; } = .65;
+        public int DirectionalPasses { get; set; } = 2;
+        public double RefinementStrength { get; set; } = .45;
+        public int RefinementPasses { get; set; } = 4;
+        public AdvancedSmoothingOptions? AdvancedOptions { get; set; }
+        public double SelectionOffsetAmount { get; set; } = 1;
+        public bool SelectionOffsetIsPercentage { get; set; }
+        public VeSetupSettings? VeSetup { get; set; }
+        public bool ShowFuelFlow { get; set; }
+    }
 }
