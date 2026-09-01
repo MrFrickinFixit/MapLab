@@ -1,0 +1,44 @@
+MAP LAB FREEWARE LICENSE AGREEMENT
+
+Copyright (c) 2026 Brian Diffenbaugh. All rights reserved.
+
+1. Free use
+
+Map Lab is freeware. You are granted a non-exclusive, royalty-free license to
+install and use Map Lab for personal, educational, and commercial purposes.
+There is no purchase fee for the software.
+
+2. Restrictions
+
+You may make reasonable backup copies. You may not sell, sublicense,
+redistribute, modify, or reverse engineer Map Lab without prior written
+permission, except where applicable law expressly permits otherwise.
+
+3. Ownership
+
+Map Lab is licensed, not sold. The author retains all ownership rights in the
+software and its original materials.
+
+4. Calibration safety
+
+Map Lab is an engine-map calculation, editing, and visualization tool. Engine
+calibration involves inherent risks. Verify all generated or modified values
+independently and use appropriate safeguards before applying changes to an
+engine or vehicle. You are responsible for the maps you create and apply.
+
+5. No warranty and limitation of liability
+
+MAP LAB IS PROVIDED "AS IS", WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR
+IMPLIED. TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE AUTHOR WILL NOT BE LIABLE
+FOR ANY CLAIM, DAMAGE, LOSS, OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR
+ITS USE.
+
+6. Third-party components
+
+Map Lab includes Microsoft .NET runtime components that are licensed under
+their own terms. Copies of the applicable .NET license and third-party notices
+are installed with Map Lab.
+
+7. Acceptance
+
+Installing or using Map Lab indicates acceptance of this agreement.

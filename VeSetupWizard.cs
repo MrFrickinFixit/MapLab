@@ -30,7 +30,6 @@ public sealed class VeSetupSettings
     public double WotVe { get; set; } = 98;
     public double HighRpmVe { get; set; } = 88;
     public double BoostVe { get; set; } = 112;
-    public int RegionValueMode { get; set; } = 2;
     public double IdleAfr { get; set; } = 13.8;
     public double CruiseAfr { get; set; } = 14.7;
     public double WotAfr { get; set; } = 12.8;
@@ -64,6 +63,7 @@ public sealed class VeSetupWizard : Window
     private VeRegionBoundary regionBoundary;
     private readonly Action requestBoundaryPick;
     private readonly Func<double, double, double[]?> rescaleMapAxis;
+    private readonly Action<bool> setBoostedMapUnit;
     private readonly Action<double[,], VeSetupSettings> apply;
     private readonly VeSetupSettings settings;
     private readonly Grid pageHost = new();
@@ -73,15 +73,14 @@ public sealed class VeSetupWizard : Window
     private readonly Dictionary<string, TextBox> inputs = [];
     private TextBlock maximumMapLabel = null!, idleMapLabel = null!, idleHighMapLabel = null!, wotVeLabel = null!, boostVeLabel = null!, wotAfrLabel = null!, boostAfrLabel = null!, applicationModeNote = null!;
     private CheckBox boostedBox = null!, selectedOnlyBox = null!, preserveOuterBox = null!, smoothBoundariesBox = null!, manualVeTargetsBox = null!, finalSmoothingBox = null!;
-    private ComboBox applyModeBox = null!, smoothingAlgorithmBox = null!, regionValueModeBox = null!, camshaftBox = null!, mapSensorBox = null!;
+    private ComboBox applyModeBox = null!, smoothingAlgorithmBox = null!, camshaftBox = null!, mapSensorBox = null!;
     private Slider blendSlider = null!, contourSlider = null!;
     private int pageIndex;
 
-    public VeSetupWizard(double[,] current, double[] rpm, double[] map, string mapUnit, VeSelection? selection, VeRegionBoundary regionBoundary, VeSetupSettings initial, Action requestBoundaryPick, Func<double, double, double[]?> rescaleMapAxis, Action<double[,], VeSetupSettings> apply)
+    public VeSetupWizard(double[,] current, double[] rpm, double[] map, string mapUnit, VeSelection? selection, VeRegionBoundary regionBoundary, VeSetupSettings initial, Action requestBoundaryPick, Func<double, double, double[]?> rescaleMapAxis, Action<bool> setBoostedMapUnit, Action<double[,], VeSetupSettings> apply)
     {
-        this.current = (double[,])current.Clone(); this.rpm = rpm.ToArray(); this.map = map.ToArray(); this.mapUnit = mapUnit; this.selection = selection; this.regionBoundary = regionBoundary; this.requestBoundaryPick = requestBoundaryPick; this.rescaleMapAxis = rescaleMapAxis; this.apply = apply;
+        this.current = (double[,])current.Clone(); this.rpm = rpm.ToArray(); this.map = map.ToArray(); this.mapUnit = mapUnit; this.selection = selection; this.regionBoundary = regionBoundary; this.requestBoundaryPick = requestBoundaryPick; this.rescaleMapAxis = rescaleMapAxis; this.setBoostedMapUnit = setBoostedMapUnit; this.apply = apply;
         settings = Clone(initial);
-        if (settings.RegionValueMode != 2) { settings.RegionValueMode = 2; settings.EnableBoundarySmoothing = false; settings.PreserveOuterValues = false; }
         SetBoundaryDerivedMapValues();
         Title = "VE Setup Wizard"; Width = 920; Height = Math.Min(860, SystemParameters.WorkArea.Height - 40); MinWidth = 760; MinHeight = Math.Min(700, Height); WindowStartupLocation = WindowStartupLocation.CenterOwner;
         Background = new SolidColorBrush(Color.FromRgb(243, 243, 243)); FontFamily = new FontFamily("Segoe UI");
@@ -218,8 +217,8 @@ public sealed class VeSetupWizard : Window
         AddField(anchors, "Idle target AFR", "idleAfr", settings.IdleAfr); AddField(anchors, "Cruise target AFR", "cruiseAfr", settings.CruiseAfr); wotAfrLabel = AddField(anchors, "AFR at 0 PSI", "wotAfr", settings.WotAfr); boostAfrLabel = AddField(anchors, "Boost target AFR", "boostAfr", settings.BoostAfr);
         AddField(anchors, "Reference intake-air temperature (°F)", "iatF", settings.IntakeAirTemperatureF); AddField(anchors, "Barometric pressure (psi absolute)", "baro", settings.BarometricPressurePsi);
         pages.Add(anchors);
-        boostedBox.Checked += (_, _) => { RefreshMapPresentation(); ApplyMapSensorDefault(false); };
-        boostedBox.Unchecked += (_, _) => RefreshMapPresentation();
+        boostedBox.Checked += (_, _) => { setBoostedMapUnit(true); RefreshMapPresentation(); ApplyMapSensorDefault(false); };
+        boostedBox.Unchecked += (_, _) => { setBoostedMapUnit(false); RefreshMapPresentation(); };
         mapSensorBox.SelectionChanged += (_, _) => ApplyMapSensorDefault(false);
         RefreshMapPresentation();
 
@@ -227,10 +226,9 @@ public sealed class VeSetupWizard : Window
         var boundaryControls = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 14) };
         var setBoundaries = MakeButton("⌖  Set Boundaries on Fuel Table", true); setBoundaries.Margin = new Thickness(0); setBoundaries.Click += (_, _) => BeginBoundaryPick(); boundaryControls.Children.Add(setBoundaries);
         boundaryControls.Children.Add(new TextBlock { Text = "Hover over the table and click the intersection to lock", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) }); shape.Children.Add(boundaryControls);
-        regionValueModeBox = new ComboBox { Width = 390, HorizontalAlignment = HorizontalAlignment.Left, SelectedIndex = 2, Visibility = Visibility.Collapsed };
-        regionValueModeBox.Items.Add(new ComboBoxItem { Content = "Fill quadrants with region values", Foreground = Brushes.Black }); regionValueModeBox.Items.Add(new ComboBoxItem { Content = "Interpolate complete map with fixed boundary lines", Foreground = Brushes.Black }); regionValueModeBox.Items.Add(new ComboBoxItem { Content = "Continuous contoured surface", Foreground = Brushes.Black }); shape.Children.Add(regionValueModeBox);
-        shape.Children.Add(Label("CONTOUR STRENGTH")); contourSlider = new Slider { Minimum = 0, Maximum = 1, Value = settings.ContourStrength, TickFrequency = .1, IsSnapToTickEnabled = true, Width = 340, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 4) }; shape.Children.Add(contourSlider);
+        shape.Children.Add(Label("CONTOUR STRENGTH"));
         shape.Children.Add(new TextBlock { Text = "Lower values hold the region anchors more tightly. Higher values create broader, softer transitions between regions.", TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, Margin = new Thickness(0, 0, 0, 12) });
+        contourSlider = new Slider { Minimum = 0, Maximum = 1, Value = settings.ContourStrength, TickFrequency = .1, IsSnapToTickEnabled = true, Width = 320, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 16) }; shape.Children.Add(contourSlider);
         var advancedVe = new StackPanel(); manualVeTargetsBox = new CheckBox { Content = "Override derived VE targets", IsChecked = settings.ManualVeTargets, Margin = new Thickness(0, 0, 0, 10), FontWeight = FontWeights.SemiBold }; advancedVe.Children.Add(manualVeTargetsBox);
         idleHighMapLabel = AddField(advancedVe, $"Idle High MAP — horizontal boundary ({mapUnit})", "idleHighMap", settings.IdleHighMap, true); AddField(advancedVe, "VE at Idle Low MAP (%)", "idleVe", settings.IdleVe); AddField(advancedVe, "VE at Idle High MAP (%)", "idleHighVe", settings.IdleHighVe);
         AddField(advancedVe, "Cruise VE — lower-right region (%)", "cruiseVe", settings.CruiseVe); AddField(advancedVe, "Part-throttle VE (%)", "partVe", settings.PartThrottleVe);
@@ -347,7 +345,7 @@ public sealed class VeSetupWizard : Window
             settings.IdleVe = idleVe; settings.IdleHighVe = idleHighVe; settings.CruiseVe = cruiseVe; settings.PartThrottleVe = partVe; settings.WotVe = wotVe; settings.HighRpmVe = highVe; settings.BoostVe = boostVe;
         }
         settings.IdleHighMap = idleHighMap;
-        settings.RegionValueMode = 2; settings.ContourStrength = contourSlider.Value;
+        settings.ContourStrength = contourSlider.Value;
         settings.IdleAfr = idleAfr; settings.CruiseAfr = cruiseAfr; settings.WotAfr = wotAfr; settings.BoostAfr = boostAfr; settings.IntakeAirTemperatureF = iatF; settings.BarometricPressurePsi = baro;
         settings.SelectedCellsOnly = selectedOnlyBox.IsChecked == true && selection is not null; settings.ApplyMode = applyModeBox.SelectedIndex; settings.BlendStrength = blendSlider.Value;
         settings.EnableFinalSmoothing = finalSmoothingBox.IsChecked == true;
@@ -384,14 +382,15 @@ public sealed class VeSetupWizard : Window
     {
         if (!ReadSettings()) { ShowPage(0); return; }
         var proposed = Generate(current, rpm, map, mapUnit, selection, regionBoundary, settings); var fuelFlow = ConvertToFuelFlow(proposed, rpm, map, mapUnit, settings);
+        var proposedExtrema = GetExtrema(proposed); var fuelFlowExtrema = GetExtrema(fuelFlow);
         var panel = new StackPanel(); panel.Children.Add(new TextBlock { Text = "5. Preview", FontSize = 20, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 5) });
         panel.Children.Add(new TextBlock { Text = "Review the overall shape before applying. The full-resolution table remains editable after generation.", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), Margin = new Thickness(0, 0, 0, 14) });
         var previews = new Grid(); previews.ColumnDefinitions.Add(new ColumnDefinition()); previews.ColumnDefinitions.Add(new ColumnDefinition()); previews.ColumnDefinitions.Add(new ColumnDefinition());
         var before = PreviewCard("CURRENT VE TABLE (%)", current, "%"); previews.Children.Add(before); var after = PreviewCard("PROPOSED VE TABLE (%)", proposed, "%"); Grid.SetColumn(after, 1); previews.Children.Add(after);
         var flow = PreviewCard("ESTIMATED FUEL FLOW (lb/hr)", fuelFlow, " lb/hr"); Grid.SetColumn(flow, 2); previews.Children.Add(flow); panel.Children.Add(previews);
         var scope = settings.SelectedCellsOnly && selection is not null ? "selected cells" : "entire table"; var mode = new[] { "replace", "blend", "fill zeros" }[settings.ApplyMode];
-        panel.Children.Add(new TextBlock { Text = $"Scope: {scope}  •  Mode: {mode}  •  VE: {proposed.Cast<double>().Min():0.0}–{proposed.Cast<double>().Max():0.0}%  •  Fuel flow: {fuelFlow.Cast<double>().Min():0.0}–{fuelFlow.Cast<double>().Max():0.0} lb/hr", Foreground = new SolidColorBrush(Color.FromRgb(0, 103, 192)), FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 14, 0, 0) }); pageHost.Children.Add(panel);
-        var correctedInjector = CorrectedInjectorFlow(settings); var injectorCapacity = correctedInjector * settings.Cylinders; var peakFuel = fuelFlow.Cast<double>().Max();
+        panel.Children.Add(new TextBlock { Text = $"Scope: {scope}  •  Mode: {mode}  •  VE: {proposedExtrema.Min:0.0}–{proposedExtrema.Max:0.0}%  •  Fuel flow: {fuelFlowExtrema.Min:0.0}–{fuelFlowExtrema.Max:0.0} lb/hr", Foreground = new SolidColorBrush(Color.FromRgb(0, 103, 192)), FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 14, 0, 0) }); pageHost.Children.Add(panel);
+        var correctedInjector = CorrectedInjectorFlow(settings); var injectorCapacity = correctedInjector * settings.Cylinders; var peakFuel = fuelFlowExtrema.Max;
         var maxCornerFuel = fuelFlow[0, fuelFlow.GetLength(1) - 1]; var maxCornerVe = proposed[0, proposed.GetLength(1) - 1];
         panel.Children.Add(new TextBlock { Text = $"Setup: {settings.Cylinders} cylinders  •  {settings.DisplacementCi:0.#} cu in  •  {CamshaftDescription(settings.CamshaftDurationRange)}  •  {settings.MapSensorBar}-bar MAP", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), Margin = new Thickness(0, 5, 0, 0) });
         panel.Children.Add(new TextBlock { Text = $"Calculation details: max RPM/max MAP cell {maxCornerVe:0.0}% VE, {maxCornerFuel:0.0} lb/hr total, {maxCornerFuel / Math.Max(1, settings.Cylinders):0.0} lb/hr per injector, {maxCornerFuel / Math.Max(.1, injectorCapacity):P0} duty  •  preview peak {peakFuel:0.0} lb/hr total, {peakFuel / Math.Max(.1, injectorCapacity):P0} duty  •  injector capacity {correctedInjector:0.0} lb/hr each, {injectorCapacity:0.0} total", TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(0, 103, 192)), FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 5, 0, 0) });
@@ -407,7 +406,7 @@ public sealed class VeSetupWizard : Window
     {
         var stack = new StackPanel { Margin = new Thickness(0, 0, 12, 0) }; stack.Children.Add(Label(title));
         var grid = new UniformGrid { Rows = Math.Min(16, values.GetLength(0)), Columns = Math.Min(24, values.GetLength(1)), Height = 260 };
-        var min = values.Cast<double>().Min(); var max = values.Cast<double>().Max();
+        var (min, max) = GetExtrema(values);
         for (var rowIndex = 0; rowIndex < grid.Rows; rowIndex++) for (var colIndex = 0; colIndex < grid.Columns; colIndex++)
         {
             var row = (int)Math.Round(rowIndex * (values.GetLength(0) - 1d) / Math.Max(1, grid.Rows - 1)); var col = (int)Math.Round(colIndex * (values.GetLength(1) - 1d) / Math.Max(1, grid.Columns - 1));
@@ -426,31 +425,10 @@ public sealed class VeSetupWizard : Window
 
     public static double[,] Generate(double[,] source, double[] rpm, double[] map, string mapUnit, VeSelection? selection, VeRegionBoundary regionBoundary, VeSetupSettings settings)
     {
-        var rows = source.GetLength(0); var cols = source.GetLength(1); var generated = new double[rows, cols]; var wotMap = mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? 0 : 100;
+        var rows = source.GetLength(0); var cols = source.GetLength(1); var wotMap = mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? 0 : 100;
         var idleColumn = Math.Clamp(regionBoundary.IdleColumn, 0, cols - 1); var wotRow = Math.Clamp(regionBoundary.WotRow, 0, rows - 1);
-        var cruiseLowMap = map[^1]; var regionMap = map[wotRow];
-        if (settings.RegionValueMode == 2)
-        {
-            generated = GenerateContinuousSurface(rpm, map, settings, idleColumn, regionMap, wotMap);
-        }
-        else for (var row = 0; row < rows; row++) for (var col = 0; col < cols; col++)
-        {
-            var fillQuadrants = settings.RegionValueMode == 0;
-            var isIdleSide = col <= idleColumn;
-            var isIdleHighMap = isIdleSide && row <= wotRow;
-            var isCruise = !isIdleSide && row > wotRow;
-            var load = isIdleSide
-                ? isIdleHighMap ? settings.IdleHighVe : settings.IdleVe
-                : isCruise
-                    ? fillQuadrants ? settings.CruiseVe : Lerp(settings.CruiseVe, settings.PartThrottleVe, Smooth(Normalize(map[row], cruiseLowMap, regionMap)))
-                    : fillQuadrants ? settings.WotVe : PowerRegionVe(map[row], settings, wotMap, regionMap);
-            var lowRpmLoad = fillQuadrants || isIdleSide ? load : isCruise ? load * .92 : load * .82;
-            var highLoad = fillQuadrants ? load : isIdleSide ? load * .9 : isCruise ? load * .94 : HighRpmPowerVe(map[row], settings, wotMap, regionMap, load);
-            generated[row, col] = rpm[col] <= settings.PeakTorqueRpm
-                ? Lerp(lowRpmLoad, load, Smooth(Normalize(rpm[col], settings.IdleRpm, settings.PeakTorqueRpm)))
-                : Lerp(load, highLoad, Smooth(Normalize(rpm[col], settings.PeakTorqueRpm, settings.MaximumRpm)));
-        }
-        if (settings.RegionValueMode == 1) generated = InterpolateCompleteMap(generated, idleColumn, wotRow);
+        var regionMap = map[wotRow];
+        var generated = GenerateContinuousSurface(rpm, map, settings, idleColumn, regionMap, wotMap);
         var result = (double[,])source.Clone(); var scope = settings.SelectedCellsOnly && selection is not null ? selection.Value : new VeSelection(0, rows - 1, 0, cols - 1);
         for (var row = scope.Top; row <= scope.Bottom; row++) for (var col = scope.Left; col <= scope.Right; col++)
             result[row, col] = settings.ApplyMode switch { 1 => Lerp(source[row, col], generated[row, col], settings.BlendStrength), 2 => Math.Abs(source[row, col]) < .0001 ? generated[row, col] : source[row, col], _ => generated[row, col] };
@@ -460,13 +438,12 @@ public sealed class VeSetupWizard : Window
             for (var col = scope.Left; col <= scope.Right; col++) { result[scope.Top, col] = source[scope.Top, col]; result[scope.Bottom, col] = source[scope.Bottom, col]; }
             for (var row = scope.Top; row <= scope.Bottom; row++) { result[row, scope.Left] = source[row, scope.Left]; result[row, scope.Right] = source[row, scope.Right]; }
         }
-        if (settings.RegionValueMode == 2 && settings.EnableFinalSmoothing)
+        if (settings.EnableFinalSmoothing)
         {
             result = SmoothAllRows(result, rpm);
             result = SmoothAllColumns(result, map);
         }
-        var roundingArea = settings.RegionValueMode == 2 ? new VeSelection(0, rows - 1, 0, cols - 1) : scope;
-        for (var row = roundingArea.Top; row <= roundingArea.Bottom; row++) for (var col = roundingArea.Left; col <= roundingArea.Right; col++) result[row, col] = Math.Round(result[row, col], 1);
+        for (var row = 0; row < rows; row++) for (var col = 0; col < cols; col++) result[row, col] = Math.Round(result[row, col], 1);
         return result;
     }
 
@@ -531,15 +508,32 @@ public sealed class VeSetupWizard : Window
         return result;
     }
 
+    /// <summary>
+    /// Generates a boosted-target VE value for a given MAP/RPM point, reusing the same WOT/boost/high-RPM
+    /// blend math used by the continuous surface generator. Intended for extending an existing NA table
+    /// with new boosted rows (MAP values above <paramref name="wotMap"/>).
+    /// </summary>
+    public static double GenerateBoostedVe(double mapValue, double rpmValue, double wotMap, double regionMap, VeSetupSettings settings)
+    {
+        var drivingLoad = PowerRegionVe(mapValue, WithBoosted(settings), wotMap, regionMap);
+        var highRpmTarget = HighRpmPowerVe(mapValue, WithBoosted(settings), wotMap, regionMap, drivingLoad);
+        var highRpmProgress = Smooth(Normalize(rpmValue, settings.PeakTorqueRpm, settings.MaximumRpm));
+        return Lerp(drivingLoad, highRpmTarget, highRpmProgress);
+    }
+
+    private static VeSetupSettings WithBoosted(VeSetupSettings settings) => settings.Boosted ? settings : Clone(settings) is { } clone ? Boosted(clone) : settings;
+    private static VeSetupSettings Boosted(VeSetupSettings settings) { settings.Boosted = true; return settings; }
+
     public static double[,] ConvertToFuelFlow(double[,] veValues, double[] rpm, double[] map, string mapUnit, VeSetupSettings settings)
     {
         var result = new double[veValues.GetLength(0), veValues.GetLength(1)];
         var temperatureRankine = Math.Max(1, settings.IntakeAirTemperatureF + 459.67);
         const double airMassConstant = 144d * 60d / (53.35d * 1728d * 2d);
-        var wotMap = mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? 0 : 100;
+        var mapIsPsi = mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase);
+        var wotMap = mapIsPsi ? 0 : 100;
         for (var row = 0; row < result.GetLength(0); row++) for (var col = 0; col < result.GetLength(1); col++)
         {
-            var mapPsia = mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? map[row] + settings.BarometricPressurePsi : map[row] / 6.894757293168361;
+            var mapPsia = mapIsPsi ? map[row] + settings.BarometricPressurePsi : map[row] / 6.894757293168361;
             mapPsia = Math.Max(.1, mapPsia);
             var airPoundsPerHour = veValues[row, col] / 100d * settings.DisplacementCi * rpm[col] * mapPsia * airMassConstant / temperatureRankine;
             result[row, col] = Math.Round(airPoundsPerHour / TargetAfr(rpm[col], map[row], wotMap, settings), 1);
@@ -575,6 +569,18 @@ public sealed class VeSetupWizard : Window
 
     private static double CorrectedInjectorFlow(VeSetupSettings settings) => settings.InjectorFlowLbHr * Math.Sqrt(Math.Max(.1, settings.FuelPressurePsi) / Math.Max(.1, settings.InjectorRatedPressurePsi));
 
+    private static (double Min, double Max) GetExtrema(double[,] values)
+    {
+        var min = double.PositiveInfinity;
+        var max = double.NegativeInfinity;
+        foreach (var value in values)
+        {
+            if (value < min) min = value;
+            if (value > max) max = value;
+        }
+        return (min, max);
+    }
+
     private static string CamshaftDescription(int index) => Math.Clamp(index, 0, 3) switch
     {
         0 => "mild cam",
@@ -582,23 +588,6 @@ public sealed class VeSetupWizard : Window
         2 => "large street/strip cam",
         _ => "race cam"
     };
-
-    private static double[,] InterpolateCompleteMap(double[,] source, int idleColumn, int horizontalRow)
-    {
-        var result = (double[,])source.Clone(); var lastRow = source.GetLength(0) - 1; var lastColumn = source.GetLength(1) - 1;
-        void InterpolateQuadrant(int top, int bottom, int left, int right)
-        {
-            // Each quadrant includes the shared boundary row/column as its
-            // perimeter. SelectionInterpolator changes only interior cells.
-            if (bottom - top < 2 || right - left < 2) return;
-            result = SelectionInterpolator.Apply(result, top, bottom, left, right);
-        }
-        InterpolateQuadrant(0, horizontalRow, 0, idleColumn);
-        InterpolateQuadrant(horizontalRow, lastRow, 0, idleColumn);
-        InterpolateQuadrant(0, horizontalRow, idleColumn, lastColumn);
-        InterpolateQuadrant(horizontalRow, lastRow, idleColumn, lastColumn);
-        return result;
-    }
 
     private static double[,] SmoothBoundaryBands(double[,] source, VeSelection area, VeRegionBoundary boundary, VeSetupSettings settings)
     {
@@ -636,7 +625,7 @@ public sealed class VeSetupWizard : Window
     private static double Normalize(double value, double low, double high) => Math.Clamp((value - low) / Math.Max(.0001, high - low), 0, 1);
     private static double Smooth(double value) => value * value * (3 - 2 * value);
     private static double Lerp(double a, double b, double t) => a + (b - a) * Math.Clamp(t, 0, 1);
-    private static VeSetupSettings Clone(VeSetupSettings value) => new() { Cylinders = value.Cylinders, DisplacementCi = value.DisplacementCi, Boosted = value.Boosted, CamshaftDurationRange = value.CamshaftDurationRange, MapSensorBar = value.MapSensorBar, InjectorFlowLbHr = value.InjectorFlowLbHr, InjectorRatedPressurePsi = value.InjectorRatedPressurePsi, FuelPressurePsi = value.FuelPressurePsi, ManualVeTargets = value.ManualVeTargets, IdleRpm = value.IdleRpm, PeakTorqueRpm = value.PeakTorqueRpm, MaximumRpm = value.MaximumRpm, IdleMap = value.IdleMap, MaximumMap = value.MaximumMap, IdleVe = value.IdleVe, IdleHighMap = value.IdleHighMap, IdleHighVe = value.IdleHighVe, CruiseVe = value.CruiseVe, PartThrottleVe = value.PartThrottleVe, WotVe = value.WotVe, HighRpmVe = value.HighRpmVe, BoostVe = value.BoostVe, RegionValueMode = value.RegionValueMode, IdleAfr = value.IdleAfr, CruiseAfr = value.CruiseAfr, WotAfr = value.WotAfr, BoostAfr = value.BoostAfr, IntakeAirTemperatureF = value.IntakeAirTemperatureF, BarometricPressurePsi = value.BarometricPressurePsi, SelectedCellsOnly = value.SelectedCellsOnly, ApplyMode = value.ApplyMode, BlendStrength = value.BlendStrength, ContourStrength = value.ContourStrength, EnableFinalSmoothing = value.EnableFinalSmoothing, EnableBoundarySmoothing = value.EnableBoundarySmoothing, BoundarySmoothingAlgorithm = value.BoundarySmoothingAlgorithm, BoundarySmoothingStrength = value.BoundarySmoothingStrength, BoundarySmoothingPasses = value.BoundarySmoothingPasses, HorizontalSmoothCells = value.HorizontalSmoothCells, VerticalSmoothCells = value.VerticalSmoothCells, PreserveOuterValues = value.PreserveOuterValues };
+    private static VeSetupSettings Clone(VeSetupSettings value) => new() { Cylinders = value.Cylinders, DisplacementCi = value.DisplacementCi, Boosted = value.Boosted, CamshaftDurationRange = value.CamshaftDurationRange, MapSensorBar = value.MapSensorBar, InjectorFlowLbHr = value.InjectorFlowLbHr, InjectorRatedPressurePsi = value.InjectorRatedPressurePsi, FuelPressurePsi = value.FuelPressurePsi, ManualVeTargets = value.ManualVeTargets, IdleRpm = value.IdleRpm, PeakTorqueRpm = value.PeakTorqueRpm, MaximumRpm = value.MaximumRpm, IdleMap = value.IdleMap, MaximumMap = value.MaximumMap, IdleVe = value.IdleVe, IdleHighMap = value.IdleHighMap, IdleHighVe = value.IdleHighVe, CruiseVe = value.CruiseVe, PartThrottleVe = value.PartThrottleVe, WotVe = value.WotVe, HighRpmVe = value.HighRpmVe, BoostVe = value.BoostVe, IdleAfr = value.IdleAfr, CruiseAfr = value.CruiseAfr, WotAfr = value.WotAfr, BoostAfr = value.BoostAfr, IntakeAirTemperatureF = value.IntakeAirTemperatureF, BarometricPressurePsi = value.BarometricPressurePsi, SelectedCellsOnly = value.SelectedCellsOnly, ApplyMode = value.ApplyMode, BlendStrength = value.BlendStrength, ContourStrength = value.ContourStrength, EnableFinalSmoothing = value.EnableFinalSmoothing, EnableBoundarySmoothing = value.EnableBoundarySmoothing, BoundarySmoothingAlgorithm = value.BoundarySmoothingAlgorithm, BoundarySmoothingStrength = value.BoundarySmoothingStrength, BoundarySmoothingPasses = value.BoundarySmoothingPasses, HorizontalSmoothCells = value.HorizontalSmoothCells, VerticalSmoothCells = value.VerticalSmoothCells, PreserveOuterValues = value.PreserveOuterValues };
     private static Color Heat(double t) => Hsl(Math.Clamp(t, 0, 1) * 300, .96, .52);
     private static Color Hsl(double h, double s, double l) { var c = (1 - Math.Abs(2 * l - 1)) * s; var x = c * (1 - Math.Abs(h / 60 % 2 - 1)); var m = l - c / 2; var (r, g, b) = h switch { < 60 => (c, x, 0d), < 120 => (x, c, 0d), < 180 => (0d, c, x), < 240 => (0d, x, c), < 300 => (x, 0d, c), _ => (c, 0d, x) }; return Color.FromRgb((byte)((r + m) * 255), (byte)((g + m) * 255), (byte)((b + m) * 255)); }
 }

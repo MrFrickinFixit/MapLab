@@ -36,6 +36,27 @@ dotnet publish $applicationProject `
 
 if ($LASTEXITCODE -ne 0) { throw 'Map Lab publish failed.' }
 
+$dotnetRoot = Split-Path -Parent (Get-Command dotnet -ErrorAction Stop).Source
+$dotnetLegalFiles = @{
+    (Join-Path $dotnetRoot 'LICENSE.txt') = (Join-Path $publishDirectory 'DOTNET-LICENSE.txt')
+    (Join-Path $dotnetRoot 'ThirdPartyNotices.txt') = (Join-Path $publishDirectory 'DOTNET-THIRD-PARTY-NOTICES.txt')
+}
+
+foreach ($entry in $dotnetLegalFiles.GetEnumerator()) {
+    if (-not (Test-Path -LiteralPath $entry.Key)) {
+        throw "Required .NET legal notice was not found: $($entry.Key)"
+    }
+    Copy-Item -LiteralPath $entry.Key -Destination $entry.Value -Force
+}
+
+$requiredPublishedFiles = @('MapLab-1.0.0-beta.exe', 'LICENSE.txt', 'DOTNET-LICENSE.txt', 'DOTNET-THIRD-PARTY-NOTICES.txt')
+foreach ($fileName in $requiredPublishedFiles) {
+    $publishedFile = Join-Path $publishDirectory $fileName
+    if (-not (Test-Path -LiteralPath $publishedFile)) {
+        throw "Required published file was not found: $publishedFile"
+    }
+}
+
 dotnet build $installerProject `
     --configuration $Configuration `
     -p:Version=$Version `
@@ -44,7 +65,7 @@ dotnet build $installerProject `
 
 if ($LASTEXITCODE -ne 0) { throw 'Map Lab installer build failed.' }
 
-$installer = Join-Path $installerDirectory "MapLab-$Version-win-x64.msi"
+$installer = Join-Path $installerDirectory "MapLab-$Version-beta-win-x64.msi"
 if (-not (Test-Path -LiteralPath $installer)) {
     throw "Installer build completed but the expected MSI was not found: $installer"
 }
