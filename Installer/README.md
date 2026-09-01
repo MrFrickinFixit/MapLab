@@ -22,4 +22,4 @@ To assign a new installer version:
 .\scripts\build-installer.ps1 -Version 1.1.0
 ```
 
-The MSI installs Map Lab under Program Files, adds Start menu and Desktop shortcuts, supports upgrades, and can be removed from Windows **Installed apps**.
+The MSI asks whether to install Map Lab just for the current user or for every user of the computer. It also provides independent, checked-by-default options for a Desktop shortcut and a Start/Programs menu shortcut. The destination folder can be changed before installation, upgrades are supported, and Map Lab can be removed from Windows **Installed apps**.

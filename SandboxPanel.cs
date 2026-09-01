@@ -403,6 +403,25 @@ public sealed class SandboxPanel : Grid
     private void SandboxKeyDown(object sender, KeyEventArgs e) { if (Keyboard.Modifiers != ModifierKeys.Control) return; if (e.Key == Key.A) { pinned.Clear(); start = (0, 0); end = (map.Length - 1, rpm.Length - 1); UpdateSelection(); e.Handled = true; } else if (e.Key == Key.C) { Copy(); e.Handled = true; } else if (e.Key == Key.V) { Paste(); e.Handled = true; } else if (e.Key == Key.Z) { Undo(); e.Handled = true; } else if (e.Key == Key.Y) { Redo(); e.Handled = true; } }
     private void Save() { if (loading || values.Length == 0) return; try { Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!); File.WriteAllText(SavePath, JsonSerializer.Serialize(Snapshot())); } catch { } }
     private bool Load() { try { if (!File.Exists(SavePath)) return false; var state = JsonSerializer.Deserialize<SandboxSnapshot>(File.ReadAllText(SavePath)); if (state is null || state.Rpm.Length is < 8 or > 64 || state.Map.Length is < 8 or > 64 || state.Values.Length != state.Map.Length || state.Values.Any(row => row.Length != state.Rpm.Length)) return false; rpm = state.Rpm; map = state.Map; mapUnit = state.MapUnit; xUnit = state.XUnit ?? "RPM"; values = FromJagged(state.Values); customUnits.Clear(); customUnits.AddRange(state.CustomUnits ?? []); customXUnits.Clear(); customXUnits.AddRange(state.CustomXUnits ?? []); ApplyDisplayPrecision(state.LeadingDisplayDigits, state.TrailingDisplayDecimals); RefreshUnitItems(); RefreshXUnitItems(); xSize.Text = rpm.Length.ToString(); ySize.Text = map.Length.ToString(); return true; } catch { return false; } }
+    internal string ExportProjectState() { Save(); return File.ReadAllText(SavePath); }
+    internal static bool ValidateProjectState(string json)
+    {
+        try
+        {
+            var state = JsonSerializer.Deserialize<SandboxSnapshot>(json);
+            return state is not null && state.Rpm.Length is >= 8 and <= 64 && state.Map.Length is >= 8 and <= 64
+                && state.Values.Length == state.Map.Length && state.Values.All(row => row.Length == state.Rpm.Length)
+                && state.Rpm.All(double.IsFinite) && state.Map.All(double.IsFinite) && state.Values.SelectMany(row => row).All(double.IsFinite);
+        }
+        catch { return false; }
+    }
+    internal void ImportProjectState(string json)
+    {
+        if (!ValidateProjectState(json)) throw new InvalidDataException("The Map Sandbox section is invalid.");
+        Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!); File.WriteAllText(SavePath, json);
+        if (!Load()) throw new InvalidDataException("The Map Sandbox section could not be loaded.");
+        undo.Clear(); redo.Clear(); ClearCellSelection(); ClearAxisSelection(); Build(); Save(); status.Text = "Sandbox settings imported";
+    }
 
     private static double[]? BuildAxis(double minimum, double maximum, int count, bool descending, double increment) { minimum = Math.Round(minimum / increment) * increment; maximum = Math.Round(maximum / increment) * increment; if (count < 2 || maximum - minimum < increment * (count - 1)) return null; var result = new double[count]; for (var i = 0; i < count; i++) { var ideal = Math.Round((minimum + (maximum - minimum) * i / (count - 1d)) / increment) * increment; var low = i == 0 ? minimum : result[i - 1] + increment; var high = maximum - increment * (count - 1 - i); result[i] = Math.Round(Math.Clamp(ideal, low, high) / increment) * increment; } if (descending) Array.Reverse(result); return result; }
     private static bool Ordered(double[] axis, bool descending) { for (var i = 1; i < axis.Length; i++) if (descending ? axis[i] >= axis[i - 1] : axis[i] <= axis[i - 1]) return false; return true; }

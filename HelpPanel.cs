@@ -35,6 +35,13 @@ public sealed class HelpPanel : Grid
             "Map Sandbox is completely independent of both engine maps.",
             "Timing, fueling, and sandbox values each have separate Undo and Redo history."));
 
+        Section(document, "Number Display and Stored Precision", Bullets(
+            "Fueling, Ignition Timing, and Map Sandbox each have independent Leading Digits and Trailing Decimals display controls.",
+            "Leading Digits sets the magnitude at which values switch to whole-number display. With the default setting of 3, 85.47 displays as 85.5 while 105.47 displays as 105.",
+            "Trailing Decimals controls how many decimal places are shown below that threshold; it does not change the stored table value.",
+            "Cell edits and pasted table values retain up to three decimal places even when the normal table display is rounded.",
+            "The selected display format is also used by the 3D value scale, 3D tooltip, and Excel number formatting. Clipboard and CSV data retain the stored precision."));
+
         Section(document, "Selecting and Editing Cells", Bullets(
             "Drag with the left mouse button to select a rectangular area.",
             "Ctrl+click or Ctrl+drag to add separated cells or another area.",
@@ -76,6 +83,8 @@ public sealed class HelpPanel : Grid
             "Fuel cells store editable volumetric-efficiency percentages. View as lb/hr changes only the display.",
             "VE Setup uses engine information and VE targets to create a preview before values are committed.",
             "Forced-induction setup displays MAP inputs in PSI and enables boost-only fields.",
+            "The boundary intersection supplies the wizard's Idle Low MAP, Idle High MAP, Cruise/Part Throttle, and Part Throttle/WOT regions.",
+            "Wizard contouring is completed before the full-map column and row smoothing pass shown in the preview.",
             "The wizard operates on the Fueling MAP axis only and cannot change the Ignition Timing MAP scale.",
             "Always review generated values before applying them to an ECU."));
 
@@ -99,7 +108,23 @@ public sealed class HelpPanel : Grid
             "Select an axis starting point before pasting a copied row or column of breakpoints.",
             "CSV and Excel put the X scale at the bottom. Excel includes matching heat-map formatting.",
             "Timing, Fueling, and Sandbox autosave separately. Dialog settings are retained until changed.",
+            "Only one instance of each tool dialog is opened. Selecting its command again restores and activates the existing dialog.",
+            "A Working… progress window is shown for longer map changes and extensive Undo or Redo operations.",
             "Use Undo immediately after an unwanted edit, paste, offset, smoothing operation, resize, or axis change."));
+
+        Section(document, "Map Lab Settings Files", Bullets(
+            "Open the Settings tab and choose Export .map to back up the complete workspace in one Map Lab settings file.",
+            "A .map file contains all three tables, their axes and units, operating boundaries, VE setup, heat-map colors, number-display preferences, and smoothing/tool settings.",
+            "Choose Import .map to validate and preview the replacement warning before the current workspace is changed.",
+            "Import replaces Ignition Timing, Fueling, and Map Sandbox together and clears their old Undo/Redo histories.",
+            "If an import cannot be completed, Map Lab attempts to restore the workspace that was open before the import."));
+
+        Section(document, "Installing Map Lab", Bullets(
+            "The Windows installer asks whether Map Lab should be installed just for you or for all users of the computer.",
+            "Just me installs under your local application-data Programs folder and normally does not require administrator approval.",
+            "All users installs under Program Files and requires administrator approval.",
+            "Desktop and Start/Programs menu shortcuts have separate checkboxes and may be enabled or disabled independently.",
+            "The destination folder can be changed before installation. Running the MSI again provides the standard repair or removal options."));
 
         document.Blocks.Add(Heading("Keyboard Shortcuts"));
         var shortcuts = new Table { CellSpacing = 0 }; shortcuts.Columns.Add(new TableColumn { Width = new GridLength(130) }); shortcuts.Columns.Add(new TableColumn()); var rows = new TableRowGroup(); shortcuts.RowGroups.Add(rows);

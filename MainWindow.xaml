@@ -41,6 +41,20 @@
  <TabItem Header="MAP SANDBOX">
   <Grid Margin="18"><ContentControl x:Name="SandboxHost"/></Grid>
  </TabItem>
+ <TabItem Header="SETTINGS">
+  <Grid Margin="24">
+   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition/></Grid.RowDefinitions>
+   <StackPanel Margin="4,0,0,20"><TextBlock Text="MAP LAB" Foreground="#0067C0" FontSize="12" FontWeight="Bold"/><TextBlock Text="Settings Import &amp; Export" FontSize="28" FontWeight="SemiBold" Margin="0,3,0,0"/><TextBlock Text="Move or back up the complete Map Lab workspace in one file." Foreground="#5E5E5E" FontSize="13" Margin="0,5,0,0"/></StackPanel>
+   <Border Grid.Row="1" Width="620" HorizontalAlignment="Left" Background="White" BorderBrush="#D1D1D1" BorderThickness="1" CornerRadius="7" Padding="20">
+    <StackPanel>
+     <TextBlock Text="MAP LAB SETTINGS FILE" Foreground="#5E5E5E" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,8"/>
+     <TextBlock Text="A .map file includes the Ignition Timing, Fueling, and Map Sandbox tables along with their axes, units, boundaries, display preferences, smoothing options, heat-map colors, and VE setup values." TextWrapping="Wrap" Foreground="#202020" FontSize="13" LineHeight="20" Margin="0,0,0,16"/>
+     <StackPanel Orientation="Horizontal"><Button Style="{StaticResource Primary}" Content="⇧  Export .map" Click="ExportMapSettings_Click" Margin="0,0,8,0"/><Button Style="{StaticResource Secondary}" Content="⇩  Import .map" Click="ImportMapSettings_Click"/></StackPanel>
+     <TextBlock x:Name="SettingsStatusText" Text="Settings are also autosaved locally while you work." Foreground="#5E5E5E" FontSize="11" Margin="0,14,0,0"/>
+    </StackPanel>
+   </Border>
+  </Grid>
+ </TabItem>
  <TabItem Header="HELP">
   <Grid Margin="18"><ContentControl x:Name="HelpHost"/></Grid>
  </TabItem>

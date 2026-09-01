@@ -1035,6 +1035,31 @@ public sealed class FuelingPanel : Grid
         }
         catch { syncingConversion = false; return false; }
     }
+    internal string ExportProjectState()
+    {
+        Save();
+        return File.ReadAllText(SavePath);
+    }
+    internal static bool ValidateProjectState(string json)
+    {
+        try
+        {
+            var state = JsonSerializer.Deserialize<FuelState>(json);
+            if (state?.Values is null || state.Values.Length is < 8 or > 64 || state.Values[0].Length is < 8 or > 64 || state.Values.Any(row => row.Length != state.Values[0].Length)) return false;
+            if (state.Values.SelectMany(row => row).Any(value => !double.IsFinite(value))) return false;
+            if (state.MapAxis is null || state.MapAxis.Length is < 2 or > 64 || state.MapAxis.Any(value => !double.IsFinite(value))) return false;
+            return true;
+        }
+        catch { return false; }
+    }
+    internal void ImportProjectState(string json)
+    {
+        if (!ValidateProjectState(json)) throw new InvalidDataException("The Fueling section is invalid.");
+        Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!); File.WriteAllText(SavePath, json);
+        if (!Load()) throw new InvalidDataException("The Fueling section could not be loaded.");
+        undoHistory.Clear(); redoHistory.Clear(); ClearFuelSelection(); SyncMapUnitControl(); Build(); ApplyBoundaries(); Save();
+        status.Text = "Fueling settings imported";
+    }
     private static void Info(string text) => MessageBox.Show(text, "Fueling selection", MessageBoxButton.OK, MessageBoxImage.Information);
     private sealed class FuelState
     {

@@ -6,33 +6,72 @@
     Manufacturer="Map Lab"
     Version="$(var.ProductVersion)"
     UpgradeCode="7C642D73-845B-4DB7-89A4-F37FE4114870"
-    Scope="perMachine">
+    Scope="perUserOrMachine">
 
     <SummaryInformation Description="Map Lab installer" Manufacturer="Map Lab" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of Map Lab is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
     <Icon Id="MapLabIcon.ico" SourceFile="$(var.ProjectRoot)\Assets\MapLab.ico" />
     <Property Id="ARPPRODUCTICON" Value="MapLabIcon.ico" />
+    <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" Secure="yes" />
+    <Property Id="INSTALLSTARTMENUSHORTCUT" Value="1" Secure="yes" />
+    <Property Id="WixAppFolder" Value="WixPerUserFolder" />
 
     <!-- Standard Windows setup wizard with destination-folder selection and
          modify/repair/remove support when the installer is run again. -->
-    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="APPLICATIONFOLDER" />
     <WixVariable Id="WixUILicenseRtf" Value="$(var.ProjectRoot)\Installer\License.rtf" />
 
+    <!-- Installation scope and shortcut choices are shown before the folder
+         page. The scope choice also supplies the appropriate default folder. -->
+    <UI>
+      <Dialog Id="InstallOptionsDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="340" Height="25" Transparent="yes" NoPrefix="yes" Text="Installation options" />
+        <Control Id="Description" Type="Text" X="25" Y="42" Width="320" Height="22" Transparent="yes" NoPrefix="yes" Text="Choose who can use Map Lab and where shortcuts are created." />
+        <Control Id="ScopeLabel" Type="Text" X="25" Y="68" Width="310" Height="16" Transparent="yes" NoPrefix="yes" Text="Install Map Lab for:" />
+        <Control Id="InstallScope" Type="RadioButtonGroup" X="32" Y="87" Width="305" Height="48" Property="WixAppFolder">
+          <RadioButtonGroup Property="WixAppFolder">
+            <RadioButton Value="WixPerUserFolder" X="0" Y="0" Width="290" Height="17" Text="Just &amp;me (no administrator approval required)" />
+            <RadioButton Value="WixPerMachineFolder" X="0" Y="25" Width="290" Height="17" Text="&amp;All users of this computer" />
+          </RadioButtonGroup>
+        </Control>
+        <Control Id="ShortcutLabel" Type="Text" X="25" Y="145" Width="310" Height="16" Transparent="yes" NoPrefix="yes" Text="Shortcuts:" />
+        <Control Id="DesktopShortcutCheckBox" Type="CheckBox" X="32" Y="166" Width="300" Height="18" Property="INSTALLDESKTOPSHORTCUT" CheckBoxValue="1" Text="Create a shortcut on the &amp;Desktop" />
+        <Control Id="StartMenuShortcutCheckBox" Type="CheckBox" X="32" Y="190" Width="300" Height="18" Property="INSTALLSTARTMENUSHORTCUT" CheckBoxValue="1" Text="Add Map Lab to the Start / &amp;Programs menu" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="&amp;Back">
+          <Publish Event="NewDialog" Value="LicenseAgreementDlg" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="&amp;Next">
+          <Publish Property="ALLUSERS" Value="{}" Order="1" Condition="WixAppFolder = &quot;WixPerUserFolder&quot;" />
+          <Publish Property="MSIINSTALLPERUSER" Value="1" Order="2" Condition="WixAppFolder = &quot;WixPerUserFolder&quot;" />
+          <Publish Property="APPLICATIONFOLDER" Value="[LocalAppDataFolder]Programs\Map Lab" Order="3" Condition="WixAppFolder = &quot;WixPerUserFolder&quot;" />
+          <Publish Property="ALLUSERS" Value="1" Order="4" Condition="WixAppFolder = &quot;WixPerMachineFolder&quot;" />
+          <Publish Property="MSIINSTALLPERUSER" Value="{}" Order="5" Condition="WixAppFolder = &quot;WixPerMachineFolder&quot;" />
+          <Publish Property="APPLICATIONFOLDER" Value="[ProgramFiles6432Folder]Map Lab" Order="6" Condition="WixAppFolder = &quot;WixPerMachineFolder&quot;" />
+          <Publish Event="NewDialog" Value="InstallDirDlg" Order="7" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="Cancel">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="InstallOptionsDlg" Order="2" Condition="LicenseAccepted = 1 AND NOT Installed" />
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="InstallOptionsDlg" Order="2" Condition="NOT Installed" />
+    </UI>
+
     <StandardDirectory Id="ProgramFiles6432Folder">
-      <Directory Id="INSTALLFOLDER" Name="Map Lab" />
+      <Directory Id="APPLICATIONFOLDER" Name="Map Lab" />
     </StandardDirectory>
 
     <StandardDirectory Id="ProgramMenuFolder">
       <Directory Id="MapLabProgramMenuFolder" Name="Map Lab">
-        <Component Id="StartMenuShortcutComponent" Guid="*">
+        <Component Id="StartMenuShortcutComponent" Guid="*" Condition="INSTALLSTARTMENUSHORTCUT = 1">
           <Shortcut
             Id="StartMenuShortcut"
             Name="Map Lab"
             Description="Open Map Lab"
-            Target="[INSTALLFOLDER]MapLab.exe"
+            Target="[APPLICATIONFOLDER]MapLab.exe"
             Icon="MapLabIcon.ico"
-            WorkingDirectory="INSTALLFOLDER" />
+            WorkingDirectory="APPLICATIONFOLDER" />
           <RemoveFolder Id="RemoveMapLabProgramMenuFolder" On="uninstall" />
           <RegistryValue Root="HKCU" Key="Software\Map Lab" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
         </Component>
@@ -40,20 +79,20 @@
     </StandardDirectory>
 
     <StandardDirectory Id="DesktopFolder">
-      <Component Id="DesktopShortcutComponent" Guid="*">
+      <Component Id="DesktopShortcutComponent" Guid="*" Condition="INSTALLDESKTOPSHORTCUT = 1">
         <Shortcut
           Id="DesktopShortcut"
           Name="Map Lab"
           Description="Open Map Lab"
-          Target="[INSTALLFOLDER]MapLab.exe"
+          Target="[APPLICATIONFOLDER]MapLab.exe"
           Icon="MapLabIcon.ico"
-          WorkingDirectory="INSTALLFOLDER" />
+          WorkingDirectory="APPLICATIONFOLDER" />
         <RegistryValue Root="HKCU" Key="Software\Map Lab" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>
 
     <Feature Id="MapLabFeature" Title="Map Lab" Level="1">
-      <Files Include="$(var.PublishDir)\**" Directory="INSTALLFOLDER" />
+      <Files Include="$(var.PublishDir)\**" Directory="APPLICATIONFOLDER" />
       <ComponentRef Id="StartMenuShortcutComponent" />
       <ComponentRef Id="DesktopShortcutComponent" />
     </Feature>

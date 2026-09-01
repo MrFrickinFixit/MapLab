@@ -1509,6 +1509,89 @@ public partial class MainWindow : Window
         StatusText.Text = $"Saved {Path.GetFileName(dialog.FileName)} with heat-map formatting";
     }
 
+    private void ExportMapSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog { Filter = "Map Lab settings (*.map)|*.map", DefaultExt = ".map", AddExtension = true, FileName = "map-lab-settings.map" };
+        if (dialog.ShowDialog() != true) return;
+        try
+        {
+            var project = new MapLabSettingsFile
+            {
+                ExportedUtc = DateTimeOffset.UtcNow,
+                Timing = ParseJsonElement(ExportTimingProjectState()),
+                Fueling = ParseJsonElement(fuelingPanel.ExportProjectState()),
+                Sandbox = ParseJsonElement(sandboxPanel.ExportProjectState())
+            };
+            File.WriteAllText(dialog.FileName, JsonSerializer.Serialize(project, new JsonSerializerOptions { WriteIndented = true }));
+            SettingsStatusText.Text = $"Exported {Path.GetFileName(dialog.FileName)}";
+            StatusText.Text = "Complete Map Lab settings exported";
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(this, exception.Message, "Settings export failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void ImportMapSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog { Filter = "Map Lab settings (*.map)|*.map", DefaultExt = ".map", CheckFileExists = true, Multiselect = false };
+        if (dialog.ShowDialog() != true) return;
+        try
+        {
+            if (new FileInfo(dialog.FileName).Length > 25 * 1024 * 1024) throw new InvalidDataException("The selected .map file is too large to be a Map Lab settings file.");
+            var project = JsonSerializer.Deserialize<MapLabSettingsFile>(File.ReadAllText(dialog.FileName)) ?? throw new InvalidDataException("The selected file is empty or invalid.");
+            if (project.Format != MapLabSettingsFile.ExpectedFormat || project.Version != MapLabSettingsFile.CurrentVersion) throw new InvalidDataException("This file is not a supported Map Lab settings file.");
+            if (project.Timing.ValueKind != JsonValueKind.Object || project.Fueling.ValueKind != JsonValueKind.Object || project.Sandbox.ValueKind != JsonValueKind.Object) throw new InvalidDataException("The settings file is missing one or more table sections.");
+            var timingJson = project.Timing.GetRawText(); var fuelingJson = project.Fueling.GetRawText(); var sandboxJson = project.Sandbox.GetRawText();
+            if (!ValidateTimingProjectState(timingJson) || !FuelingPanel.ValidateProjectState(fuelingJson) || !SandboxPanel.ValidateProjectState(sandboxJson)) throw new InvalidDataException("One or more table sections contain invalid dimensions or values.");
+            if (MessageBox.Show(this, "Importing replaces the current Ignition Timing, Fueling, and Map Sandbox settings. Continue?", "Import Map Lab settings", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+
+            var timingBackup = ExportTimingProjectState(); var fuelingBackup = fuelingPanel.ExportProjectState(); var sandboxBackup = sandboxPanel.ExportProjectState();
+            var success = false; string? failure = null;
+            WorkingRunner.Run(this, () =>
+            {
+                try
+                {
+                    ImportTimingProjectState(timingJson); fuelingPanel.ImportProjectState(fuelingJson); sandboxPanel.ImportProjectState(sandboxJson);
+                    undoHistory.Clear(); redoHistory.Clear(); success = true;
+                }
+                catch (Exception exception)
+                {
+                    failure = exception.Message;
+                    try { ImportTimingProjectState(timingBackup); fuelingPanel.ImportProjectState(fuelingBackup); sandboxPanel.ImportProjectState(sandboxBackup); }
+                    catch { failure += " The previous workspace could not be fully restored."; }
+                }
+            }, "Importing Map Lab settings....");
+            if (!success) throw new InvalidDataException(failure ?? "The settings file could not be imported.");
+            SettingsStatusText.Text = $"Imported {Path.GetFileName(dialog.FileName)}"; StatusText.Text = "Complete Map Lab settings imported";
+        }
+        catch (Exception exception)
+        {
+            MessageBox.Show(this, exception.Message, "Settings import failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private static JsonElement ParseJsonElement(string json) { using var document = JsonDocument.Parse(json); return document.RootElement.Clone(); }
+    private string ExportTimingProjectState() { SaveState(); return File.ReadAllText(AutosavePath); }
+    private static bool ValidateTimingProjectState(string json)
+    {
+        try
+        {
+            var state = JsonSerializer.Deserialize<AutosaveState>(json);
+            return state is not null && state.RpmAxis.Length is >= 8 and <= 64 && state.MapAxis.Length is >= 8 and <= 64
+                && state.Timing.Length == state.MapAxis.Length && state.Timing.All(row => row.Length == state.RpmAxis.Length)
+                && state.RpmAxis.All(double.IsFinite) && state.MapAxis.All(double.IsFinite) && state.Timing.SelectMany(row => row).All(double.IsFinite);
+        }
+        catch { return false; }
+    }
+    private void ImportTimingProjectState(string json)
+    {
+        if (!ValidateTimingProjectState(json)) throw new InvalidDataException("The Ignition Timing section is invalid.");
+        Directory.CreateDirectory(Path.GetDirectoryName(AutosavePath)!); File.WriteAllText(AutosavePath, json);
+        if (!LoadState()) throw new InvalidDataException("The Ignition Timing section could not be loaded.");
+        undoHistory.Clear(); redoHistory.Clear(); SaveState();
+    }
+
     private void Undo_Click(object sender, RoutedEventArgs e) => Undo();
     private void Redo_Click(object sender, RoutedEventArgs e) => Redo();
 
@@ -1700,6 +1783,18 @@ public partial class MainWindow : Window
         public int HorizontalRegionSmoothCells { get; set; } = 3;
         public int TimingLeadingDisplayDigits { get; set; } = 3;
         public int TimingTrailingDisplayDecimals { get; set; } = 1;
+    }
+
+    private sealed class MapLabSettingsFile
+    {
+        public const string ExpectedFormat = "MapLab.Settings";
+        public const int CurrentVersion = 1;
+        public string Format { get; set; } = ExpectedFormat;
+        public int Version { get; set; } = CurrentVersion;
+        public DateTimeOffset ExportedUtc { get; set; }
+        public JsonElement Timing { get; set; }
+        public JsonElement Fueling { get; set; }
+        public JsonElement Sandbox { get; set; }
     }
 
     private enum RegionPointPick { None, IdleToCruise, CruiseToWot, Both }
