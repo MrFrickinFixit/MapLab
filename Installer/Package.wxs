@@ -2,25 +2,27 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package
-    Name="Map Lab"
+    Name="Map Lab (Beta)"
     Manufacturer="Map Lab"
     Version="$(var.ProductVersion)"
     UpgradeCode="7C642D73-845B-4DB7-89A4-F37FE4114870"
-    Scope="perMachine">
+    Scope="perUserOrMachine">
 
-    <SummaryInformation Description="Map Lab installer" Manufacturer="Map Lab" />
+    <SummaryInformation Description="Map Lab (Beta) installer" Manufacturer="Map Lab" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of Map Lab is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
     <Icon Id="MapLabIcon.ico" SourceFile="$(var.ProjectRoot)\Assets\MapLab.ico" />
     <Property Id="ARPPRODUCTICON" Value="MapLabIcon.ico" />
 
-    <!-- Standard Windows setup wizard with destination-folder selection and
-         modify/repair/remove support when the installer is run again. -->
-    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <!-- Advanced setup includes license acceptance, per-user/per-machine scope,
+         destination-folder selection, and optional-feature selection. -->
+    <ui:WixUI Id="WixUI_Advanced" />
     <WixVariable Id="WixUILicenseRtf" Value="$(var.ProjectRoot)\Installer\License.rtf" />
+    <Property Id="ApplicationFolderName" Value="Map Lab" />
+    <Property Id="WixAppFolder" Value="WixPerMachineFolder" />
 
     <StandardDirectory Id="ProgramFiles6432Folder">
-      <Directory Id="INSTALLFOLDER" Name="Map Lab" />
+      <Directory Id="APPLICATIONFOLDER" Name="Map Lab" />
     </StandardDirectory>
 
     <StandardDirectory Id="ProgramMenuFolder">
@@ -30,9 +32,9 @@
             Id="StartMenuShortcut"
             Name="Map Lab"
             Description="Open Map Lab"
-            Target="[INSTALLFOLDER]MapLab.exe"
+            Target="[APPLICATIONFOLDER]MapLab-1.0.0-beta.exe"
             Icon="MapLabIcon.ico"
-            WorkingDirectory="INSTALLFOLDER" />
+            WorkingDirectory="APPLICATIONFOLDER" />
           <RemoveFolder Id="RemoveMapLabProgramMenuFolder" On="uninstall" />
           <RegistryValue Root="HKCU" Key="Software\Map Lab" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
         </Component>
@@ -45,17 +47,28 @@
           Id="DesktopShortcut"
           Name="Map Lab"
           Description="Open Map Lab"
-          Target="[INSTALLFOLDER]MapLab.exe"
+          Target="[APPLICATIONFOLDER]MapLab-1.0.0-beta.exe"
           Icon="MapLabIcon.ico"
-          WorkingDirectory="INSTALLFOLDER" />
+          WorkingDirectory="APPLICATIONFOLDER" />
         <RegistryValue Root="HKCU" Key="Software\Map Lab" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>
 
-    <Feature Id="MapLabFeature" Title="Map Lab" Level="1">
-      <Files Include="$(var.PublishDir)\**" Directory="INSTALLFOLDER" />
-      <ComponentRef Id="StartMenuShortcutComponent" />
-      <ComponentRef Id="DesktopShortcutComponent" />
+    <Feature
+      Id="MapLabFeature"
+      Title="Map Lab application"
+      Description="Required application files and legal notices."
+      Level="1"
+      AllowAbsent="no"
+      ConfigurableDirectory="APPLICATIONFOLDER"
+      Display="expand">
+      <Files Include="$(var.PublishDir)\**" Directory="APPLICATIONFOLDER" />
+      <Feature Id="StartMenuShortcutFeature" Title="Start menu shortcut" Description="Add Map Lab to the Windows Start menu." Level="1" AllowAbsent="yes" AllowAdvertise="no">
+        <ComponentRef Id="StartMenuShortcutComponent" />
+      </Feature>
+      <Feature Id="DesktopShortcutFeature" Title="Desktop shortcut" Description="Add a Map Lab shortcut to the desktop." Level="1" AllowAbsent="yes" AllowAdvertise="no">
+        <ComponentRef Id="DesktopShortcutComponent" />
+      </Feature>
     </Feature>
   </Package>
 </Wix>

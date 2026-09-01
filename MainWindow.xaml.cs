@@ -1022,6 +1022,84 @@ public partial class MainWindow : Window
         StatusText.Text = changed == 0 ? "No timing change was applied above the selected start MAP" : $"Boost timing offset applied to {changed} cells  •  maximum {largestChange:+0.0;-0.0;0.0}°";
     }
 
+    private void ConvertTimingToBoosted_Click(object sender, RoutedEventArgs e)
+    {
+        if (ModelessWindowManager.ActivateIfOpen("Timing.BoostConvert")) return;
+        if (mapAxis.Length == 0) return;
+        var confirm = MessageBox.Show(this, "Converting to a boosted table keeps the matrix size the same and redistributes the MAP scale to span the new boosted range. This cannot be reversed back to naturally aspirated with Undo, and the undo/redo history will be cleared.\n\nContinue with the conversion?", "Convert to boosted", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (confirm != MessageBoxResult.Yes) return;
+        var fromPsi = mapUnitIndex == 1;
+        ModelessWindowManager.ShowOrActivate("Timing.BoostConvert", () => new BoostConversionWindow("Convert Timing Table to Boosted", mapAxis[^1], mapAxis[0], fromPsi, dialog => ApplyTimingBoostConversion(dialog)) { Owner = this });
+    }
+
+    private void ApplyTimingBoostConversion(BoostConversionWindow dialog)
+    {
+        if (dialog.Result is not { } result) return;
+        var fromPsi = mapUnitIndex == 1;
+        var currentMaxPsi = fromPsi ? mapAxis[0] : ConvertMapUnit(mapAxis[0], false, true);
+        var currentMinPsi = fromPsi ? mapAxis[^1] : ConvertMapUnit(mapAxis[^1], false, true);
+        var existingRows = mapAxis.Length;
+        var newMinPsi = currentMinPsi;
+        var newMaxPsi = result.MaxBoostPsi;
+
+        undoHistory.Clear(); redoHistory.Clear();
+
+        var newRowCount = existingRows;
+        var newMapAxis = new double[newRowCount];
+        for (var i = 0; i < newRowCount; i++)
+        {
+            var proportion = i / (double)(newRowCount - 1);
+            newMapAxis[i] = Math.Round(newMaxPsi - proportion * (newMaxPsi - newMinPsi), 1);
+        }
+
+        var newTiming = new double[newRowCount, ColumnCount];
+        var wotMap = currentMaxPsi;
+        for (var row = 0; row < newRowCount; row++)
+        {
+            for (var col = 0; col < ColumnCount; col++)
+            {
+                var mapValue = newMapAxis[row];
+                if (mapValue >= wotMap)
+                {
+                    var effectiveBoost = Math.Clamp(mapValue, boostRetardLowMap, boostRetardHighMap) - boostRetardLowMap;
+                    var timingChange = effectiveBoost * boostRetardPerPsi;
+                    newTiming[row, col] = result.Mode == BoostRescaleMode.GenerateBoostedRows ? timingValues[0, col] + timingChange : timingValues[0, col];
+                }
+                else
+                {
+                    var closestIdx = 0;
+                    var closestDist = double.MaxValue;
+                    for (var oldIdx = 0; oldIdx < mapAxis.Length; oldIdx++)
+                    {
+                        var oldMapPsi = fromPsi ? mapAxis[oldIdx] : ConvertMapUnit(mapAxis[oldIdx], false, true);
+                        var dist = Math.Abs(oldMapPsi - mapValue);
+                        if (dist < closestDist) { closestDist = dist; closestIdx = oldIdx; }
+                    }
+                    newTiming[row, col] = timingValues[closestIdx, col];
+                }
+            }
+        }
+
+        mapAxisCells = new TextBox[newRowCount];
+        mapAxis = newMapAxis; timingValues = newTiming; RowCount = newRowCount;
+        mapUnitIndex = 1; boostRetardHighMap = Math.Max(boostRetardHighMap, mapAxis[0]);
+
+        wotMarkerRow = 0;
+        for (var i = 0; i < mapAxis.Length; i++)
+            if (mapAxis[i] >= currentMaxPsi) { wotMarkerRow = i; break; }
+        wotMarkerRow = Math.Clamp(wotMarkerRow, 0, RowCount - 1);
+        wotTransitionMap = mapAxis[wotMarkerRow];
+
+        BuildGrid(42, 12, mapAxis[^1], mapAxis[0]);
+        for (var row = 0; row < RowCount; row++) for (var col = 0; col < ColumnCount; col++) SetCellValue(row, col, newTiming[row, col]);
+
+        SyncTimingMapUnitControls(); RefreshTimingMapUnitPresentation();
+        selectionStart = selectionEnd = null; selectedMapAxis.Clear(); selectedRpmAxis.Clear(); activeAxisIsMap = null;
+        UpdateAxisSelectionVisuals(); ApplyRegionVisualization(); SaveState();
+        StatusText.Text = $"Timing table converted to boosted  •  MAP now {FormatMap(mapAxis[^1])}–{FormatMap(mapAxis[0])} PSI gauge";
+        dialog.Close();
+    }
+
     private void RegionTiming_Click(object sender, RoutedEventArgs e)
     {
         if (regionTimingProfiles.Length != 3) regionTimingProfiles = CreateDefaultRegionProfiles();

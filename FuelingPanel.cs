@@ -99,7 +99,7 @@ public sealed class FuelingPanel : Grid
         var frame = new Border { Background = new SolidColorBrush(Color.FromRgb(8, 13, 20)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 50, 71)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(3), Child = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, CanContentScroll = false, Content = table } };
         Grid.SetRow(frame, 2); Children.Add(frame);
         var tools = new StackPanel { Orientation = Orientation.Horizontal };
-        tools.Children.Add(ControlGroup("FUEL SETUP TOOLS", Button("◒  VE Setup", OpenVeSetup, true)));
+        tools.Children.Add(ControlGroup("FUEL SETUP TOOLS", Button("◒  VE Setup", OpenVeSetup, true), Button("⇧  Convert to Boosted", ConvertToBoosted_Click, false)));
         tools.Children.Add(MatrixAxisGroup());
         tools.Children.Add(ControlGroup("CELL EDITING", Button("⧉  Copy", (_, _) => CopySelection()), Button("▣  Paste", (_, _) => PasteSelection()), Button("△  Delta", DeltaCompare)));
         tools.Children.Add(ControlGroup("SMOOTHING", Button("⌁  Interpolate", InterpolateSelection), Button("⚙  Smooth Selected…", AdvancedSmooth, true), Button("↕  Columns", SmoothColumns), Button("↔  Rows", SmoothRows)));
@@ -326,7 +326,7 @@ public sealed class FuelingPanel : Grid
     {
         VeSelection? selected = Bounds(out var top, out var bottom, out var left, out var right) ? new VeSelection(top, bottom, left, right) : null;
         var boundary = new VeRegionBoundary(idleBoundaryCol, wotBoundaryRow);
-        veSetupWizard = ModelessWindowManager.ShowOrActivate("Fuel.VeSetup", () => new VeSetupWizard(ve, rpm, map, mapUnit, selected, boundary, veSetupSettings, BeginWizardBoundarySetting, RescaleWizardMapAxis, (updated, settings) => WorkingRunner.Run(this, () => ApplyVeSetup(updated, settings))) { Owner = Window.GetWindow(this) });
+        veSetupWizard = ModelessWindowManager.ShowOrActivate("Fuel.VeSetup", () => new VeSetupWizard(ve, rpm, map, mapUnit, selected, boundary, veSetupSettings, BeginWizardBoundarySetting, RescaleWizardMapAxis, SetBoostedMapUnitFromWizard, (updated, settings) => WorkingRunner.Run(this, () => ApplyVeSetup(updated, settings))) { Owner = Window.GetWindow(this) });
         veSetupWizard.UpdateBoundaryMapValues(map, boundary);
     }
 
@@ -334,6 +334,84 @@ public sealed class FuelingPanel : Grid
     {
         var updated = RescaleFuelMapAxis(minimum, maximum); if (updated is null) return null;
         status.Text = $"MAP axis rescaled to {FormatMap(map[^1])}–{FormatMap(map[0])} {mapUnit}  •  boundary moved to nearest breakpoint"; return map.ToArray();
+    }
+
+    private void SetBoostedMapUnitFromWizard(bool boosted) => ChangeFuelMapUnit(boosted ? 1 : 0);
+
+    private void ConvertToBoosted_Click(object? sender, RoutedEventArgs e)
+    {
+        if (map.Length == 0) return;
+        var confirm = MessageBox.Show(Window.GetWindow(this), "Converting to a boosted table keeps the matrix size the same and redistributes the MAP scale to span the new boosted range. This cannot be reversed with Undo, and the undo/redo history will be cleared.\n\nContinue with the conversion?", "Convert to boosted", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+        if (confirm != MessageBoxResult.Yes) return;
+        var fromPsi = mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase);
+        ModelessWindowManager.ShowOrActivate("Fuel.BoostConvert", () => new BoostConversionWindow("Convert Fuel Table to Boosted", map[^1], map[0], fromPsi, dialog => ApplyBoostConversion(dialog)) { Owner = Window.GetWindow(this) });
+    }
+
+    private void ApplyBoostConversion(BoostConversionWindow dialog)
+    {
+        if (dialog.Result is not { } result) return;
+        var fromPsi = mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase);
+        var currentMinPsi = fromPsi ? map[^1] : ConvertMapUnit(map[^1], false, true);
+        var currentMaxPsi = fromPsi ? map[0] : ConvertMapUnit(map[0], false, true);
+        var existingRows = map.Length;
+        var newMinPsi = currentMinPsi;
+        var newMaxPsi = result.MaxBoostPsi;
+
+        undoHistory.Clear(); redoHistory.Clear();
+
+        var newRowCount = existingRows;
+        var newMap = new double[newRowCount];
+        for (var i = 0; i < newRowCount; i++)
+        {
+            var proportion = i / (double)(newRowCount - 1);
+            newMap[i] = Math.Round(newMaxPsi - proportion * (newMaxPsi - newMinPsi), 1);
+        }
+
+        var newVe = new double[newRowCount, rpm.Length];
+        var wotMap = currentMaxPsi;
+        var regionMap = newMinPsi + (wotMap - newMinPsi) * .5;
+        for (var row = 0; row < newRowCount; row++)
+        {
+            for (var col = 0; col < rpm.Length; col++)
+            {
+                var mapValue = newMap[row];
+                if (mapValue >= wotMap)
+                {
+                    newVe[row, col] = result.Mode switch
+                    {
+                        BoostRescaleMode.GenerateBoostedRows => Math.Round(VeSetupWizard.GenerateBoostedVe(mapValue, rpm[col], wotMap, regionMap, veSetupSettings), 1),
+                        BoostRescaleMode.FlatFill => ve[0, col],
+                        _ => ve[0, col]
+                    };
+                }
+                else
+                {
+                    var closestIdx = 0;
+                    var closestDist = double.MaxValue;
+                    for (var oldIdx = 0; oldIdx < map.Length; oldIdx++)
+                    {
+                        var oldMapPsi = fromPsi ? map[oldIdx] : ConvertMapUnit(map[oldIdx], false, true);
+                        var dist = Math.Abs(oldMapPsi - mapValue);
+                        if (dist < closestDist) { closestDist = dist; closestIdx = oldIdx; }
+                    }
+                    newVe[row, col] = ve[closestIdx, col];
+                }
+            }
+        }
+
+        map = newMap; ve = newVe; mapUnit = "PSI gauge";
+        wotBoundaryRow = 0;
+        for (var i = 0; i < map.Length; i++)
+            if (map[i] >= currentMaxPsi) { wotBoundaryRow = i; break; }
+        wotBoundaryRow = Math.Clamp(wotBoundaryRow, 0, map.Length - 1);
+        wotBoundaryMap = map[wotBoundaryRow];
+        idleBoundaryCol = Math.Clamp(idleBoundaryCol, 0, rpm.Length - 1);
+        veSetupSettings.Boosted = true; veSetupSettings.MaximumMap = map[0]; veSetupSettings.MapSensorBar = Math.Clamp(veSetupSettings.MapSensorBar, 1, 3);
+
+        SyncMapUnitControl(); Build(); Save(); RefreshFuelMapAxisEditors();
+        veSetupWizard?.UpdateMapAxisAndUnit(map, mapUnit, new VeRegionBoundary(idleBoundaryCol, wotBoundaryRow));
+        status.Text = $"Fuel table converted to boosted  •  MAP now {FormatMap(map[^1])}–{FormatMap(map[0])} PSI gauge";
+        dialog.Close();
     }
 
     private void ApplyVeSetup(double[,] updated, VeSetupSettings appliedSettings)
