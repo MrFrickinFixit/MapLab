@@ -75,6 +75,7 @@ public sealed class FuelingPanel : Grid
     private readonly Dictionary<TextBox, string> editOriginals = [];
     private readonly Dictionary<TextBox, double> axisEditOriginalValues = [];
     private static string SavePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimingTableCalculator", "fueling-autosave.json");
+    private string? lastSavedJson;
 
     public FuelingPanel(Action<int, int> resizeMatrix, Action<bool, int[]> autoFillAxis, Action<bool, int?, int[]> pasteAxis, Action<int, int> setRegionBoundaries, Func<bool, int, double, double[]?> editAxis)
     {
@@ -82,7 +83,7 @@ public sealed class FuelingPanel : Grid
         matrixXBox = MatrixSizeBox("31"); matrixYBox = MatrixSizeBox("31");
         leadingPrecisionBox = PrecisionBox(1, 4, leadingDisplayDigits); trailingPrecisionBox = PrecisionBox(0, 3, trailingDisplayDecimals);
         leadingPrecisionBox.SelectionChanged += (_, _) => ApplyDisplayPrecision(); trailingPrecisionBox.SelectionChanged += (_, _) => ApplyDisplayPrecision();
-        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition());
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition()); RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         mapUnitBox = CreateMapUnitBox();
         var heading = new Grid { Margin = new Thickness(4, 0, 0, 20) }; heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var title = new StackPanel(); title.Children.Add(new TextBlock { Text = "FUELING LAB", Foreground = new SolidColorBrush(Color.FromRgb(0, 103, 192)), FontSize = 12, FontWeight = FontWeights.Bold });
@@ -99,15 +100,18 @@ public sealed class FuelingPanel : Grid
         var frame = new Border { Background = new SolidColorBrush(Color.FromRgb(8, 13, 20)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 50, 71)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(3), Child = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, CanContentScroll = false, Content = table } };
         Grid.SetRow(frame, 2); Children.Add(frame);
         var tools = new StackPanel { Orientation = Orientation.Horizontal };
-        tools.Children.Add(ControlGroup("FUEL SETUP TOOLS", Button("◒  VE Setup", OpenVeSetup, true), Button("⇧  Convert to Boosted", ConvertToBoosted_Click, false)));
+        tools.Children.Add(ControlGroup("FUEL SETUP TOOLS", Button("◒  VE Setup", OpenVeSetup, true)));
         tools.Children.Add(MatrixAxisGroup());
         tools.Children.Add(ControlGroup("CELL EDITING", Button("⧉  Copy", (_, _) => CopySelection()), Button("▣  Paste", (_, _) => PasteSelection()), Button("△  Delta", DeltaCompare)));
         tools.Children.Add(ControlGroup("SMOOTHING", Button("⌁  Interpolate", InterpolateSelection), Button("⚙  Smooth Selected…", AdvancedSmooth, true), Button("↕  Columns", SmoothColumns), Button("↔  Rows", SmoothRows)));
-        tools.Children.Add(DisplayPrecisionGroup());
-        tools.Children.Add(ControlGroup("VIEW & OUTPUT", Button("▦  3D Map", View3D), Button("⇩  Export CSV", ExportCsv), Button("▤  Export Excel", ExportExcel, true)));
-        tools.Children.Add(ControlGroup("HISTORY", Button("↶  Undo", (_, _) => Undo()), Button("↷  Redo", (_, _) => Redo())));
         var commandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = tools, Margin = new Thickness(0, 0, 0, 10) };
         Grid.SetRow(commandBar, 1); Children.Add(commandBar);
+        var bottomTools = new StackPanel { Orientation = Orientation.Horizontal };
+        bottomTools.Children.Add(DisplayPrecisionGroup());
+        bottomTools.Children.Add(ControlGroup("VIEW & OUTPUT", Button("▦  3D Map", View3D), Button("⇩  Export CSV", ExportCsv), Button("▤  Export Excel", ExportExcel, true)));
+        bottomTools.Children.Add(ControlGroup("HISTORY", Button("↶  Undo", (_, _) => Undo()), Button("↷  Redo", (_, _) => Redo())));
+        var bottomCommandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = bottomTools, Margin = new Thickness(0, 10, 0, 0) };
+        Grid.SetRow(bottomCommandBar, 3); Children.Add(bottomCommandBar);
         PreviewKeyDown += FuelingPanel_PreviewKeyDown;
         table.PreviewMouseLeftButtonUp += (_, _) => { selecting = false; axisSelecting = false; };
     }
@@ -406,7 +410,7 @@ public sealed class FuelingPanel : Grid
         wotBoundaryRow = Math.Clamp(wotBoundaryRow, 0, map.Length - 1);
         wotBoundaryMap = map[wotBoundaryRow];
         idleBoundaryCol = Math.Clamp(idleBoundaryCol, 0, rpm.Length - 1);
-        veSetupSettings.Boosted = true; veSetupSettings.MaximumMap = map[0]; veSetupSettings.MapSensorBar = Math.Clamp(veSetupSettings.MapSensorBar, 1, 3);
+        veSetupSettings.Boosted = true; veSetupSettings.MaximumMap = map[0]; veSetupSettings.MapSensorBar = Math.Clamp(veSetupSettings.MapSensorBar, 1d, 10d);
 
         SyncMapUnitControl(); Build(); Save(); RefreshFuelMapAxisEditors();
         veSetupWizard?.UpdateMapAxisAndUnit(map, mapUnit, new VeRegionBoundary(idleBoundaryCol, wotBoundaryRow));
@@ -784,7 +788,7 @@ public sealed class FuelingPanel : Grid
     private void ExportCsv(object? sender, RoutedEventArgs e)
     {
         if (rpm.Length == 0 || map.Length == 0) return;
-        var dialog = new SaveFileDialog { Filter = "CSV file (*.csv)|*.csv", FileName = "fuel-table.csv" }; if (dialog.ShowDialog() != true) return;
+        var dialog = new SaveFileDialog { Filter = "CSV file (*.csv)|*.csv", FileName = "fuel-table.csv" }; if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
         var csv = new StringBuilder();
         for (var row = 0; row < map.Length; row++)
         {
@@ -799,7 +803,7 @@ public sealed class FuelingPanel : Grid
     private void ExportExcel(object? sender, RoutedEventArgs e)
     {
         if (rpm.Length == 0 || map.Length == 0) return;
-        var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "fuel-table.xlsx" }; if (dialog.ShowDialog() != true) return;
+        var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "fuel-table.xlsx" }; if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
         ExcelTimingExporter.Export(dialog.FileName, rpm, map, ve, mapUnit, Hsl(0, .96, .52), Hsl(150, .96, .52), Hsl(300, .96, .52), false, "Fuel Map", "Fueling Map", valueNumberFormat: VeExcelNumberFormat());
         status.Text = $"Saved {Path.GetFileName(dialog.FileName)} with heat-map formatting";
     }
@@ -855,12 +859,22 @@ public sealed class FuelingPanel : Grid
         });
     }
 
-    private void RefreshAll() { if (cells.Length == 0) return; loading = true; var displayed = DisplayValues(); var min = displayed.Cast<double>().Min(); var max = displayed.Cast<double>().Max(); for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++) { var value = displayed[row, col]; cells[row, col].Text = showFuelFlow ? value.ToString("0.0", CultureInfo.InvariantCulture) : FormatVeDisplayValue(value); cells[row, col].IsReadOnly = showFuelFlow; cells[row, col].Background = new SolidColorBrush(Heat((value - min) / Math.Max(.1, max - min))); } loading = false; }
+    private void RefreshAll()
+    {
+        if (cells.Length == 0) return;
+        loading = true; var displayed = showFuelFlow ? DisplayValues() : ve; var (min, max) = ValueRange(displayed); var span = Math.Max(.1, max - min);
+        for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++)
+        {
+            var value = displayed[row, col]; cells[row, col].Text = showFuelFlow ? value.ToString("0.0", CultureInfo.InvariantCulture) : FormatVeDisplayValue(value);
+            cells[row, col].IsReadOnly = showFuelFlow; cells[row, col].Background = UiBrushCache.SpectrumAt((value - min) / span);
+        }
+        loading = false;
+    }
     private bool Bounds(out int top, out int bottom, out int left, out int right) { top = bottom = left = right = 0; if (start is null || end is null) return false; top = Math.Min(start.Value.Row, end.Value.Row); bottom = Math.Max(start.Value.Row, end.Value.Row); left = Math.Min(start.Value.Col, end.Value.Col); right = Math.Max(start.Value.Col, end.Value.Col); return true; }
     private bool IsFuelCellSelected(int row, int col) => pinnedFuelSelection.Contains((row, col)) || Bounds(out var top, out var bottom, out var left, out var right) && row >= top && row <= bottom && col >= left && col <= right;
     private void PinActiveFuelSelection() { if (!Bounds(out var top, out var bottom, out var left, out var right)) return; for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) pinnedFuelSelection.Add((row, col)); }
     private HashSet<(int Row, int Col)> SelectedFuelCells() { var selected = new HashSet<(int Row, int Col)>(pinnedFuelSelection); if (Bounds(out var top, out var bottom, out var left, out var right)) for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) selected.Add((row, col)); return selected; }
-    private void UpdateSelection() { var selectedCells = SelectedFuelCells(); if (selectedCells.Count == 0) return; for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++) { var selected = selectedCells.Contains((row, col)); var boundary = IsBoundary(row, col); cells[row, col].BorderBrush = selected ? Brushes.White : boundary ? Brushes.Black : new SolidColorBrush(Color.FromRgb(29, 42, 57)); cells[row, col].BorderThickness = new Thickness(selected ? 1.5 : boundary ? 3 : .5); } status.Text = $"Selected {selectedCells.Count} fuel cells"; }
+    private void UpdateSelection() { var selectedCells = SelectedFuelCells(); if (selectedCells.Count == 0) return; for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++) { var selected = selectedCells.Contains((row, col)); var boundary = IsBoundary(row, col); cells[row, col].BorderBrush = selected ? Brushes.White : boundary ? Brushes.Black : UiBrushCache.GridLine; cells[row, col].BorderThickness = new Thickness(selected ? 1.5 : boundary ? 3 : .5); } status.Text = $"Selected {selectedCells.Count} fuel cells"; }
     private void ApplyBoundaries()
     {
         idleBoundaryCol = Closest(rpm, idleBoundaryRpm); wotBoundaryRow = Closest(map, wotBoundaryMap);
@@ -868,10 +882,10 @@ public sealed class FuelingPanel : Grid
     }
     private void RenderBoundaries()
     {
-        var displayed = DisplayValues(); var suffix = showFuelFlow ? " lb/hr" : "% VE";
+        var displayed = showFuelFlow ? DisplayValues() : ve; var suffix = showFuelFlow ? " lb/hr" : "% VE";
         for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++)
         {
-            var boundary = IsBoundary(row, col); cells[row, col].BorderBrush = boundary ? Brushes.Black : new SolidColorBrush(Color.FromRgb(29, 42, 57)); cells[row, col].BorderThickness = new Thickness(boundary ? 3 : .5);
+            var boundary = IsBoundary(row, col); cells[row, col].BorderBrush = boundary ? Brushes.Black : UiBrushCache.GridLine; cells[row, col].BorderThickness = new Thickness(boundary ? 3 : .5);
             var region = col <= idleBoundaryCol
                 ? row <= wotBoundaryRow ? "Idle High MAP" : "Idle Low MAP"
                 : row <= wotBoundaryRow ? "Part Throttle to WOT" : "Cruise to Part Throttle";
@@ -882,6 +896,12 @@ public sealed class FuelingPanel : Grid
     }
     private bool IsBoundary(int row, int col) => col == idleBoundaryCol || row == wotBoundaryRow;
     private static int Closest(double[] axis, double value) { var best = 0; var distance = double.MaxValue; for (var i = 0; i < axis.Length; i++) { var current = Math.Abs(axis[i] - value); if (current < distance) { best = i; distance = current; } } return best; }
+    private static (double Min, double Max) ValueRange(double[,] source)
+    {
+        var min = double.PositiveInfinity; var max = double.NegativeInfinity;
+        for (var row = 0; row < source.GetLength(0); row++) for (var col = 0; col < source.GetLength(1); col++) { var value = source[row, col]; if (value < min) min = value; if (value > max) max = value; }
+        return (min, max);
+    }
     private void AddAxisEditor(double value, int row, int column, bool isMap, int index)
     {
         var editor = new TextBox
@@ -1079,7 +1099,8 @@ public sealed class FuelingPanel : Grid
                 LeadingDisplayDigits = leadingDisplayDigits, TrailingDisplayDecimals = trailingDisplayDecimals
             };
             Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!);
-            File.WriteAllText(SavePath, JsonSerializer.Serialize(state));
+            var json = JsonSerializer.Serialize(state); if (string.Equals(json, lastSavedJson, StringComparison.Ordinal)) return;
+            File.WriteAllText(SavePath, json); lastSavedJson = json;
         }
         catch { }
     }
@@ -1089,7 +1110,8 @@ public sealed class FuelingPanel : Grid
         try
         {
             if (!File.Exists(SavePath)) return false;
-            var state = JsonSerializer.Deserialize<FuelState>(File.ReadAllText(SavePath));
+            var savedJson = File.ReadAllText(SavePath);
+            var state = JsonSerializer.Deserialize<FuelState>(savedJson);
             if (state?.Values is null || state.Values.Length == 0 || state.Values.Any(row => row.Length != state.Values[0].Length)) return false;
             if (state.MapAxis is { Length: > 1 })
             {
@@ -1109,6 +1131,7 @@ public sealed class FuelingPanel : Grid
             syncingDisplayPrecision = true; leadingPrecisionBox.SelectedIndex = leadingDisplayDigits - 1; trailingPrecisionBox.SelectedIndex = trailingDisplayDecimals; syncingDisplayPrecision = false;
             syncingConversion = true; conversionViewBox.IsChecked = showFuelFlow; syncingConversion = false;
             fuelTableTitle.Text = showFuelFlow ? "Fuel Table — Estimated Fuel Flow (lb/hr)" : "Fuel Table — VE (%)";
+            lastSavedJson = savedJson;
             return true;
         }
         catch { syncingConversion = false; return false; }

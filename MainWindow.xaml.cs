@@ -36,10 +36,12 @@ public partial class MainWindow : Window
     private bool? activeAxisIsMap;
     private int? lastAxisIndex;
     private readonly DispatcherTimer autosaveTimer = new() { Interval = TimeSpan.FromSeconds(15) };
+    private string? lastAutosaveJson;
     private bool loadingState;
     private bool useCustomHeatColors;
     private Color customLowColor = Color.FromRgb(255, 20, 20);
     private Color customHighColor = Color.FromRgb(255, 0, 235);
+    private Brush[] timingHeatPalette = UiBrushCache.Spectrum;
     private double boostRetardPerPsi = 1, boostRetardLowMap, boostRetardHighMap = 15;
     private double refinementStrength = .5;
     private int refinementPasses = 3;
@@ -952,10 +954,10 @@ public partial class MainWindow : Window
 
     private Brush RegionBrush(int row, int col) => RegionNameAtMarkers(row, col) switch
     {
-        "Idle" => new SolidColorBrush(Color.FromRgb(67, 145, 208)),
-        "IdleHigh" => new SolidColorBrush(Color.FromRgb(73, 119, 188)),
-        "WOT" => new SolidColorBrush(Color.FromRgb(236, 138, 69)),
-        _ => new SolidColorBrush(Color.FromRgb(54, 199, 173))
+        "Idle" => UiBrushCache.Idle,
+        "IdleHigh" => UiBrushCache.IdleHigh,
+        "WOT" => UiBrushCache.Wot,
+        _ => UiBrushCache.Cruise
     };
 
     private bool IsRegionMarker(int row, int col) => col == idleMarkerCol || row == wotMarkerRow;
@@ -984,6 +986,7 @@ public partial class MainWindow : Window
     private void ApplyColors(ColorCustomizerWindow dialog)
     {
         useCustomHeatColors = dialog.UseCustomColors; customLowColor = dialog.LowColor; customHighColor = dialog.HighColor;
+        RefreshTimingHeatPalette();
         for (var row = 0; row < RowCount; row++) for (var col = 0; col < ColumnCount; col++) RefreshCellColor(valueCells[row, col]);
         StatusText.Text = useCustomHeatColors ? "Custom heat-map colors applied" : "Default spectrum heat map applied";
         SaveState();
@@ -1180,14 +1183,9 @@ public partial class MainWindow : Window
     private Brush TimingBrush(double value)
     {
         var t = Math.Clamp((value - 12) / 34, 0, 1);
-        if (useCustomHeatColors)
-        {
-            byte Blend(byte low, byte high) => (byte)Math.Round(low + (high - low) * t);
-            return new SolidColorBrush(Color.FromRgb(Blend(customLowColor.R, customHighColor.R), Blend(customLowColor.G, customHighColor.G), Blend(customLowColor.B, customHighColor.B)));
-        }
-        // Default full-spectrum ignition heat map: red → yellow → green → cyan → blue → magenta.
-        return new SolidColorBrush(HslToColor(t * 300, .96, .52));
+        return timingHeatPalette[(int)Math.Round(t * (timingHeatPalette.Length - 1))];
     }
+    private void RefreshTimingHeatPalette() => timingHeatPalette = useCustomHeatColors ? UiBrushCache.CreateLinearPalette(customLowColor, customHighColor) : UiBrushCache.Spectrum;
     private static Color HslToColor(double h, double s, double l)
     {
         var c = (1 - Math.Abs(2 * l - 1)) * s; var x = c * (1 - Math.Abs(h / 60 % 2 - 1)); var m = l - c / 2;
@@ -1562,7 +1560,7 @@ public partial class MainWindow : Window
     private void Clear_Click(object sender, RoutedEventArgs e) { PushUndo(); for (var row = 0; row < RowCount; row++) for (var col = 0; col < ColumnCount; col++) SetCellValue(row, col, 0); StatusText.Text = "Timing values cleared"; }
     private void Export_Click(object sender, RoutedEventArgs e)
     {
-        if (rpmAxis.Length == 0) return; var dialog = new SaveFileDialog { Filter = "CSV file (*.csv)|*.csv", FileName = "timing-table.csv" }; if (dialog.ShowDialog() != true) return;
+        if (rpmAxis.Length == 0) return; var dialog = new SaveFileDialog { Filter = "CSV file (*.csv)|*.csv", FileName = "timing-table.csv" }; if (dialog.ShowDialog(this) != true) return;
         var csv = new StringBuilder();
         for (var row = 0; row < RowCount; row++) { csv.Append(FormatExactAxisValue(mapAxis[row])); for (var col = 0; col < ColumnCount; col++) csv.Append(',').Append(FormatEditableTiming(timingValues[row, col])); csv.AppendLine(); }
         csv.Append("Engine RPM"); foreach (var rpm in rpmAxis) csv.Append(',').Append(FormatExactAxisValue(rpm)); csv.AppendLine();
@@ -1573,7 +1571,7 @@ public partial class MainWindow : Window
     {
         if (rpmAxis.Length == 0) return;
         var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "timing-table.xlsx" };
-        if (dialog.ShowDialog() != true) return;
+        if (dialog.ShowDialog(this) != true) return;
 
         var timing = ReadTimingValues();
 
@@ -1685,7 +1683,9 @@ public partial class MainWindow : Window
                 TimingTrailingDisplayDecimals = timingTrailingDisplayDecimals
             };
             Directory.CreateDirectory(Path.GetDirectoryName(AutosavePath)!);
-            File.WriteAllText(AutosavePath, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
+            var json = JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true });
+            if (string.Equals(json, lastAutosaveJson, StringComparison.Ordinal)) return;
+            File.WriteAllText(AutosavePath, json); lastAutosaveJson = json;
         }
         catch (Exception) { /* Autosave must never interrupt tuning work or application shutdown. */ }
     }
@@ -1695,7 +1695,8 @@ public partial class MainWindow : Window
         if (!File.Exists(AutosavePath)) return false;
         try
         {
-            var state = JsonSerializer.Deserialize<AutosaveState>(File.ReadAllText(AutosavePath));
+            var savedJson = File.ReadAllText(AutosavePath);
+            var state = JsonSerializer.Deserialize<AutosaveState>(savedJson);
             if (state?.RpmAxis is null || state.MapAxis is null || state.Timing is null || state.RpmAxis.Length is < 8 or > 64 || state.MapAxis.Length is < 8 or > 64 || state.Timing.Length != state.MapAxis.Length || state.Timing.Any(row => row?.Length != state.RpmAxis.Length)) return false;
             loadingState = true;
             ColumnCount = state.RpmAxis.Length; RowCount = state.MapAxis.Length;
@@ -1708,6 +1709,7 @@ public partial class MainWindow : Window
             useCustomHeatColors = state.UseCustomHeatColors;
             if (ColorConverter.ConvertFromString(state.LowHeatColor) is Color lowColor) customLowColor = lowColor;
             if (ColorConverter.ConvertFromString(state.HighHeatColor) is Color highColor) customHighColor = highColor;
+            RefreshTimingHeatPalette();
             boostRetardPerPsi = state.BoostRetardPerPsi; boostRetardLowMap = state.BoostRetardLowMap; boostRetardHighMap = state.BoostRetardHighMap;
             refinementStrength = state.RefinementStrength; refinementPasses = state.RefinementPasses; advancedSmoothingOptions = state.AdvancedOptions ?? advancedSmoothingOptions;
             directionalOuterToInner = state.DirectionalOuterToInner; directionalStrength = state.DirectionalStrength; directionalPasses = state.DirectionalPasses;
@@ -1736,6 +1738,7 @@ public partial class MainWindow : Window
             ReadAndApplyRegions(false);
             selectionStart = selectionEnd = null; selectedRpmAxis.Clear(); selectedMapAxis.Clear(); activeAxisIsMap = null;
             StatusText.Text = "Autosaved table restored";
+            lastAutosaveJson = savedJson;
             return true;
         }
         catch (Exception) { return false; }

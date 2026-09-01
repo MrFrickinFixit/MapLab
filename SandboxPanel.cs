@@ -38,6 +38,7 @@ public sealed class SandboxPanel : Grid
     private int leadingDisplayDigits = 3, trailingDisplayDecimals = 1;
     private bool syncingDisplayPrecision;
     private static string SavePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimingTableCalculator", "sandbox-autosave.json");
+    private string? lastSavedJson;
     private bool IsPsiUnit => mapUnit.Equals("PSI gauge", StringComparison.OrdinalIgnoreCase);
     private bool IsKpaUnit => mapUnit.Equals("kPa absolute", StringComparison.OrdinalIgnoreCase);
     private double MapIncrement => IsPsiUnit ? .1 : IsKpaUnit ? 1 : .001;
@@ -55,6 +56,7 @@ public sealed class SandboxPanel : Grid
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition());
+        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         unitBox = new ComboBox { Width = 112, Height = 32, Background = Brushes.White, Foreground = Brushes.Black, Padding = new Thickness(6, 3, 6, 3), SelectedIndex = 0 };
         RefreshUnitItems();
@@ -87,11 +89,15 @@ public sealed class SandboxPanel : Grid
         tools.Children.Add(Group("X AXIS UNITS", xUnits));
         tools.Children.Add(Group("CELL EDITING", Button("⧉  Copy", (_, _) => Copy()), Button("▣  Paste", (_, _) => Paste()), Button("×  Clear", Clear)));
         tools.Children.Add(Group("SMOOTHING", Button("⌁  Interpolate", Interpolate), Button("⚙  Smooth Selected…", AdvancedSmooth, true), Button("↕  Columns", SmoothColumns), Button("↔  Rows", SmoothRows)));
-        tools.Children.Add(Group("NUMBER DISPLAY", Label("LEADING DIGITS"), leadingPrecisionBox, Label("TRAILING DECIMALS"), trailingPrecisionBox));
-        tools.Children.Add(Group("VIEW & OUTPUT", Button("▦  3D Map", View3D), Button("⇩  Export CSV", ExportCsv), Button("▤  Export Excel", ExportExcel, true)));
-        tools.Children.Add(Group("HISTORY", Button("↶  Undo", (_, _) => Undo()), Button("↷  Redo", (_, _) => Redo())));
         var commandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = tools, Margin = new Thickness(0, 0, 0, 10) };
         Grid.SetRow(commandBar, 1); Children.Add(commandBar);
+
+        var bottomTools = new StackPanel { Orientation = Orientation.Horizontal };
+        bottomTools.Children.Add(Group("NUMBER DISPLAY", Label("LEADING DIGITS"), leadingPrecisionBox, Label("TRAILING DECIMALS"), trailingPrecisionBox));
+        bottomTools.Children.Add(Group("VIEW & OUTPUT", Button("▦  3D Map", View3D), Button("⇩  Export CSV", ExportCsv), Button("▤  Export Excel", ExportExcel, true)));
+        bottomTools.Children.Add(Group("HISTORY", Button("↶  Undo", (_, _) => Undo()), Button("↷  Redo", (_, _) => Redo())));
+        var bottomCommandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = bottomTools, Margin = new Thickness(0, 10, 0, 0) };
+        Grid.SetRow(bottomCommandBar, 3); Children.Add(bottomCommandBar);
 
         var frame = new Border { Background = new SolidColorBrush(Color.FromRgb(8, 13, 20)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 50, 71)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(3), Child = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, CanContentScroll = false, Content = table } };
         Grid.SetRow(frame, 2); Children.Add(frame);
@@ -294,8 +300,8 @@ public sealed class SandboxPanel : Grid
         ClearCellSelection(); Changed($"Pasted {parsed[0].Length} × {parsed.Length} sandbox cells");
     }
 
-    private void ExportCsv(object? sender, RoutedEventArgs e) { var dialog = new SaveFileDialog { Filter = "CSV file (*.csv)|*.csv", FileName = "map-sandbox.csv" }; if (dialog.ShowDialog() != true) return; var csv = new StringBuilder(); for (var r = 0; r < map.Length; r++) { csv.Append(FormatExactAxisValue(map[r])); for (var c = 0; c < rpm.Length; c++) csv.Append(',').Append(values[r, c].ToString("0.###", CultureInfo.InvariantCulture)); csv.AppendLine(); } csv.Append(XAxisTitle); foreach (var value in rpm) csv.Append(',').Append(FormatExactAxisValue(value)); File.WriteAllText(dialog.FileName, csv.ToString()); status.Text = $"Saved {Path.GetFileName(dialog.FileName)}"; }
-    private void ExportExcel(object? sender, RoutedEventArgs e) { var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "map-sandbox.xlsx" }; if (dialog.ShowDialog() != true) return; ExcelTimingExporter.Export(dialog.FileName, rpm, map, values, mapUnit, Colors.Red, Colors.Lime, Colors.Magenta, false, "Map Sandbox", "Custom Map", XAxisTitle, MagnitudeNumberFormatter.ExcelFormat(leadingDisplayDigits, trailingDisplayDecimals)); status.Text = $"Saved {Path.GetFileName(dialog.FileName)}"; }
+    private void ExportCsv(object? sender, RoutedEventArgs e) { var dialog = new SaveFileDialog { Filter = "CSV file (*.csv)|*.csv", FileName = "map-sandbox.csv" }; if (dialog.ShowDialog(Window.GetWindow(this)) != true) return; var csv = new StringBuilder(); for (var r = 0; r < map.Length; r++) { csv.Append(FormatExactAxisValue(map[r])); for (var c = 0; c < rpm.Length; c++) csv.Append(',').Append(values[r, c].ToString("0.###", CultureInfo.InvariantCulture)); csv.AppendLine(); } csv.Append(XAxisTitle); foreach (var value in rpm) csv.Append(',').Append(FormatExactAxisValue(value)); File.WriteAllText(dialog.FileName, csv.ToString()); status.Text = $"Saved {Path.GetFileName(dialog.FileName)}"; }
+    private void ExportExcel(object? sender, RoutedEventArgs e) { var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "map-sandbox.xlsx" }; if (dialog.ShowDialog(Window.GetWindow(this)) != true) return; ExcelTimingExporter.Export(dialog.FileName, rpm, map, values, mapUnit, Colors.Red, Colors.Lime, Colors.Magenta, false, "Map Sandbox", "Custom Map", XAxisTitle, MagnitudeNumberFormatter.ExcelFormat(leadingDisplayDigits, trailingDisplayDecimals)); status.Text = $"Saved {Path.GetFileName(dialog.FileName)}"; }
 
     private void RefreshUnitItems()
     {
@@ -377,7 +383,15 @@ public sealed class SandboxPanel : Grid
         leadingDisplayDigits = Math.Clamp(leadingDigits, 1, 4); trailingDisplayDecimals = Math.Clamp(trailingDecimals, 0, 3);
         syncingDisplayPrecision = true; leadingPrecisionBox.SelectedIndex = leadingDisplayDigits - 1; trailingPrecisionBox.SelectedIndex = trailingDisplayDecimals; syncingDisplayPrecision = false;
     }
-    private void Refresh() { if (loading || cells.Length == 0) return; loading = true; var min = values.Cast<double>().Min(); var max = values.Cast<double>().Max(); for (var r = 0; r < map.Length; r++) for (var c = 0; c < rpm.Length; c++) { cells[r, c].Text = FormatDisplayValue(values[r, c]); cells[r, c].Background = new SolidColorBrush(Heat((values[r, c] - min) / Math.Max(.001, max - min))); } loading = false; }
+    private void Refresh()
+    {
+        if (loading || cells.Length == 0) return;
+        loading = true; var min = double.PositiveInfinity; var max = double.NegativeInfinity;
+        for (var r = 0; r < map.Length; r++) for (var c = 0; c < rpm.Length; c++) { var value = values[r, c]; if (value < min) min = value; if (value > max) max = value; }
+        var span = Math.Max(.001, max - min);
+        for (var r = 0; r < map.Length; r++) for (var c = 0; c < rpm.Length; c++) { cells[r, c].Text = FormatDisplayValue(values[r, c]); cells[r, c].Background = UiBrushCache.SpectrumAt((values[r, c] - min) / span); }
+        loading = false;
+    }
     private HashSet<(int Row, int Col)> Selected() { var result = pinned.ToHashSet(); if (Bounds(out var t, out var b, out var l, out var r)) for (var row = t; row <= b; row++) for (var c = l; c <= r; c++) result.Add((row, c)); return result; }
     private bool Bounds(out int top, out int bottom, out int left, out int right) { top = bottom = left = right = 0; if (start is null || end is null) return false; top = Math.Min(start.Value.Row, end.Value.Row); bottom = Math.Max(start.Value.Row, end.Value.Row); left = Math.Min(start.Value.Col, end.Value.Col); right = Math.Max(start.Value.Col, end.Value.Col); return true; }
     private bool IsSelected(int row, int col) => Selected().Contains((row, col));
@@ -391,7 +405,7 @@ public sealed class SandboxPanel : Grid
         for (var r = 0; r < cells.GetLength(0); r++) for (var c = 0; c < cells.GetLength(1); c++)
         {
             var isSelected = selected.Contains((r, c));
-            cells[r, c].BorderBrush = isSelected ? Brushes.White : new SolidColorBrush(Color.FromRgb(29, 42, 57));
+            cells[r, c].BorderBrush = isSelected ? Brushes.White : UiBrushCache.GridLine;
             cells[r, c].BorderThickness = new Thickness(isSelected ? 2 : .5);
         }
     }
@@ -401,8 +415,8 @@ public sealed class SandboxPanel : Grid
     private void RefreshAxisEditors() { for (var i = 0; i < map.Length; i++) if (mapEditors[i] is not null) mapEditors[i].Text = FormatExactAxisValue(map[i]); for (var i = 0; i < rpm.Length; i++) if (rpmEditors[i] is not null) rpmEditors[i].Text = FormatExactAxisValue(rpm[i]); }
 
     private void SandboxKeyDown(object sender, KeyEventArgs e) { if (Keyboard.Modifiers != ModifierKeys.Control) return; if (e.Key == Key.A) { pinned.Clear(); start = (0, 0); end = (map.Length - 1, rpm.Length - 1); UpdateSelection(); e.Handled = true; } else if (e.Key == Key.C) { Copy(); e.Handled = true; } else if (e.Key == Key.V) { Paste(); e.Handled = true; } else if (e.Key == Key.Z) { Undo(); e.Handled = true; } else if (e.Key == Key.Y) { Redo(); e.Handled = true; } }
-    private void Save() { if (loading || values.Length == 0) return; try { Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!); File.WriteAllText(SavePath, JsonSerializer.Serialize(Snapshot())); } catch { } }
-    private bool Load() { try { if (!File.Exists(SavePath)) return false; var state = JsonSerializer.Deserialize<SandboxSnapshot>(File.ReadAllText(SavePath)); if (state is null || state.Rpm.Length is < 8 or > 64 || state.Map.Length is < 8 or > 64 || state.Values.Length != state.Map.Length || state.Values.Any(row => row.Length != state.Rpm.Length)) return false; rpm = state.Rpm; map = state.Map; mapUnit = state.MapUnit; xUnit = state.XUnit ?? "RPM"; values = FromJagged(state.Values); customUnits.Clear(); customUnits.AddRange(state.CustomUnits ?? []); customXUnits.Clear(); customXUnits.AddRange(state.CustomXUnits ?? []); ApplyDisplayPrecision(state.LeadingDisplayDigits, state.TrailingDisplayDecimals); RefreshUnitItems(); RefreshXUnitItems(); xSize.Text = rpm.Length.ToString(); ySize.Text = map.Length.ToString(); return true; } catch { return false; } }
+    private void Save() { if (loading || values.Length == 0) return; try { var json = JsonSerializer.Serialize(Snapshot()); if (string.Equals(json, lastSavedJson, StringComparison.Ordinal)) return; Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!); File.WriteAllText(SavePath, json); lastSavedJson = json; } catch { } }
+    private bool Load() { try { if (!File.Exists(SavePath)) return false; var savedJson = File.ReadAllText(SavePath); var state = JsonSerializer.Deserialize<SandboxSnapshot>(savedJson); if (state is null || state.Rpm.Length is < 8 or > 64 || state.Map.Length is < 8 or > 64 || state.Values.Length != state.Map.Length || state.Values.Any(row => row.Length != state.Rpm.Length)) return false; rpm = state.Rpm; map = state.Map; mapUnit = state.MapUnit; xUnit = state.XUnit ?? "RPM"; values = FromJagged(state.Values); customUnits.Clear(); customUnits.AddRange(state.CustomUnits ?? []); customXUnits.Clear(); customXUnits.AddRange(state.CustomXUnits ?? []); ApplyDisplayPrecision(state.LeadingDisplayDigits, state.TrailingDisplayDecimals); RefreshUnitItems(); RefreshXUnitItems(); xSize.Text = rpm.Length.ToString(); ySize.Text = map.Length.ToString(); lastSavedJson = savedJson; return true; } catch { return false; } }
 
     private static double[]? BuildAxis(double minimum, double maximum, int count, bool descending, double increment) { minimum = Math.Round(minimum / increment) * increment; maximum = Math.Round(maximum / increment) * increment; if (count < 2 || maximum - minimum < increment * (count - 1)) return null; var result = new double[count]; for (var i = 0; i < count; i++) { var ideal = Math.Round((minimum + (maximum - minimum) * i / (count - 1d)) / increment) * increment; var low = i == 0 ? minimum : result[i - 1] + increment; var high = maximum - increment * (count - 1 - i); result[i] = Math.Round(Math.Clamp(ideal, low, high) / increment) * increment; } if (descending) Array.Reverse(result); return result; }
     private static bool Ordered(double[] axis, bool descending) { for (var i = 1; i < axis.Length; i++) if (descending ? axis[i] >= axis[i - 1] : axis[i] <= axis[i - 1]) return false; return true; }
