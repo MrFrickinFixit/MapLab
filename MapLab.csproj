@@ -9,13 +9,18 @@
     <AssemblyName>MapLab</AssemblyName>
     <RootNamespace>TimingTableCalculator</RootNamespace>
     <Title>Map Lab</Title>
-    <Product>Map Lab</Product>
-    <Version>1.0.0</Version>
-    <FileVersion>1.0.0.0</FileVersion>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <Authors>Map Lab</Authors>
+    <Product>Map Lab 1.0.0-beta</Product>
+    <Version>1.0.0-beta</Version>
+    <FileVersion>1.0.0-beta</FileVersion>
+    <AssemblyVersion>1.0.0</AssemblyVersion>
+    <Authors>Brian Diffenbaugh</Authors>
     <Description>Engine ignition timing and fueling map editor.</Description>
     <ApplicationIcon>Assets\MapLab.ico</ApplicationIcon>
+    <StartupObject>TimingTableCalculator.App</StartupObject>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\MapLabIcon.png" />
+  </ItemGroup>
 
 </Project>

@@ -15,6 +15,7 @@ public sealed class FuelingPanel : Grid
     private readonly Grid table = new() { Background = new SolidColorBrush(Color.FromRgb(8, 13, 20)) };
     private readonly TextBlock status = new() { Foreground = new SolidColorBrush(Color.FromRgb(118, 135, 156)), FontSize = 11 };
     private readonly TextBox matrixXBox, matrixYBox;
+    private readonly ComboBox leadingPrecisionBox, trailingPrecisionBox;
     private readonly Action<int, int> resizeMatrix;
     private readonly Action<bool, int[]> autoFillAxis;
     private readonly Action<bool, int?, int[]> pasteAxis;
@@ -24,7 +25,7 @@ public sealed class FuelingPanel : Grid
     private CheckBox conversionViewBox = null!;
     private TextBlock fuelTableTitle = null!;
     private Button boundaryButton = null!;
-    private bool settingBoundaries, boundaryPickFromWizard, syncingMapUnit, syncingConversion, showFuelFlow;
+    private bool settingBoundaries, boundaryPickFromWizard, syncingMapUnit, syncingConversion, syncingDisplayPrecision, showFuelFlow;
     private VeSetupWizard? veSetupWizard;
     private readonly HashSet<int> selectedMapAxis = [], selectedRpmAxis = [];
     private TextBox[] mapAxisCells = [], rpmAxisCells = [];
@@ -36,6 +37,25 @@ public sealed class FuelingPanel : Grid
     private string mapUnit = "kPa absolute";
     private string MapFormat => mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? "0.0" : "0";
     private string FormatMap(double value) => value.ToString(MapFormat, CultureInfo.InvariantCulture);
+    private static string FormatExactAxisValue(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
+    private static string FormatEditableVe(double value) => Math.Round(value, 3).ToString("0.###", CultureInfo.InvariantCulture);
+    private static double RoundEditableVe(double value) => Math.Round(value, 3, MidpointRounding.AwayFromZero);
+    private int leadingDisplayDigits = 3, trailingDisplayDecimals = 1;
+    private string FormatVeDisplayValue(double value)
+    {
+        var magnitude = Math.Abs(value);
+        var leadingDigits = magnitude < 1 ? 1 : (int)Math.Floor(Math.Log10(magnitude)) + 1;
+        var format = trailingDisplayDecimals > 0 && leadingDigits < leadingDisplayDigits
+            ? "0." + new string('0', trailingDisplayDecimals)
+            : "0";
+        return value.ToString(format, CultureInfo.InvariantCulture);
+    }
+    private string VeExcelNumberFormat()
+    {
+        if (trailingDisplayDecimals == 0 || leadingDisplayDigits <= 1) return "0";
+        var threshold = Math.Pow(10, leadingDisplayDigits - 1).ToString("0", CultureInfo.InvariantCulture);
+        return $"[>={threshold}]0;0.{new string('0', trailingDisplayDecimals)}";
+    }
     private double idleBoundaryRpm, wotBoundaryMap;
     private int idleBoundaryCol, wotBoundaryRow;
     private (int Row, int Col)? start, end;
@@ -53,12 +73,15 @@ public sealed class FuelingPanel : Grid
     private readonly Stack<double[,]> undoHistory = [];
     private readonly Stack<double[,]> redoHistory = [];
     private readonly Dictionary<TextBox, string> editOriginals = [];
+    private readonly Dictionary<TextBox, double> axisEditOriginalValues = [];
     private static string SavePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimingTableCalculator", "fueling-autosave.json");
 
     public FuelingPanel(Action<int, int> resizeMatrix, Action<bool, int[]> autoFillAxis, Action<bool, int?, int[]> pasteAxis, Action<int, int> setRegionBoundaries, Func<bool, int, double, double[]?> editAxis)
     {
         this.resizeMatrix = resizeMatrix; this.autoFillAxis = autoFillAxis; this.pasteAxis = pasteAxis; this.setRegionBoundaries = setRegionBoundaries; this.editAxis = editAxis;
         matrixXBox = MatrixSizeBox("31"); matrixYBox = MatrixSizeBox("31");
+        leadingPrecisionBox = PrecisionBox(1, 4, leadingDisplayDigits); trailingPrecisionBox = PrecisionBox(0, 3, trailingDisplayDecimals);
+        leadingPrecisionBox.SelectionChanged += (_, _) => ApplyDisplayPrecision(); trailingPrecisionBox.SelectionChanged += (_, _) => ApplyDisplayPrecision();
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition());
         mapUnitBox = CreateMapUnitBox();
         var heading = new Grid { Margin = new Thickness(4, 0, 0, 20) }; heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -80,6 +103,7 @@ public sealed class FuelingPanel : Grid
         tools.Children.Add(MatrixAxisGroup());
         tools.Children.Add(ControlGroup("CELL EDITING", Button("⧉  Copy", (_, _) => CopySelection()), Button("▣  Paste", (_, _) => PasteSelection()), Button("△  Delta", DeltaCompare)));
         tools.Children.Add(ControlGroup("SMOOTHING", Button("⌁  Interpolate", InterpolateSelection), Button("⚙  Smooth Selected…", AdvancedSmooth, true), Button("↕  Columns", SmoothColumns), Button("↔  Rows", SmoothRows)));
+        tools.Children.Add(DisplayPrecisionGroup());
         tools.Children.Add(ControlGroup("VIEW & OUTPUT", Button("▦  3D Map", View3D), Button("⇩  Export CSV", ExportCsv), Button("▤  Export Excel", ExportExcel, true)));
         tools.Children.Add(ControlGroup("HISTORY", Button("↶  Undo", (_, _) => Undo()), Button("↷  Redo", (_, _) => Redo())));
         var commandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = tools, Margin = new Thickness(0, 0, 0, 10) };
@@ -245,7 +269,6 @@ public sealed class FuelingPanel : Grid
         for (var index = 0; index < tokens.Length; index++)
             if (!double.TryParse(tokens[index], NumberStyles.Float, CultureInfo.InvariantCulture, out pasted[index]) || !double.IsFinite(pasted[index]))
             { Info("The copied MAP column must contain only numeric values."); return; }
-            else pasted[index] = RoundFuelMap(pasted[index]);
         int[] targets;
         if (selected.Length > 1 && selected.Length == pasted.Length) targets = selected;
         else
@@ -259,14 +282,14 @@ public sealed class FuelingPanel : Grid
         { Info("Pasted fuel MAP values must decrease from top to bottom."); return; }
         map = candidate; wotBoundaryMap = map[Math.Clamp(wotBoundaryRow, 0, map.Length - 1)];
         selectedMapAxis.Clear(); foreach (var target in targets) selectedMapAxis.Add(target);
-        RefreshFuelMapAxisEditors(); ApplyBoundaries(); Save(); status.Text = $"Pasted {targets.Length} fuel MAP breakpoints  •  timing MAP scale unchanged";
+        RefreshFuelMapAxisEditors(); ApplyBoundaries(); Save(); status.Text = $"Pasted {targets.Length} fuel MAP breakpoints as entered  •  no auto-scaling";
         veSetupWizard?.UpdateBoundaryMapValues(map, new VeRegionBoundary(idleBoundaryCol, wotBoundaryRow));
     }
 
     private void RefreshFuelMapAxisEditors()
     {
         for (var index = 0; index < map.Length && index < mapAxisCells.Length; index++)
-            if (mapAxisCells[index] is not null) mapAxisCells[index].Text = FormatMap(map[index]);
+            if (mapAxisCells[index] is not null) mapAxisCells[index].Text = FormatExactAxisValue(map[index]);
         UpdateAxisSelectionVisuals();
     }
 
@@ -303,7 +326,7 @@ public sealed class FuelingPanel : Grid
     {
         VeSelection? selected = Bounds(out var top, out var bottom, out var left, out var right) ? new VeSelection(top, bottom, left, right) : null;
         var boundary = new VeRegionBoundary(idleBoundaryCol, wotBoundaryRow);
-        veSetupWizard = ModelessWindowManager.ShowOrActivate("Fuel.VeSetup", () => new VeSetupWizard(ve, rpm, map, mapUnit, selected, boundary, veSetupSettings, BeginWizardBoundarySetting, RescaleWizardMapAxis, ApplyVeSetup) { Owner = Window.GetWindow(this) });
+        veSetupWizard = ModelessWindowManager.ShowOrActivate("Fuel.VeSetup", () => new VeSetupWizard(ve, rpm, map, mapUnit, selected, boundary, veSetupSettings, BeginWizardBoundarySetting, RescaleWizardMapAxis, (updated, settings) => WorkingRunner.Run(this, () => ApplyVeSetup(updated, settings))) { Owner = Window.GetWindow(this) });
         veSetupWizard.UpdateBoundaryMapValues(map, boundary);
     }
 
@@ -340,7 +363,7 @@ public sealed class FuelingPanel : Grid
 
     private void Build()
     {
-        loading = true; cells = new TextBox[map.Length, rpm.Length]; mapAxisCells = new TextBox[map.Length]; rpmAxisCells = new TextBox[rpm.Length];
+        loading = true; axisEditOriginalValues.Clear(); cells = new TextBox[map.Length, rpm.Length]; mapAxisCells = new TextBox[map.Length]; rpmAxisCells = new TextBox[rpm.Length];
         selectedMapAxis.Clear(); selectedRpmAxis.Clear(); axisSelecting = false;
         table.Children.Clear(); table.RowDefinitions.Clear(); table.ColumnDefinitions.Clear();
         table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) }); table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(58) });
@@ -356,7 +379,17 @@ public sealed class FuelingPanel : Grid
             {
                 var cell = new TextBox { Tag = (row, col), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = Brushes.Black, BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), Padding = new Thickness(1) };
                 cell.PreviewMouseLeftButtonDown += CellDown; cell.MouseEnter += CellEnter; cell.PreviewMouseRightButtonDown += CellRightClick; cell.ContextMenu = CreateContextMenu();
-                cell.GotKeyboardFocus += (_, _) => { editOriginals[cell] = cell.Text; cell.SelectAll(); };
+                cell.GotKeyboardFocus += (_, _) =>
+                {
+                    if (!showFuelFlow)
+                    {
+                        var point = (ValueTuple<int, int>)cell.Tag;
+                        var editable = FormatEditableVe(ve[point.Item1, point.Item2]);
+                        editOriginals[cell] = editable;
+                        cell.Text = editable;
+                    }
+                    cell.SelectAll();
+                };
                 cell.LostFocus += CellEdited; cell.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Keyboard.ClearFocus(); e.Handled = true; } }; cells[row, col] = cell;
                 Grid.SetRow(cell, row); Grid.SetColumn(cell, col + 2); table.Children.Add(cell);
             }
@@ -419,11 +452,13 @@ public sealed class FuelingPanel : Grid
         if (showFuelFlow) { RefreshAll(); return; }
         if (loading || sender is not TextBox { Tag: ValueTuple<int, int> p } cell || !double.TryParse(cell.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) { RefreshAll(); return; }
         var changed = editOriginals.Remove(cell, out var original) && !string.Equals(original, cell.Text, StringComparison.Ordinal);
-        if (changed) PushUndo();
-        if (changed && IsFuelCellSelected(p.Item1, p.Item2))
+        if (!changed) { RefreshAll(); UpdateSelection(); return; }
+        value = RoundEditableVe(value);
+        PushUndo();
+        if (IsFuelCellSelected(p.Item1, p.Item2))
         {
             var selected = SelectedFuelCells(); foreach (var selectedCell in selected) ve[selectedCell.Row, selectedCell.Col] = value;
-            status.Text = $"Set {selected.Count} selected fuel cells to {value:0.0}";
+            status.Text = $"Set {selected.Count} selected fuel cells to {FormatEditableVe(value)}";
         }
         else ve[p.Item1, p.Item2] = value;
         Save(); RefreshAll(); UpdateSelection();
@@ -449,9 +484,10 @@ public sealed class FuelingPanel : Grid
     {
         if (!Bounds(out var top, out var bottom, out var left, out var right)) { Info("Select one or more fuel cells first."); return; }
         var text = new StringBuilder();
+        var copiedValues = showFuelFlow ? DisplayValues() : ve;
         for (var row = top; row <= bottom; row++)
         {
-            for (var col = left; col <= right; col++) { if (col > left) text.Append('\t'); text.Append(cells[row, col].Text); }
+            for (var col = left; col <= right; col++) { if (col > left) text.Append('\t'); text.Append(copiedValues[row, col].ToString("0.###", CultureInfo.InvariantCulture)); }
             if (row < bottom) text.AppendLine();
         }
         try { Clipboard.SetText(text.ToString()); ClearFuelSelection(); status.Text = $"Copied {right - left + 1} × {bottom - top + 1} fuel cells  •  selection cleared"; }
@@ -469,7 +505,8 @@ public sealed class FuelingPanel : Grid
         PushUndo();
         if (rows.Length == 1 && rows[0].Length == 1)
         {
-            if (!double.TryParse(rows[0][0], NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) { Info("Clipboard cells must contain numeric values."); return; }
+            if (!double.TryParse(rows[0][0], NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || !double.IsFinite(value)) { Info("Clipboard cells must contain numeric values."); return; }
+            value = RoundEditableVe(value);
             for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) ve[row, col] = value;
         }
         else
@@ -477,8 +514,8 @@ public sealed class FuelingPanel : Grid
             for (var sourceRow = 0; sourceRow < rows.Length && top + sourceRow < map.Length; sourceRow++)
             for (var sourceCol = 0; sourceCol < rows[sourceRow].Length && left + sourceCol < rpm.Length; sourceCol++)
             {
-                if (!double.TryParse(rows[sourceRow][sourceCol], NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) { Info("Clipboard cells must contain numeric values."); return; }
-                var row = top + sourceRow; var col = left + sourceCol; ve[row, col] = value;
+                if (!double.TryParse(rows[sourceRow][sourceCol], NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || !double.IsFinite(value)) { Info("Clipboard cells must contain numeric values."); return; }
+                var row = top + sourceRow; var col = left + sourceCol; ve[row, col] = RoundEditableVe(value);
             }
             end = (Math.Min(map.Length - 1, top + rows.Length - 1), Math.Min(rpm.Length - 1, left + rows.Max(row => row.Length) - 1));
         }
@@ -606,7 +643,7 @@ public sealed class FuelingPanel : Grid
     {
         if (ModelessWindowManager.ActivateIfOpen("Fuel.Refinement")) return;
         if (!Bounds(out var top, out var bottom, out var left, out var right) || bottom - top < 2 || right - left < 2) { Info("Select at least 3 × 3 fuel cells."); return; }
-        ModelessWindowManager.ShowOrActivate("Fuel.Refinement", () => new SmoothRefinementWindow(refinementStrength, refinementPasses, applied => ApplyRefinement(applied, top, bottom, left, right)) { Owner = Window.GetWindow(this) });
+        ModelessWindowManager.ShowOrActivate("Fuel.Refinement", () => new SmoothRefinementWindow(refinementStrength, refinementPasses, applied => WorkingRunner.Run(this, () => ApplyRefinement(applied, top, bottom, left, right))) { Owner = Window.GetWindow(this) });
     }
     private void ApplyRefinement(SmoothRefinementWindow dialog, int top, int bottom, int left, int right)
     {
@@ -618,7 +655,7 @@ public sealed class FuelingPanel : Grid
     {
         if (ModelessWindowManager.ActivateIfOpen("Fuel.AdvancedSmoothing")) return;
         var selected = SelectedFuelCells(); if (selected.Count == 0) { Info("Select one or more fuel cells first."); return; }
-        ModelessWindowManager.ShowOrActivate("Fuel.AdvancedSmoothing", () => new AdvancedSmoothingWindow(advancedSmoothingOptions, dialog => ApplyAdvancedSmoothing(dialog, selected)) { Owner = Window.GetWindow(this) });
+        ModelessWindowManager.ShowOrActivate("Fuel.AdvancedSmoothing", () => new AdvancedSmoothingWindow(advancedSmoothingOptions, dialog => WorkingRunner.Run(this, () => ApplyAdvancedSmoothing(dialog, selected))) { Owner = Window.GetWindow(this) });
     }
     private void ApplyAdvancedSmoothing(AdvancedSmoothingWindow dialog, IReadOnlyCollection<(int Row, int Col)> selected)
     {
@@ -656,7 +693,7 @@ public sealed class FuelingPanel : Grid
             var displayed = DisplayValues();
             var window = new Surface3DWindow(displayed, rpm, map, mapUnit, false, Colors.Red, Colors.Magenta,
                 showFuelFlow ? (_, _, _, _) => displayed : (t, b, l, r) => { start = (t, l); end = (b, r); Smooth(t, b, l, r, 2, .65); return (double[,])ve.Clone(); },
-                showFuelFlow ? "3D Fuel Flow Map" : "3D Volumetric Efficiency Map", showFuelFlow ? "FUEL FLOW (lb/hr)" : "VOLUMETRIC EFFICIENCY (%)", showFuelFlow ? null : Handle3DSelectionAction) { Owner = Window.GetWindow(this) };
+                showFuelFlow ? "3D Fuel Flow Map" : "3D Volumetric Efficiency Map", showFuelFlow ? "FUEL FLOW (lb/hr)" : "VOLUMETRIC EFFICIENCY (%)", showFuelFlow ? null : Handle3DSelectionAction, rpmFormat: "0.########", valueFormat: showFuelFlow ? "0.0" : "0", valueFormatter: showFuelFlow ? null : FormatVeDisplayValue) { Owner = Window.GetWindow(this) };
             window.Closed += (_, _) =>
             {
                 start = end = null; selecting = false;
@@ -673,11 +710,11 @@ public sealed class FuelingPanel : Grid
         var csv = new StringBuilder();
         for (var row = 0; row < map.Length; row++)
         {
-            csv.Append(FormatMap(map[row]));
-            for (var col = 0; col < rpm.Length; col++) csv.Append(',').Append(ve[row, col].ToString("0.0", CultureInfo.InvariantCulture));
+            csv.Append(FormatExactAxisValue(map[row]));
+            for (var col = 0; col < rpm.Length; col++) csv.Append(',').Append(ve[row, col].ToString("0.###", CultureInfo.InvariantCulture));
             csv.AppendLine();
         }
-        csv.Append("Engine RPM"); foreach (var value in rpm) csv.Append(',').Append(value.ToString("0", CultureInfo.InvariantCulture)); csv.AppendLine();
+        csv.Append("Engine RPM"); foreach (var value in rpm) csv.Append(',').Append(FormatExactAxisValue(value)); csv.AppendLine();
         File.WriteAllText(dialog.FileName, csv.ToString()); status.Text = $"Saved {Path.GetFileName(dialog.FileName)}";
     }
 
@@ -685,7 +722,7 @@ public sealed class FuelingPanel : Grid
     {
         if (rpm.Length == 0 || map.Length == 0) return;
         var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "fuel-table.xlsx" }; if (dialog.ShowDialog() != true) return;
-        ExcelTimingExporter.Export(dialog.FileName, rpm, map, ve, mapUnit, Hsl(0, .96, .52), Hsl(150, .96, .52), Hsl(300, .96, .52), false, "Fuel Map", "Fueling Map");
+        ExcelTimingExporter.Export(dialog.FileName, rpm, map, ve, mapUnit, Hsl(0, .96, .52), Hsl(150, .96, .52), Hsl(300, .96, .52), false, "Fuel Map", "Fueling Map", valueNumberFormat: VeExcelNumberFormat());
         status.Text = $"Saved {Path.GetFileName(dialog.FileName)} with heat-map formatting";
     }
 
@@ -705,10 +742,10 @@ public sealed class FuelingPanel : Grid
             case SurfaceSelectionAction.Smooth: SmoothSelection(this, new RoutedEventArgs()); Refresh(); break;
             case SurfaceSelectionAction.Interpolate: InterpolateSelection(this, new RoutedEventArgs()); Refresh(); break;
             case SurfaceSelectionAction.Refine:
-                ModelessWindowManager.ShowOrActivate("Fuel.Refinement", () => new SmoothRefinementWindow(refinementStrength, refinementPasses, dialog => { ApplyRefinement(dialog, top, bottom, left, right); Refresh(); }) { Owner = Window.GetWindow(this) }); break;
+                ModelessWindowManager.ShowOrActivate("Fuel.Refinement", () => new SmoothRefinementWindow(refinementStrength, refinementPasses, dialog => WorkingRunner.Run(this, () => { ApplyRefinement(dialog, top, bottom, left, right); Refresh(); })) { Owner = Window.GetWindow(this) }); break;
             case SurfaceSelectionAction.Advanced:
                 var fuelSelection = selectedCells.ToArray();
-                ModelessWindowManager.ShowOrActivate("Fuel.AdvancedSmoothing", () => new AdvancedSmoothingWindow(advancedSmoothingOptions, dialog => { ApplyAdvancedSmoothing(dialog, fuelSelection); Refresh(); }) { Owner = Window.GetWindow(this) }); break;
+                ModelessWindowManager.ShowOrActivate("Fuel.AdvancedSmoothing", () => new AdvancedSmoothingWindow(advancedSmoothingOptions, dialog => WorkingRunner.Run(this, () => { ApplyAdvancedSmoothing(dialog, fuelSelection); Refresh(); })) { Owner = Window.GetWindow(this) }); break;
             case SurfaceSelectionAction.SmoothRows: SmoothRows(this, new RoutedEventArgs()); Refresh(); break;
             case SurfaceSelectionAction.SmoothColumns: SmoothColumns(this, new RoutedEventArgs()); Refresh(); break;
             case SurfaceSelectionAction.Clear: ClearSelected(this, new RoutedEventArgs()); Refresh(); break;
@@ -725,16 +762,22 @@ public sealed class FuelingPanel : Grid
     private void Undo()
     {
         if (undoHistory.Count == 0) { status.Text = "Nothing to undo in the fuel table"; return; }
-        redoHistory.Push((double[,])ve.Clone()); ve = undoHistory.Pop(); Save(); RefreshAll(); UpdateSelection(); status.Text = "Fuel change undone";
+        WorkingRunner.Run(this, () =>
+        {
+            redoHistory.Push((double[,])ve.Clone()); ve = undoHistory.Pop(); Save(); RefreshAll(); UpdateSelection(); status.Text = "Fuel change undone";
+        });
     }
 
     private void Redo()
     {
         if (redoHistory.Count == 0) { status.Text = "Nothing to redo in the fuel table"; return; }
-        undoHistory.Push((double[,])ve.Clone()); ve = redoHistory.Pop(); Save(); RefreshAll(); UpdateSelection(); status.Text = "Fuel change redone";
+        WorkingRunner.Run(this, () =>
+        {
+            undoHistory.Push((double[,])ve.Clone()); ve = redoHistory.Pop(); Save(); RefreshAll(); UpdateSelection(); status.Text = "Fuel change redone";
+        });
     }
 
-    private void RefreshAll() { if (cells.Length == 0) return; loading = true; var displayed = DisplayValues(); var min = displayed.Cast<double>().Min(); var max = displayed.Cast<double>().Max(); for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++) { var value = displayed[row, col]; cells[row, col].Text = value.ToString("0.0", CultureInfo.InvariantCulture); cells[row, col].IsReadOnly = showFuelFlow; cells[row, col].Background = new SolidColorBrush(Heat((value - min) / Math.Max(.1, max - min))); } loading = false; }
+    private void RefreshAll() { if (cells.Length == 0) return; loading = true; var displayed = DisplayValues(); var min = displayed.Cast<double>().Min(); var max = displayed.Cast<double>().Max(); for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++) { var value = displayed[row, col]; cells[row, col].Text = showFuelFlow ? value.ToString("0.0", CultureInfo.InvariantCulture) : FormatVeDisplayValue(value); cells[row, col].IsReadOnly = showFuelFlow; cells[row, col].Background = new SolidColorBrush(Heat((value - min) / Math.Max(.1, max - min))); } loading = false; }
     private bool Bounds(out int top, out int bottom, out int left, out int right) { top = bottom = left = right = 0; if (start is null || end is null) return false; top = Math.Min(start.Value.Row, end.Value.Row); bottom = Math.Max(start.Value.Row, end.Value.Row); left = Math.Min(start.Value.Col, end.Value.Col); right = Math.Max(start.Value.Col, end.Value.Col); return true; }
     private bool IsFuelCellSelected(int row, int col) => pinnedFuelSelection.Contains((row, col)) || Bounds(out var top, out var bottom, out var left, out var right) && row >= top && row <= bottom && col >= left && col <= right;
     private void PinActiveFuelSelection() { if (!Bounds(out var top, out var bottom, out var left, out var right)) return; for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) pinnedFuelSelection.Add((row, col)); }
@@ -754,7 +797,8 @@ public sealed class FuelingPanel : Grid
             var region = col <= idleBoundaryCol
                 ? row <= wotBoundaryRow ? "Idle High MAP" : "Idle Low MAP"
                 : row <= wotBoundaryRow ? "Part Throttle to WOT" : "Cruise to Part Throttle";
-            cells[row, col].ToolTip = $"{region}  •  {rpm[col]:0} RPM  •  {FormatMap(map[row])} {mapUnit}  •  {displayed[row, col]:0.0}{suffix}";
+            var displayedValue = showFuelFlow ? displayed[row, col].ToString("0.0", CultureInfo.InvariantCulture) : FormatVeDisplayValue(displayed[row, col]);
+            cells[row, col].ToolTip = $"{region}  •  {rpm[col]:0} RPM  •  {FormatMap(map[row])} {mapUnit}  •  {displayedValue}{suffix}";
         }
         if (start is not null) UpdateSelection();
     }
@@ -764,13 +808,13 @@ public sealed class FuelingPanel : Grid
     {
         var editor = new TextBox
         {
-            Tag = (isMap, index), Text = value.ToString(isMap ? MapFormat : "0", CultureInfo.InvariantCulture),
+            Tag = (isMap, index), Text = FormatExactAxisValue(value),
             Foreground = new SolidColorBrush(Color.FromRgb(127, 227, 208)), Background = new SolidColorBrush(isMap ? Color.FromRgb(16, 31, 45) : Color.FromRgb(15, 40, 51)),
             BorderBrush = new SolidColorBrush(Color.FromRgb(38, 58, 76)), BorderThickness = new Thickness(.5), TextAlignment = TextAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center, FontSize = isMap ? 11 : 10, FontWeight = FontWeights.Bold, Padding = new Thickness(2),
             ToolTip = isMap ? $"Edit fuel MAP breakpoint ({mapUnit})" : "Edit shared RPM breakpoint"
         };
-        editor.GotKeyboardFocus += (_, _) => { start = end = null; selecting = false; RenderBoundaries(); editor.Text = (isMap ? map[index] : rpm[index]).ToString(isMap ? "0.###" : "0", CultureInfo.InvariantCulture); editor.SelectAll(); };
+        editor.GotKeyboardFocus += (_, _) => { start = end = null; selecting = false; RenderBoundaries(); var current = isMap ? map[index] : rpm[index]; axisEditOriginalValues[editor] = current; editor.Text = FormatExactAxisValue(current); editor.SelectAll(); };
         editor.PreviewMouseLeftButtonDown += AxisEditorMouseDown;
         editor.MouseEnter += AxisEditorMouseEnter;
         editor.PreviewMouseRightButtonDown += AxisEditorRightClick;
@@ -861,20 +905,36 @@ public sealed class FuelingPanel : Grid
     {
         if (loading || sender is not TextBox editor || editor.Tag is not ValueTuple<bool, int> tag) return;
         var (isMap, index) = tag;
+        var currentEditors = isMap ? mapAxisCells : rpmAxisCells;
+        if (index < 0 || index >= currentEditors.Length || !ReferenceEquals(editor, currentEditors[index])) return;
         var axis = isMap ? map : rpm;
-        var updatedAxis = double.TryParse(editor.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) && double.IsFinite(value)
-            ? isMap ? EditFuelMapAxisValue(index, value) : editAxis(false, index, value) : null;
+        if (!double.TryParse(editor.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var currentValue) || !double.IsFinite(currentValue))
+            currentValue = double.NaN;
+        if (axisEditOriginalValues.Remove(editor, out var originalValue) && currentValue.Equals(originalValue) && !axis[index].Equals(originalValue))
+        {
+            editor.Text = FormatExactAxisValue(axis[index]);
+            editor.Background = new SolidColorBrush(isMap ? Color.FromRgb(16, 31, 45) : Color.FromRgb(15, 40, 51));
+            return;
+        }
+        if (double.IsFinite(currentValue) && currentValue.Equals(axis[index]))
+        {
+            editor.Text = FormatExactAxisValue(axis[index]);
+            editor.Background = new SolidColorBrush(isMap ? Color.FromRgb(16, 31, 45) : Color.FromRgb(15, 40, 51));
+            return;
+        }
+        var updatedAxis = double.IsFinite(currentValue)
+            ? isMap ? EditFuelMapAxisValue(index, currentValue) : editAxis(false, index, currentValue) : null;
         if (updatedAxis is null)
         {
-            editor.Text = axis[index].ToString(isMap ? MapFormat : "0", CultureInfo.InvariantCulture);
+            editor.Text = FormatExactAxisValue(axis[index]);
             editor.Background = new SolidColorBrush(Color.FromRgb(100, 30, 38));
             status.Text = isMap ? "MAP values must decrease from top to bottom" : "RPM values must increase from left to right";
             return;
         }
         if (isMap) map = updatedAxis; else rpm = updatedAxis;
-        var editors = isMap ? mapAxisCells : rpmAxisCells;
+        var editors = currentEditors;
         for (var i = 0; i < updatedAxis.Length && i < editors.Length; i++)
-            if (editors[i] is not null) editors[i].Text = updatedAxis[i].ToString(isMap ? MapFormat : "0", CultureInfo.InvariantCulture);
+            if (editors[i] is not null) editors[i].Text = FormatExactAxisValue(updatedAxis[i]);
         ApplyBoundaries();
         var endpoint = index == (isMap ? 0 : updatedAxis.Length - 1) ? "maximum" : index == (isMap ? updatedAxis.Length - 1 : 0) ? "minimum" : null;
         status.Text = endpoint is not null
@@ -889,6 +949,30 @@ public sealed class FuelingPanel : Grid
         foreach (var control in controls) row.Children.Add(control);
         content.Children.Add(row);
         return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 7, 0), Child = content };
+    }
+    private Border DisplayPrecisionGroup()
+    {
+        UIElement Field(string label, ComboBox box, string tip)
+        {
+            var field = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 9, 0), ToolTip = tip };
+            field.Children.Add(new TextBlock { Text = label, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 10, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 5, 0) });
+            field.Children.Add(box); return field;
+        }
+        return ControlGroup("VE NUMBER DISPLAY",
+            Field("LEADING DIGITS", leadingPrecisionBox, "Show trailing decimals when the VE value has fewer than this many digits before the decimal point."),
+            Field("TRAILING DECIMALS", trailingPrecisionBox, "Number of decimal places shown for VE values below the leading-digit threshold."));
+    }
+    private static ComboBox PrecisionBox(int minimum, int maximum, int selected)
+    {
+        var box = new ComboBox { Width = 48, Height = 30, Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(Color.FromRgb(184, 184, 184)), Padding = new Thickness(6, 3, 6, 3) };
+        for (var value = minimum; value <= maximum; value++) box.Items.Add(new ComboBoxItem { Content = value.ToString(CultureInfo.InvariantCulture), Tag = value, Foreground = Brushes.Black });
+        box.SelectedIndex = Math.Clamp(selected - minimum, 0, box.Items.Count - 1); return box;
+    }
+    private void ApplyDisplayPrecision()
+    {
+        if (syncingDisplayPrecision || leadingPrecisionBox.SelectedItem is not ComboBoxItem { Tag: int leading } || trailingPrecisionBox.SelectedItem is not ComboBoxItem { Tag: int trailing }) return;
+        leadingDisplayDigits = leading; trailingDisplayDecimals = trailing;
+        if (ve.Length > 0) { RefreshAll(); ApplyBoundaries(); Save(); status.Text = $"VE display: decimals below {leadingDisplayDigits} leading digits • {trailingDisplayDecimals} trailing decimal place{(trailingDisplayDecimals == 1 ? "" : "s")}"; }
     }
     private static Button Button(string text, RoutedEventHandler click, bool primary = false) { var button = new Button { Content = text, Padding = new Thickness(12, 7, 12, 7), Margin = new Thickness(0, 0, 7, 0), Background = new SolidColorBrush(primary ? Color.FromRgb(0, 103, 192) : Color.FromRgb(249, 249, 249)), Foreground = primary ? Brushes.White : new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(primary ? Color.FromRgb(0, 90, 170) : Color.FromRgb(190, 190, 190)), BorderThickness = new Thickness(1), FontWeight = FontWeights.SemiBold, FontFamily = new FontFamily("Segoe UI") }; button.Click += click; return button; }
     private static TextBox MatrixSizeBox(string text) => new() { Text = text, Width = 44, Padding = new Thickness(6), Margin = new Thickness(0, 0, 6, 0), TextAlignment = TextAlignment.Center, Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(Color.FromRgb(184, 184, 184)), BorderThickness = new Thickness(1) };
@@ -913,7 +997,8 @@ public sealed class FuelingPanel : Grid
                 DirectionalOuterToInner = directionalOuterToInner, DirectionalStrength = directionalStrength, DirectionalPasses = directionalPasses,
                 RefinementStrength = refinementStrength, RefinementPasses = refinementPasses, AdvancedOptions = advancedSmoothingOptions,
                 SelectionOffsetAmount = selectionOffsetAmount, SelectionOffsetIsPercentage = selectionOffsetIsPercentage,
-                VeSetup = veSetupSettings, ShowFuelFlow = showFuelFlow
+                VeSetup = veSetupSettings, ShowFuelFlow = showFuelFlow,
+                LeadingDisplayDigits = leadingDisplayDigits, TrailingDisplayDecimals = trailingDisplayDecimals
             };
             Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!);
             File.WriteAllText(SavePath, JsonSerializer.Serialize(state));
@@ -932,7 +1017,7 @@ public sealed class FuelingPanel : Grid
             {
                 mapUnit = state.MapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? "PSI gauge" : "kPa absolute";
                 map = state.MapAxis.Length == map.Length
-                    ? state.MapAxis.Select(RoundFuelMap).ToArray()
+                    ? state.MapAxis.ToArray()
                     : BuildMapAxis(state.MapAxis[^1], state.MapAxis[0], map.Length) ?? map;
             }
             var loaded = new double[state.Values.Length, state.Values[0].Length];
@@ -942,6 +1027,8 @@ public sealed class FuelingPanel : Grid
             refinementStrength = state.RefinementStrength; refinementPasses = state.RefinementPasses; advancedSmoothingOptions = state.AdvancedOptions ?? advancedSmoothingOptions;
             selectionOffsetAmount = state.SelectionOffsetAmount; selectionOffsetIsPercentage = state.SelectionOffsetIsPercentage;
             veSetupSettings = state.VeSetup ?? veSetupSettings; showFuelFlow = state.ShowFuelFlow;
+            leadingDisplayDigits = Math.Clamp(state.LeadingDisplayDigits, 1, 4); trailingDisplayDecimals = Math.Clamp(state.TrailingDisplayDecimals, 0, 3);
+            syncingDisplayPrecision = true; leadingPrecisionBox.SelectedIndex = leadingDisplayDigits - 1; trailingPrecisionBox.SelectedIndex = trailingDisplayDecimals; syncingDisplayPrecision = false;
             syncingConversion = true; conversionViewBox.IsChecked = showFuelFlow; syncingConversion = false;
             fuelTableTitle.Text = showFuelFlow ? "Fuel Table — Estimated Fuel Flow (lb/hr)" : "Fuel Table — VE (%)";
             return true;
@@ -964,5 +1051,7 @@ public sealed class FuelingPanel : Grid
         public bool SelectionOffsetIsPercentage { get; set; }
         public VeSetupSettings? VeSetup { get; set; }
         public bool ShowFuelFlow { get; set; }
+        public int LeadingDisplayDigits { get; set; } = 3;
+        public int TrailingDisplayDecimals { get; set; } = 1;
     }
 }

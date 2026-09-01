@@ -23,7 +23,11 @@ public partial class MainWindow : Window
         4750, 5000, 5250, 5500, 5750, 6000, 6250, 6500, 6750, 7000
     ];
     private TextBox[,] valueCells = new TextBox[31, 31];
+    private double[,] timingValues = new double[31, 31];
+    private int timingLeadingDisplayDigits = 3, timingTrailingDisplayDecimals = 1;
+    private bool syncingTimingDisplayPrecision;
     private readonly Dictionary<TextBox, string> cellEditOriginalValues = [];
+    private readonly Dictionary<TextBox, double> axisEditOriginalValues = [];
     private TextBox[] rpmAxisCells = new TextBox[31];
     private TextBox[] mapAxisCells = new TextBox[31];
     private TextBlock? mapAxisTitle;
@@ -66,6 +70,10 @@ public partial class MainWindow : Window
     private string MapAxisFormat => mapUnitIndex == 1 ? "0.0" : "0";
     private double RoundMapValue(double value) => Math.Round(value / MapAxisIncrement) * MapAxisIncrement;
     private string FormatMap(double value) => value.ToString(MapAxisFormat, CultureInfo.InvariantCulture);
+    private string FormatTimingDisplayValue(double value) => MagnitudeNumberFormatter.Format(value, timingLeadingDisplayDigits, timingTrailingDisplayDecimals);
+    private static double RoundEditableTiming(double value) => Math.Round(value, 3);
+    private static string FormatEditableTiming(double value) => RoundEditableTiming(value).ToString("0.###", CultureInfo.InvariantCulture);
+    private static string FormatExactAxisValue(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
     private double idleTransitionRpm = 1200, wotTransitionMap = 85;
     private RegionPointPick regionPointPick;
     private int idleMarkerCol, wotMarkerRow;
@@ -76,6 +84,7 @@ public partial class MainWindow : Window
         fuelingPanel = new FuelingPanel(ResizeMatrixFromFuel, AutoFillAxisFromFuel, PasteAxisFromFuel, SetRegionBoundariesFromFuel, EditAxisFromFuel); FuelingHost.Content = fuelingPanel;
         sandboxPanel = new SandboxPanel(); SandboxHost.Content = sandboxPanel;
         HelpHost.Content = new HelpPanel();
+        AboutHost.Content = new AboutPanel();
         PreviewKeyDown += MainWindow_PreviewKeyDown;
         Loaded += (_, _) =>
         {
@@ -249,7 +258,8 @@ public partial class MainWindow : Window
 
     private void BuildGrid(double lowTiming, double highTiming, double minMap, double maxMap)
     {
-        valueCells = new TextBox[RowCount, ColumnCount]; rpmAxisCells = new TextBox[ColumnCount]; mapAxisCells = new TextBox[RowCount];
+        axisEditOriginalValues.Clear();
+        valueCells = new TextBox[RowCount, ColumnCount]; timingValues = new double[RowCount, ColumnCount]; rpmAxisCells = new TextBox[ColumnCount]; mapAxisCells = new TextBox[RowCount];
         TableGrid.Children.Clear(); TableGrid.RowDefinitions.Clear(); TableGrid.ColumnDefinitions.Clear();
         TableGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
         TableGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(54) });
@@ -282,8 +292,9 @@ public partial class MainWindow : Window
 
     private TextBox CreateValueCell(double value, int row, int col)
     {
-        var cell = new TextBox { Tag = (row, col), Text = value.ToString("0.0", CultureInfo.InvariantCulture), Foreground = Brushes.Black, Background = TimingBrush(value), BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 11, FontWeight = FontWeights.SemiBold, Padding = new Thickness(2) };
-        cell.GotKeyboardFocus += (_, _) => { cellEditOriginalValues[cell] = cell.Text; cell.SelectAll(); }; cell.PreviewMouseLeftButtonDown += Cell_MouseDown; cell.MouseEnter += Cell_MouseEnter;
+        timingValues[row, col] = RoundEditableTiming(value);
+        var cell = new TextBox { Tag = (row, col), Text = FormatTimingDisplayValue(timingValues[row, col]), Foreground = Brushes.Black, Background = TimingBrush(value), BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 11, FontWeight = FontWeights.SemiBold, Padding = new Thickness(2) };
+        cell.GotKeyboardFocus += (_, _) => { var point = ((int Row, int Col))cell.Tag; cell.Text = FormatEditableTiming(timingValues[point.Row, point.Col]); cellEditOriginalValues[cell] = cell.Text; cell.SelectAll(); }; cell.PreviewMouseLeftButtonDown += Cell_MouseDown; cell.MouseEnter += Cell_MouseEnter;
         cell.PreviewMouseRightButtonDown += TimingCell_RightClick; cell.ContextMenu = CreateTimingContextMenu();
         cell.LostFocus += (_, _) => CompleteCellEdit(cell); cell.KeyDown += (_, e) => { if (e.Key == Key.Enter) Keyboard.ClearFocus(); }; return cell;
     }
@@ -326,7 +337,7 @@ public partial class MainWindow : Window
         if (selected.Count == 0) for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) selected.Add((row, col));
         foreach (var cell in selected)
         {
-            double.TryParse(valueCells[cell.Row, cell.Col].Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value);
+            var value = timingValues[cell.Row, cell.Col];
             SetCellValue(cell.Row, cell.Col, percentage ? value * (1 + direction * amount / 100) : value + direction * amount);
         }
         UpdateSelection(); SaveState(); StatusText.Text = $"{selected.Count} timing cells {(direction > 0 ? "increased" : "decreased")} by {amount:0.###}{(percentage ? "%" : "°")}";
@@ -373,15 +384,17 @@ public partial class MainWindow : Window
     private void CompleteCellEdit(TextBox cell)
     {
         var changed = cellEditOriginalValues.Remove(cell, out var original) && !string.Equals(original, cell.Text, StringComparison.Ordinal);
-        if (!double.TryParse(cell.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) { RefreshCellColor(cell); return; }
-        RefreshCellColor(cell);
-        if (!changed || cell.Tag is not ValueTuple<int, int> point || !IsInsideTimingSelection(point.Item1, point.Item2)) return;
+        if (cell.Tag is not ValueTuple<int, int> point) return;
+        if (!double.TryParse(cell.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || !double.IsFinite(value)) { RefreshCellColor(cell); return; }
+        value = RoundEditableTiming(value);
+        if (!changed) { RefreshCellColor(cell); return; }
+        if (!IsInsideTimingSelection(point.Item1, point.Item2)) { SetCellValue(point.Item1, point.Item2, value); SaveState(); return; }
         var selected = SelectedTimingCells(); if (selected.Count == 0) return;
         var before = CaptureSnapshot();
         if (double.TryParse(original, NumberStyles.Float, CultureInfo.InvariantCulture, out var oldValue)) before.Timing[point.Item1][point.Item2] = oldValue;
         PushUndo(before);
         foreach (var selectedCell in selected) SetCellValue(selectedCell.Row, selectedCell.Col, value);
-        UpdateSelection(); SaveState(); StatusText.Text = $"Set {selected.Count} selected cells to {value:0.0}";
+        UpdateSelection(); SaveState(); StatusText.Text = $"Set {selected.Count} selected cells to {FormatEditableTiming(value)}";
     }
 
     private void SelectAllTimingCells()
@@ -406,6 +419,23 @@ public partial class MainWindow : Window
         {
             MessageBox.Show("Each axis range must contain at least one whole-number step per breakpoint. Increase the axis range or reduce the matrix size.", "Cannot resize with whole-number axes", MessageBoxButton.OK, MessageBoxImage.Warning); return;
         }
+        WorkingRunner.Run(this, () => ResizeMatrixCore(newColumns, newRows, oldRows, oldColumns, oldTiming, resizedRpm, resizedMap));
+    }
+
+    private void TimingDisplayPrecision_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (syncingTimingDisplayPrecision || loadingState || TimingLeadingPrecisionBox is null || TimingTrailingPrecisionBox is null) return;
+        if (TimingLeadingPrecisionBox.SelectedItem is not ComboBoxItem leadingItem || TimingTrailingPrecisionBox.SelectedItem is not ComboBoxItem trailingItem) return;
+        if (!int.TryParse(leadingItem.Content?.ToString(), out timingLeadingDisplayDigits) || !int.TryParse(trailingItem.Content?.ToString(), out timingTrailingDisplayDecimals)) return;
+        for (var row = 0; row < valueCells.GetLength(0); row++)
+            for (var col = 0; col < valueCells.GetLength(1); col++)
+                if (valueCells[row, col] is not null) RefreshCellColor(valueCells[row, col]);
+        SaveState();
+        if (StatusText is not null) StatusText.Text = $"Timing display set to {timingLeadingDisplayDigits} leading digits / {timingTrailingDisplayDecimals} trailing decimals";
+    }
+
+    private void ResizeMatrixCore(int newColumns, int newRows, int oldRows, int oldColumns, double[,] oldTiming, double[] resizedRpm, double[] resizedMap)
+    {
         PushUndo(); rpmAxis = resizedRpm; mapAxis = resizedMap;
         var resizedTiming = new double[newRows, newColumns];
         for (var row = 0; row < newRows; row++) for (var col = 0; col < newColumns; col++)
@@ -522,10 +552,10 @@ public partial class MainWindow : Window
             case SurfaceSelectionAction.Smooth: Smooth_Click(this, new RoutedEventArgs()); Refresh(); break;
             case SurfaceSelectionAction.Interpolate: Interpolate_Click(this, new RoutedEventArgs()); Refresh(); break;
             case SurfaceSelectionAction.Refine:
-                ModelessWindowManager.ShowOrActivate("Timing.Refinement", () => new SmoothRefinementWindow(refinementStrength, refinementPasses, dialog => { ApplyRefinement(dialog, top, bottom, left, right); Refresh(); }) { Owner = this }); break;
+                ModelessWindowManager.ShowOrActivate("Timing.Refinement", () => new SmoothRefinementWindow(refinementStrength, refinementPasses, dialog => WorkingRunner.Run(this, () => { ApplyRefinement(dialog, top, bottom, left, right); Refresh(); })) { Owner = this }); break;
             case SurfaceSelectionAction.Advanced:
                 var timingSelection = selectedCells.ToArray();
-                ModelessWindowManager.ShowOrActivate("Timing.AdvancedSmoothing", () => new AdvancedSmoothingWindow(advancedSmoothingOptions, dialog => { ApplyAdvancedSmoothing(dialog, timingSelection); Refresh(); }) { Owner = this }); break;
+                ModelessWindowManager.ShowOrActivate("Timing.AdvancedSmoothing", () => new AdvancedSmoothingWindow(advancedSmoothingOptions, dialog => WorkingRunner.Run(this, () => { ApplyAdvancedSmoothing(dialog, timingSelection); Refresh(); })) { Owner = this }); break;
             case SurfaceSelectionAction.SmoothRows: SmoothRows_Click(this, new RoutedEventArgs()); Refresh(); break;
             case SurfaceSelectionAction.SmoothColumns: SmoothColumns_Click(this, new RoutedEventArgs()); Refresh(); break;
             case SurfaceSelectionAction.Clear: ClearSelectedTiming(this, new RoutedEventArgs()); Refresh(); break;
@@ -539,7 +569,7 @@ public partial class MainWindow : Window
         {
             MessageBox.Show("Refinement requires at least 3 rows and 3 columns. The outer perimeter is preserved.", "Select a larger area", MessageBoxButton.OK, MessageBoxImage.Information); return;
         }
-        ModelessWindowManager.ShowOrActivate("Timing.Refinement", () => new SmoothRefinementWindow(refinementStrength, refinementPasses, applied => ApplyRefinement(applied, top, bottom, left, right)) { Owner = this });
+        ModelessWindowManager.ShowOrActivate("Timing.Refinement", () => new SmoothRefinementWindow(refinementStrength, refinementPasses, applied => WorkingRunner.Run(this, () => ApplyRefinement(applied, top, bottom, left, right))) { Owner = this });
     }
 
     private void ApplyRefinement(SmoothRefinementWindow dialog, int top, int bottom, int left, int right)
@@ -569,7 +599,7 @@ public partial class MainWindow : Window
         var selected = SelectedTimingCells();
         if (selected.Count == 0)
         { MessageBox.Show("Select one or more timing cells first.", "No cells selected", MessageBoxButton.OK, MessageBoxImage.Information); return; }
-        ModelessWindowManager.ShowOrActivate("Timing.AdvancedSmoothing", () => new AdvancedSmoothingWindow(advancedSmoothingOptions, dialog => ApplyAdvancedSmoothing(dialog, selected)) { Owner = this });
+        ModelessWindowManager.ShowOrActivate("Timing.AdvancedSmoothing", () => new AdvancedSmoothingWindow(advancedSmoothingOptions, dialog => WorkingRunner.Run(this, () => ApplyAdvancedSmoothing(dialog, selected))) { Owner = this });
     }
 
     private void ApplyAdvancedSmoothing(AdvancedSmoothingWindow dialog, IReadOnlyCollection<(int Row, int Col)> selected)
@@ -632,9 +662,7 @@ public partial class MainWindow : Window
 
     private double[,] ReadTimingValues()
     {
-        var values = new double[RowCount, ColumnCount];
-        for (var row = 0; row < RowCount; row++) for (var col = 0; col < ColumnCount; col++) double.TryParse(valueCells[row, col].Text, NumberStyles.Float, CultureInfo.InvariantCulture, out values[row, col]);
-        return values;
+        return (double[,])timingValues.Clone();
     }
 
     private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
@@ -678,11 +706,10 @@ public partial class MainWindow : Window
         if (tokens.Length == 0) return;
         var pasted = new double[tokens.Length];
         for (var i = 0; i < tokens.Length; i++)
-            if (!double.TryParse(tokens[i], NumberStyles.Float, CultureInfo.InvariantCulture, out pasted[i]))
+            if (!double.TryParse(tokens[i], NumberStyles.Float, CultureInfo.InvariantCulture, out pasted[i]) || !double.IsFinite(pasted[i]))
             {
                 MessageBox.Show("The copied axis column must contain only numeric values.", "Cannot paste axis", MessageBoxButton.OK, MessageBoxImage.Warning); return;
             }
-            else pasted[i] = isMap ? RoundMapValue(pasted[i]) : Math.Round(pasted[i]);
 
         var axis = isMap ? mapAxis : rpmAxis;
         var selected = (isMap ? selectedMapAxis : selectedRpmAxis).OrderBy(i => i).ToArray();
@@ -711,15 +738,15 @@ public partial class MainWindow : Window
         for (var i = 0; i < targets.Length; i++)
         {
             axis[targets[i]] = pasted[i];
-            editors[targets[i]].Text = pasted[i].ToString(isMap ? MapAxisFormat : "0", CultureInfo.InvariantCulture);
+            editors[targets[i]].Text = FormatExactAxisValue(pasted[i]);
         }
-        if (isMap) { MinMapBox.Text = FormatMap(mapAxis[^1]); MaxMapBox.Text = FormatMap(mapAxis[0]); }
+        if (isMap) { MinMapBox.Text = FormatExactAxisValue(mapAxis[^1]); MaxMapBox.Text = FormatExactAxisValue(mapAxis[0]); }
         selectedMapAxis.Clear(); selectedRpmAxis.Clear();
         foreach (var target in targets) (isMap ? selectedMapAxis : selectedRpmAxis).Add(target);
         activeAxisIsMap = isMap; lastAxisIndex = targets[^1];
         UpdateAxisSelectionVisuals(); ApplyRegionVisualization(); SaveState();
         SyncFuelingAxes();
-        StatusText.Text = $"Pasted {targets.Length} {(isMap ? "MAP" : "RPM")} breakpoint values  •  timing preserved";
+        StatusText.Text = $"Pasted {targets.Length} {(isMap ? "MAP" : "RPM")} breakpoint values as entered  •  no auto-scaling";
     }
 
     private void Copy_Click(object sender, RoutedEventArgs e) => CopySelection();
@@ -738,7 +765,7 @@ public partial class MainWindow : Window
             for (var col = left; col <= right; col++)
             {
                 if (col > left) text.Append('\t');
-                text.Append(valueCells[row, col].Text);
+                text.Append(FormatEditableTiming(timingValues[row, col]));
             }
             if (row < bottom) text.AppendLine();
         }
@@ -795,7 +822,8 @@ public partial class MainWindow : Window
 
     private void SetCellValue(int row, int col, double value)
     {
-        valueCells[row, col].Text = value.ToString("0.0", CultureInfo.InvariantCulture);
+        timingValues[row, col] = RoundEditableTiming(value);
+        valueCells[row, col].Text = FormatTimingDisplayValue(timingValues[row, col]);
         RefreshCellColor(valueCells[row, col]);
     }
 
@@ -935,11 +963,10 @@ public partial class MainWindow : Window
 
     private void View3D_Click(object sender, RoutedEventArgs e)
     {
-        var values = new double[RowCount, ColumnCount];
-        for (var r = 0; r < RowCount; r++) for (var c = 0; c < ColumnCount; c++) double.TryParse(valueCells[r, c].Text, NumberStyles.Float, CultureInfo.InvariantCulture, out values[r, c]);
+        var values = ReadTimingValues();
         ModelessWindowManager.ShowOrActivate("Timing.3D", () =>
         {
-            var window = new Surface3DWindow(values, rpmAxis, mapAxis, MapUnit, useCustomHeatColors, customLowColor, customHighColor, SmoothFrom3D, selectionAction: Handle3DSelectionAction) { Owner = this };
+            var window = new Surface3DWindow(values, rpmAxis, mapAxis, MapUnit, useCustomHeatColors, customLowColor, customHighColor, SmoothFrom3D, selectionAction: Handle3DSelectionAction, rpmFormat: "0.########", valueFormatter: FormatTimingDisplayValue) { Owner = this };
             window.Closed += (_, _) =>
             {
                 selectionStart = selectionEnd = null; selecting = false;
@@ -988,8 +1015,7 @@ public partial class MainWindow : Window
             if (Math.Abs(timingChange) > Math.Abs(largestChange)) largestChange = timingChange;
             for (var col = left; col <= right; col++)
             {
-                double.TryParse(valueCells[row, col].Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var timing);
-                SetCellValue(row, col, timing + timingChange); changed++;
+                SetCellValue(row, col, timingValues[row, col] + timingChange); changed++;
             }
         }
         UpdateSelection(); SaveState();
@@ -999,7 +1025,7 @@ public partial class MainWindow : Window
     private void RegionTiming_Click(object sender, RoutedEventArgs e)
     {
         if (regionTimingProfiles.Length != 3) regionTimingProfiles = CreateDefaultRegionProfiles();
-        ModelessWindowManager.ShowOrActivate("Timing.Regions", () => new RegionTimingWindow(MapUnit, regionTimingProfiles, blendRegionTiming, verticalRegionSmoothCells, horizontalRegionSmoothCells, ApplyRegionTiming) { Owner = this });
+        ModelessWindowManager.ShowOrActivate("Timing.Regions", () => new RegionTimingWindow(MapUnit, regionTimingProfiles, blendRegionTiming, verticalRegionSmoothCells, horizontalRegionSmoothCells, dialog => WorkingRunner.Run(this, () => ApplyRegionTiming(dialog))) { Owner = this });
     }
 
     private void ApplyRegionTiming(RegionTimingWindow dialog)
@@ -1092,7 +1118,11 @@ public partial class MainWindow : Window
     }
     private void RefreshCellColor(TextBox cell)
     {
-        if (double.TryParse(cell.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) { cell.Text = value.ToString("0.0", CultureInfo.InvariantCulture); cell.Background = TimingBrush(value); }
+        if (cell.Tag is ValueTuple<int, int> point && point.Item1 >= 0 && point.Item1 < timingValues.GetLength(0) && point.Item2 >= 0 && point.Item2 < timingValues.GetLength(1))
+        {
+            var value = timingValues[point.Item1, point.Item2];
+            cell.Text = FormatTimingDisplayValue(value); cell.Background = TimingBrush(value);
+        }
         else cell.Background = new SolidColorBrush(Color.FromRgb(100, 30, 38));
     }
     private void AddLabel(string text, int row, int column, bool mapLabel)
@@ -1125,7 +1155,7 @@ public partial class MainWindow : Window
     {
         var editor = new TextBox
         {
-            Tag = (isMap, index), Text = value.ToString(isMap ? MapAxisFormat : "0", CultureInfo.InvariantCulture),
+            Tag = (isMap, index), Text = FormatExactAxisValue(value),
             Foreground = new SolidColorBrush(Color.FromRgb(127, 227, 208)),
             Background = new SolidColorBrush(isMap ? Color.FromRgb(16, 31, 45) : Color.FromRgb(15, 40, 51)),
             BorderBrush = new SolidColorBrush(Color.FromRgb(38, 58, 76)), BorderThickness = new Thickness(.5),
@@ -1133,7 +1163,7 @@ public partial class MainWindow : Window
             FontSize = isMap ? 11 : 10, FontWeight = FontWeights.Bold, Padding = new Thickness(2),
             ToolTip = isMap ? $"Edit MAP breakpoint ({MapUnit})" : "Edit RPM breakpoint"
         };
-        editor.GotKeyboardFocus += (_, _) => { editor.Text = (isMap ? mapAxis[index] : rpmAxis[index]).ToString(isMap ? "0.###" : "0", CultureInfo.InvariantCulture); editor.SelectAll(); };
+        editor.GotKeyboardFocus += (_, _) => { var current = isMap ? mapAxis[index] : rpmAxis[index]; axisEditOriginalValues[editor] = current; editor.Text = FormatExactAxisValue(current); editor.SelectAll(); };
         editor.PreviewMouseLeftButtonDown += AxisEditor_MouseDown;
         editor.PreviewMouseRightButtonDown += AxisEditor_RightClick;
         var axisMenu = new ContextMenu();
@@ -1416,9 +1446,24 @@ public partial class MainWindow : Window
     private bool CommitAxisEditor(TextBox editor)
     {
         if (editor.Tag is not ValueTuple<bool, int> tag) return false;
-        var (isMap, index) = tag; var axis = isMap ? mapAxis : rpmAxis;
-        var updated = double.TryParse(editor.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
-            ? UpdateSharedAxisValue(isMap, index, value, true) : null;
+        var (isMap, index) = tag; var editors = isMap ? mapAxisCells : rpmAxisCells;
+        if (index < 0 || index >= editors.Length || !ReferenceEquals(editor, editors[index])) return true;
+        var axis = isMap ? mapAxis : rpmAxis;
+        if (!double.TryParse(editor.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var currentValue) || !double.IsFinite(currentValue))
+            currentValue = double.NaN;
+        if (axisEditOriginalValues.Remove(editor, out var originalValue) && currentValue.Equals(originalValue) && !axis[index].Equals(originalValue))
+        {
+            editor.Text = FormatExactAxisValue(axis[index]);
+            editor.Background = new SolidColorBrush(isMap ? Color.FromRgb(16, 31, 45) : Color.FromRgb(15, 40, 51));
+            return true;
+        }
+        if (double.IsFinite(currentValue) && currentValue.Equals(axis[index]))
+        {
+            editor.Text = FormatExactAxisValue(axis[index]);
+            editor.Background = new SolidColorBrush(isMap ? Color.FromRgb(16, 31, 45) : Color.FromRgb(15, 40, 51));
+            return true;
+        }
+        var updated = double.IsFinite(currentValue) ? UpdateSharedAxisValue(isMap, index, currentValue, true) : null;
         if (updated is null)
         {
             editor.Text = axis[index].ToString(isMap ? MapAxisFormat : "0", CultureInfo.InvariantCulture);
@@ -1436,13 +1481,13 @@ public partial class MainWindow : Window
         return true;
     }
     private static double[] EvenRange(double start, double end, int count) => Enumerable.Range(0, count).Select(i => start + (end - start) * i / (count - 1)).ToArray();
-    private void Clear_Click(object sender, RoutedEventArgs e) { PushUndo(); foreach (var cell in valueCells) if (cell is not null) { cell.Text = "0.0"; RefreshCellColor(cell); } StatusText.Text = "Timing values cleared"; }
+    private void Clear_Click(object sender, RoutedEventArgs e) { PushUndo(); for (var row = 0; row < RowCount; row++) for (var col = 0; col < ColumnCount; col++) SetCellValue(row, col, 0); StatusText.Text = "Timing values cleared"; }
     private void Export_Click(object sender, RoutedEventArgs e)
     {
         if (rpmAxis.Length == 0) return; var dialog = new SaveFileDialog { Filter = "CSV file (*.csv)|*.csv", FileName = "timing-table.csv" }; if (dialog.ShowDialog() != true) return;
         var csv = new StringBuilder();
-        for (var row = 0; row < RowCount; row++) { csv.Append(FormatMap(mapAxis[row])); for (var col = 0; col < ColumnCount; col++) csv.Append(',').Append(valueCells[row, col].Text); csv.AppendLine(); }
-        csv.Append("Engine RPM"); foreach (var rpm in rpmAxis) csv.Append(',').Append(rpm.ToString("0", CultureInfo.InvariantCulture)); csv.AppendLine();
+        for (var row = 0; row < RowCount; row++) { csv.Append(FormatExactAxisValue(mapAxis[row])); for (var col = 0; col < ColumnCount; col++) csv.Append(',').Append(FormatEditableTiming(timingValues[row, col])); csv.AppendLine(); }
+        csv.Append("Engine RPM"); foreach (var rpm in rpmAxis) csv.Append(',').Append(FormatExactAxisValue(rpm)); csv.AppendLine();
         File.WriteAllText(dialog.FileName, csv.ToString()); StatusText.Text = $"Saved {Path.GetFileName(dialog.FileName)}";
     }
 
@@ -1452,10 +1497,7 @@ public partial class MainWindow : Window
         var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "timing-table.xlsx" };
         if (dialog.ShowDialog() != true) return;
 
-        var timing = new double[RowCount, ColumnCount];
-        for (var row = 0; row < RowCount; row++)
-            for (var col = 0; col < ColumnCount; col++)
-                double.TryParse(valueCells[row, col].Text, NumberStyles.Float, CultureInfo.InvariantCulture, out timing[row, col]);
+        var timing = ReadTimingValues();
 
         var lowColor = useCustomHeatColors ? customLowColor : HslToColor(0, .96, .52);
         var middleColor = useCustomHeatColors
@@ -1463,7 +1505,7 @@ public partial class MainWindow : Window
             : HslToColor(150, .96, .52);
         var highColor = useCustomHeatColors ? customHighColor : HslToColor(300, .96, .52);
 
-        ExcelTimingExporter.Export(dialog.FileName, rpmAxis, mapAxis, timing, MapUnit, lowColor, middleColor, highColor, useCustomHeatColors);
+        ExcelTimingExporter.Export(dialog.FileName, rpmAxis, mapAxis, timing, MapUnit, lowColor, middleColor, highColor, useCustomHeatColors, valueNumberFormat: MagnitudeNumberFormatter.ExcelFormat(timingLeadingDisplayDigits, timingTrailingDisplayDecimals));
         StatusText.Text = $"Saved {Path.GetFileName(dialog.FileName)} with heat-map formatting";
     }
 
@@ -1473,13 +1515,19 @@ public partial class MainWindow : Window
     private void Undo()
     {
         if (undoHistory.Count == 0) { StatusText.Text = "Nothing to undo"; return; }
-        redoHistory.Push(CaptureSnapshot()); RestoreSnapshot(undoHistory.Pop()); StatusText.Text = "Change undone";
+        WorkingRunner.Run(this, () =>
+        {
+            redoHistory.Push(CaptureSnapshot()); RestoreSnapshot(undoHistory.Pop()); StatusText.Text = "Change undone";
+        });
     }
 
     private void Redo()
     {
         if (redoHistory.Count == 0) { StatusText.Text = "Nothing to redo"; return; }
-        undoHistory.Push(CaptureSnapshot()); RestoreSnapshot(redoHistory.Pop()); StatusText.Text = "Change redone";
+        WorkingRunner.Run(this, () =>
+        {
+            undoHistory.Push(CaptureSnapshot()); RestoreSnapshot(redoHistory.Pop()); StatusText.Text = "Change redone";
+        });
     }
 
     private void PushUndo(MapSnapshot? snapshot = null)
@@ -1499,7 +1547,7 @@ public partial class MainWindow : Window
         for (var row = 0; row < RowCount; row++)
         {
             timing[row] = new double[ColumnCount];
-            for (var col = 0; col < ColumnCount; col++) double.TryParse(valueCells[row, col].Text, NumberStyles.Float, CultureInfo.InvariantCulture, out timing[row][col]);
+            for (var col = 0; col < ColumnCount; col++) timing[row][col] = timingValues[row, col];
         }
         return new MapSnapshot(rpmAxis.ToArray(), mapAxis.ToArray(), timing, idleTransitionRpm, wotTransitionMap, LowTimingBox.Text, HighTimingBox.Text);
     }
@@ -1537,7 +1585,7 @@ public partial class MainWindow : Window
             for (var row = 0; row < RowCount; row++)
             {
                 timing[row] = new double[ColumnCount];
-                for (var col = 0; col < ColumnCount; col++) double.TryParse(valueCells[row, col].Text, NumberStyles.Float, CultureInfo.InvariantCulture, out timing[row][col]);
+                for (var col = 0; col < ColumnCount; col++) timing[row][col] = timingValues[row, col];
             }
             var state = new AutosaveState
             {
@@ -1554,7 +1602,9 @@ public partial class MainWindow : Window
                 RegionTimingProfiles = regionTimingProfiles,
                 BlendRegionTiming = blendRegionTiming,
                 VerticalRegionSmoothCells = verticalRegionSmoothCells,
-                HorizontalRegionSmoothCells = horizontalRegionSmoothCells
+                HorizontalRegionSmoothCells = horizontalRegionSmoothCells,
+                TimingLeadingDisplayDigits = timingLeadingDisplayDigits,
+                TimingTrailingDisplayDecimals = timingTrailingDisplayDecimals
             };
             Directory.CreateDirectory(Path.GetDirectoryName(AutosavePath)!);
             File.WriteAllText(AutosavePath, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
@@ -1588,11 +1638,17 @@ public partial class MainWindow : Window
             blendRegionTiming = state.BlendRegionTiming;
             verticalRegionSmoothCells = Math.Clamp(state.VerticalRegionSmoothCells, 3, 64);
             horizontalRegionSmoothCells = Math.Clamp(state.HorizontalRegionSmoothCells, 3, 64);
+            timingLeadingDisplayDigits = Math.Clamp(state.TimingLeadingDisplayDigits, 1, 4);
+            timingTrailingDisplayDecimals = Math.Clamp(state.TimingTrailingDisplayDecimals, 0, 3);
+            syncingTimingDisplayPrecision = true;
+            TimingLeadingPrecisionBox.SelectedIndex = timingLeadingDisplayDigits - 1;
+            TimingTrailingPrecisionBox.SelectedIndex = timingTrailingDisplayDecimals;
+            syncingTimingDisplayPrecision = false;
             IdleRpmBox.Text = state.IdleRpm; IdleMapBox.Text = state.IdleMap; WotRpmBox.Text = state.WotRpm; WotMapBox.Text = state.WotMap;
             rpmAxis = IsLegacyDefaultRpmAxis(state.RpmAxis) ? DefaultRpmAxis.ToArray() : state.RpmAxis;
             if (IsLegacyDefaultRpmAxis(state.RpmAxis)) { MinRpmBox.Text = "500"; MaxRpmBox.Text = "7000"; }
-            mapAxis = state.MapAxis.Select(RoundMapValue).ToArray();
-            MinMapBox.Text = FormatMap(mapAxis[^1]); MaxMapBox.Text = FormatMap(mapAxis[0]);
+            mapAxis = state.MapAxis.ToArray();
+            MinMapBox.Text = FormatExactAxisValue(mapAxis[^1]); MaxMapBox.Text = FormatExactAxisValue(mapAxis[0]);
             if (double.TryParse(WotMapBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var loadedWotMap)) WotMapBox.Text = FormatMap(RoundMapValue(loadedWotMap));
             if (double.TryParse(IdleMapBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var loadedIdleMap)) IdleMapBox.Text = FormatMap(RoundMapValue(loadedIdleMap));
             var lowTiming = double.TryParse(state.LowTiming, NumberStyles.Float, CultureInfo.InvariantCulture, out var low) ? low : 42;
@@ -1642,6 +1698,8 @@ public partial class MainWindow : Window
         public bool BlendRegionTiming { get; set; } = true;
         public int VerticalRegionSmoothCells { get; set; } = 3;
         public int HorizontalRegionSmoothCells { get; set; } = 3;
+        public int TimingLeadingDisplayDigits { get; set; } = 3;
+        public int TimingTrailingDisplayDecimals { get; set; } = 1;
     }
 
     private enum RegionPointPick { None, IdleToCruise, CruiseToWot, Both }

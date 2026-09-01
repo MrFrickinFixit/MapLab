@@ -12,7 +12,7 @@ internal static class ExcelTimingExporter
 {
     public static void Export(string path, double[] rpm, double[] map, double[,] timing, string mapUnit,
         Color lowColor, Color middleColor, Color highColor, bool twoColorScale,
-        string sheetName = "Timing Map", string documentTitle = "Ignition Timing Map", string xAxisTitle = "Engine RPM")
+        string sheetName = "Timing Map", string documentTitle = "Ignition Timing Map", string xAxisTitle = "Engine RPM", string valueNumberFormat = "0.0")
     {
         using var output = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
         using var archive = new ZipArchive(output, ZipArchiveMode.Create);
@@ -20,7 +20,7 @@ internal static class ExcelTimingExporter
         WriteEntry(archive, "_rels/.rels", PackageRelationships);
         WriteEntry(archive, "xl/workbook.xml", BuildWorkbook(sheetName));
         WriteEntry(archive, "xl/_rels/workbook.xml.rels", WorkbookRelationships);
-        WriteEntry(archive, "xl/styles.xml", Styles);
+        WriteEntry(archive, "xl/styles.xml", Styles.Replace("formatCode=\"0.0\"", $"formatCode=\"{Escape(valueNumberFormat)}\"", StringComparison.Ordinal));
         WriteEntry(archive, "docProps/app.xml", AppProperties);
         WriteEntry(archive, "docProps/core.xml", BuildCoreProperties(documentTitle));
         WriteEntry(archive, "xl/worksheets/sheet1.xml", BuildSheet(rpm, map, timing, mapUnit, lowColor, middleColor, highColor, twoColorScale, xAxisTitle));

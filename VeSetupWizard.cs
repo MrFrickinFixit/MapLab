@@ -104,7 +104,7 @@ public sealed class VeSetupWizard : Window
         var actions = new StackPanel { Orientation = Orientation.Horizontal };
         backButton = MakeButton("Back", false); backButton.Click += (_, _) => ShowPage(pageIndex - 1);
         nextButton = MakeButton("Next", true); nextButton.Click += (_, _) => { if (pageIndex == 0 && !ApplyMapRange(false)) return; if (ReadSettings()) ShowPage(pageIndex + 1); };
-        applyButton = MakeButton("Apply VE Table", true); applyButton.Click += (_, _) => Apply();
+        applyButton = MakeButton("Apply VE Table", true); applyButton.Click += (_, _) => WorkingRunner.Run(this, Apply);
         var close = MakeButton("Close", false); close.Click += (_, _) => Close();
         actions.Children.Add(backButton); actions.Children.Add(nextButton); actions.Children.Add(applyButton); actions.Children.Add(close); Grid.SetColumn(actions, 1); footer.Children.Add(actions);
         Grid.SetRow(footer, 2); root.Children.Add(footer); Content = root; ShowPage(0);
@@ -378,7 +378,9 @@ public sealed class VeSetupWizard : Window
         s.BoostVe = Math.Round(s.Boosted ? Math.Min(140, s.WotVe + 8 + boostPsi * .45) : s.WotVe + 4, 1);
     }
 
-    private void BuildPreview()
+    private void BuildPreview() => WorkingRunner.Run(this, BuildPreviewCore);
+
+    private void BuildPreviewCore()
     {
         if (!ReadSettings()) { ShowPage(0); return; }
         var proposed = Generate(current, rpm, map, mapUnit, selection, regionBoundary, settings); var fuelFlow = ConvertToFuelFlow(proposed, rpm, map, mapUnit, settings);
@@ -409,7 +411,8 @@ public sealed class VeSetupWizard : Window
         for (var rowIndex = 0; rowIndex < grid.Rows; rowIndex++) for (var colIndex = 0; colIndex < grid.Columns; colIndex++)
         {
             var row = (int)Math.Round(rowIndex * (values.GetLength(0) - 1d) / Math.Max(1, grid.Rows - 1)); var col = (int)Math.Round(colIndex * (values.GetLength(1) - 1d) / Math.Max(1, grid.Columns - 1));
-            grid.Children.Add(new Border { Background = new SolidColorBrush(Heat((values[row, col] - min) / Math.Max(.1, max - min))), BorderBrush = new SolidColorBrush(Color.FromRgb(30, 40, 52)), BorderThickness = new Thickness(.35), ToolTip = $"{rpm[col]:0} RPM • {FormatDisplayMap(ToDisplayMap(map[row]))} {DisplayMapUnit} • {values[row, col]:0.0}{suffix}" });
+            var displayedValue = values[row, col].ToString(suffix == "%" ? "0" : "0.0", CultureInfo.InvariantCulture);
+            grid.Children.Add(new Border { Background = new SolidColorBrush(Heat((values[row, col] - min) / Math.Max(.1, max - min))), BorderBrush = new SolidColorBrush(Color.FromRgb(30, 40, 52)), BorderThickness = new Thickness(.35), ToolTip = $"{rpm[col]:0} RPM • {FormatDisplayMap(ToDisplayMap(map[row]))} {DisplayMapUnit} • {displayedValue}{suffix}" });
         }
         stack.Children.Add(grid); return new Border { BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(10), Child = stack };
     }
