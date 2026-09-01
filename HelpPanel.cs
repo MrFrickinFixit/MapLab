@@ -27,7 +27,7 @@ public sealed class HelpPanel : Grid
             "Drag across cells to select an area. Ctrl+click or Ctrl+drag adds another area.",
             "Type into a selected cell to apply that value to every selected cell.",
             "Interpolate or smooth the selection, then inspect it in the 3D view.",
-            "Export the finished map to CSV or Excel."));
+            "Export the finished map to CSV or Excel. Setup and editing cards are above the map; display, output, and history cards are below it."));
 
         Section(document, "How the Tables Relate", Bullets(
             "Fueling and Ignition Timing keep separate MAP scales and MAP units.",
@@ -48,6 +48,7 @@ public sealed class HelpPanel : Grid
             "Click an axis breakpoint, enter a value, and press Enter. Breakpoints must remain ordered and unique.",
             "Changing a minimum or maximum endpoint automatically rescales that axis.",
             "Drag across axis values and right-click to Auto-fill or paste breakpoints.",
+            "Pasted X, RPM, Y, or MAP breakpoint values are retained as entered; clicking back into the table commits the pasted scale.",
             "MAP uses whole-number kPa values and one decimal place for PSI.",
             "Fuel MAP changes never alter the Ignition Timing MAP scale, and timing MAP changes never alter Fueling.",
             "Sandbox X and Y units may be standard, Unitless, or custom. Custom-unit changes relabel the axis without converting values."));
@@ -75,7 +76,9 @@ public sealed class HelpPanel : Grid
         Section(document, "Fueling and VE Setup", Bullets(
             "Fuel cells store editable volumetric-efficiency percentages. View as lb/hr changes only the display.",
             "VE Setup uses engine information and VE targets to create a preview before values are committed.",
-            "Forced-induction setup displays MAP inputs in PSI and enables boost-only fields.",
+            "Forced-induction setup displays MAP inputs in PSI and enables 1-, 2-, 3-bar, or custom MAP sensor selection. Custom ratings must be greater than 1 and no more than 10 bar.",
+            "The selected sensor rating proposes an editable maximum boost range. Use Apply MAP Range to rescale the Fueling MAP breakpoints before continuing.",
+            "Boosted Fueling setup is performed inside the VE wizard; there is no separate Convert to Boosted command.",
             "The wizard operates on the Fueling MAP axis only and cannot change the Ignition Timing MAP scale.",
             "Always review generated values before applying them to an ECU."));
 
@@ -97,9 +100,16 @@ public sealed class HelpPanel : Grid
         Section(document, "Copy, Paste, Export, and Recovery", Bullets(
             "Copied cells use tab-separated rows and can be moved between Map Lab tables and compatible tuning software.",
             "Select an axis starting point before pasting a copied row or column of breakpoints.",
-            "CSV and Excel put the X scale at the bottom. Excel includes matching heat-map formatting.",
+            "CSV and Excel put the X scale at the bottom. Excel includes matching heat-map formatting without header filters.",
             "Timing, Fueling, and Sandbox autosave separately. Dialog settings are retained until changed.",
             "Use Undo immediately after an unwanted edit, paste, offset, smoothing operation, resize, or axis change."));
+
+        Section(document, "Display and Long Operations", Bullets(
+            "Use Number Display below each map to choose leading digits and trailing decimal precision without changing the stored values.",
+            "Fueling values may retain up to three decimal places even when the table displays a rounded value.",
+            "Large resizes, smoothing operations, and extensive Undo or Redo changes show a Working progress window.",
+            "Only one instance of each modeless tool dialog is opened. Selecting its command again restores the existing dialog.",
+            "Closing or cancelling a dialog returns focus to Map Lab and preserves the main window state."));
 
         document.Blocks.Add(Heading("Keyboard Shortcuts"));
         var shortcuts = new Table { CellSpacing = 0 }; shortcuts.Columns.Add(new TableColumn { Width = new GridLength(130) }); shortcuts.Columns.Add(new TableColumn()); var rows = new TableRowGroup(); shortcuts.RowGroups.Add(rows);
