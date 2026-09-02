@@ -103,7 +103,7 @@ public sealed class FuelingPanel : Grid
         tools.Children.Add(ControlGroup("FUEL SETUP TOOLS", Button("◒  VE Setup", OpenVeSetup, true)));
         tools.Children.Add(MatrixAxisGroup());
         tools.Children.Add(ControlGroup("CELL EDITING", Button("⧉  Copy", (_, _) => CopySelection()), Button("▣  Paste", (_, _) => PasteSelection()), Button("△  Delta", DeltaCompare)));
-        tools.Children.Add(ControlGroup("SMOOTHING", Button("⌁  Interpolate", InterpolateSelection), Button("⚙  Smooth Selected…", AdvancedSmooth, true), Button("↕  Columns", SmoothColumns), Button("↔  Rows", SmoothRows)));
+        tools.Children.Add(ControlGroup("SMOOTHING", Button("⚙  Smooth Selected…", AdvancedSmooth, true), Button("↕  Columns", SmoothColumns), Button("↔  Rows", SmoothRows)));
         var commandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = tools, Margin = new Thickness(0, 0, 0, 10) };
         Grid.SetRow(commandBar, 1); Children.Add(commandBar);
         var bottomTools = new StackPanel { Orientation = Orientation.Horizontal };
@@ -510,7 +510,7 @@ public sealed class FuelingPanel : Grid
     private ContextMenu CreateContextMenu()
     {
         var menu = new ContextMenu(); menu.Items.Add(Item("Copy selected", (_, _) => CopySelection())); menu.Items.Add(Item("Paste", (_, _) => PasteSelection())); menu.Items.Add(Item("Offset selection…", OffsetSelection)); menu.Items.Add(new Separator());
-        menu.Items.Add(Item("Interpolate selection", InterpolateSelection)); menu.Items.Add(Item("Smooth selected…", AdvancedSmooth)); menu.Items.Add(Item("Smooth rows", SmoothRows)); menu.Items.Add(Item("Smooth columns", SmoothColumns));
+        menu.Items.Add(Item("Smooth selected…", AdvancedSmooth)); menu.Items.Add(Item("Smooth rows", SmoothRows)); menu.Items.Add(Item("Smooth columns", SmoothColumns));
         menu.Items.Add(new Separator()); menu.Items.Add(Item("Clear selected", ClearSelected)); return menu;
     }
     private static MenuItem Item(string header, RoutedEventHandler click) { var item = new MenuItem { Header = header }; item.Click += click; return item; }
@@ -715,12 +715,6 @@ public sealed class FuelingPanel : Grid
     }
 
     private void SmoothSelection(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || b - t < 2 || r - l < 2) { Info("Select at least 3 × 3 fuel cells."); return; } Smooth(t, b, l, r, 2, .65); }
-    private void InterpolateSelection(object? sender, RoutedEventArgs e)
-    {
-        if (showFuelFlow) { Info("Interpolation works on VE percentages. Clear 'View as lb/hr' before interpolating."); return; }
-        if (!Bounds(out var top, out var bottom, out var left, out var right) || !SelectionInterpolator.CanApply(top, bottom, left, right)) { Info("Select at least three cells in a row or column, or a selection at least 3 × 3."); return; }
-        PushUndo(); ve = SelectionInterpolator.Apply(ve, top, bottom, left, right); Save(); RefreshAll(); UpdateSelection(); status.Text = $"Interpolated {right - left + 1} × {bottom - top + 1} fuel cells from the selected perimeter";
-    }
     private void Refine(object? sender, RoutedEventArgs e)
     {
         if (ModelessWindowManager.ActivateIfOpen("Fuel.Refinement")) return;
@@ -741,7 +735,7 @@ public sealed class FuelingPanel : Grid
     }
     private void ApplyAdvancedSmoothing(AdvancedSmoothingWindow dialog, IReadOnlyCollection<(int Row, int Col)> selected)
     {
-        advancedSmoothingOptions = dialog.Options; PushUndo(); ve = AdvancedSmoother.Apply(ve, selected, advancedSmoothingOptions);
+        advancedSmoothingOptions = dialog.Options; PushUndo(); ve = AdvancedSmoother.Apply(ve, selected, advancedSmoothingOptions, rpm, map);
         Save(); RefreshAll(); UpdateSelection(); status.Text = $"Smoothed {selected.Count} selected fuel cells  •  {advancedSmoothingOptions.Algorithm}  •  {advancedSmoothingOptions.Passes} passes";
     }
     private void DirectionalSmooth(object? sender, RoutedEventArgs e)
@@ -822,7 +816,6 @@ public sealed class FuelingPanel : Grid
             case SurfaceSelectionAction.Offset:
                 ModelessWindowManager.ShowOrActivate("Fuel.Offset", () => new OffsetSelectionWindow(selectionOffsetAmount, selectionOffsetIsPercentage, (direction, amount, percentage) => { ApplyOffset(top, bottom, left, right, direction, amount, percentage); Refresh(); }) { Owner = Window.GetWindow(this) }); break;
             case SurfaceSelectionAction.Smooth: SmoothSelection(this, new RoutedEventArgs()); Refresh(); break;
-            case SurfaceSelectionAction.Interpolate: InterpolateSelection(this, new RoutedEventArgs()); Refresh(); break;
             case SurfaceSelectionAction.Refine:
                 ModelessWindowManager.ShowOrActivate("Fuel.Refinement", () => new SmoothRefinementWindow(refinementStrength, refinementPasses, dialog => WorkingRunner.Run(this, () => { ApplyRefinement(dialog, top, bottom, left, right); Refresh(); })) { Owner = Window.GetWindow(this) }); break;
             case SurfaceSelectionAction.Advanced:

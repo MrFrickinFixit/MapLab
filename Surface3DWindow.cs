@@ -6,7 +6,7 @@ using System.Windows.Media.Media3D;
 
 namespace TimingTableCalculator;
 
-public enum SurfaceSelectionAction { Undo, Redo, Copy, Paste, Offset, Interpolate, Smooth, Refine, Advanced, SmoothRows, SmoothColumns, Clear }
+public enum SurfaceSelectionAction { Undo, Redo, Copy, Paste, Offset, Smooth, Refine, Advanced, SmoothRows, SmoothColumns, Clear }
 
 public sealed class Surface3DWindow : Window
 {
@@ -119,7 +119,6 @@ public sealed class Surface3DWindow : Window
         menu.Items.Add(ActionItem("Paste", SurfaceSelectionAction.Paste));
         menu.Items.Add(ActionItem("Offset selection…", SurfaceSelectionAction.Offset));
         menu.Items.Add(new Separator());
-        menu.Items.Add(ActionItem("Interpolate selection", SurfaceSelectionAction.Interpolate));
         menu.Items.Add(ActionItem("Smooth selected…", SurfaceSelectionAction.Advanced));
         menu.Items.Add(ActionItem("Smooth rows", SurfaceSelectionAction.SmoothRows));
         menu.Items.Add(ActionItem("Smooth columns", SurfaceSelectionAction.SmoothColumns));

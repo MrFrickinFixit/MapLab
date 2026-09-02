@@ -401,7 +401,7 @@ public partial class MainWindow : Window
         var menu = new ContextMenu();
         menu.Items.Add(ContextItem("Copy selected", (_, _) => CopySelection())); menu.Items.Add(ContextItem("Paste", (_, _) => PasteSelection()));
         menu.Items.Add(ContextItem("Offset selection…", OffsetSelection_Click));
-        menu.Items.Add(new Separator()); menu.Items.Add(ContextItem("Interpolate selection", Interpolate_Click)); menu.Items.Add(ContextItem("Smooth selected…", AdvancedSmooth_Click));
+        menu.Items.Add(new Separator()); menu.Items.Add(ContextItem("Smooth selected…", AdvancedSmooth_Click));
         menu.Items.Add(ContextItem("Smooth rows", SmoothRows_Click)); menu.Items.Add(ContextItem("Smooth columns", SmoothColumns_Click));
         menu.Items.Add(new Separator()); menu.Items.Add(ContextItem("Clear selected", ClearSelectedTiming)); return menu;
     }
@@ -588,15 +588,6 @@ public partial class MainWindow : Window
         SmoothSelectionBounds(top, bottom, left, right);
     }
 
-    private void Interpolate_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetSelectionBounds(out var top, out var bottom, out var left, out var right) || !SelectionInterpolator.CanApply(top, bottom, left, right))
-        { MessageBox.Show("Select at least three cells in a row or column, or a selection at least 3 × 3.", "Select a larger area", MessageBoxButton.OK, MessageBoxImage.Information); return; }
-        PushUndo(); var interpolated = SelectionInterpolator.Apply(ReadTimingValues(), top, bottom, left, right);
-        for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) SetCellValue(row, col, interpolated[row, col]);
-        UpdateSelection(); SaveState(); StatusText.Text = $"Interpolated {right - left + 1} × {bottom - top + 1} timing cells from the selected perimeter";
-    }
-
     private void SmoothSelectionBounds(int top, int bottom, int left, int right)
     {
         PushUndo();
@@ -647,7 +638,6 @@ public partial class MainWindow : Window
             case SurfaceSelectionAction.Offset:
                 ModelessWindowManager.ShowOrActivate("Timing.Offset", () => new OffsetSelectionWindow(selectionOffsetAmount, selectionOffsetIsPercentage, (direction, amount, percentage) => { ApplyTimingOffset(top, bottom, left, right, direction, amount, percentage); Refresh(); }) { Owner = this }); break;
             case SurfaceSelectionAction.Smooth: Smooth_Click(this, new RoutedEventArgs()); Refresh(); break;
-            case SurfaceSelectionAction.Interpolate: Interpolate_Click(this, new RoutedEventArgs()); Refresh(); break;
             case SurfaceSelectionAction.Refine:
                 ModelessWindowManager.ShowOrActivate("Timing.Refinement", () => new SmoothRefinementWindow(refinementStrength, refinementPasses, dialog => WorkingRunner.Run(this, () => { ApplyRefinement(dialog, top, bottom, left, right); Refresh(); })) { Owner = this }); break;
             case SurfaceSelectionAction.Advanced:
@@ -702,7 +692,7 @@ public partial class MainWindow : Window
     private void ApplyAdvancedSmoothing(AdvancedSmoothingWindow dialog, IReadOnlyCollection<(int Row, int Col)> selected)
     {
         advancedSmoothingOptions = dialog.Options; PushUndo();
-        var result = AdvancedSmoother.Apply(ReadTimingValues(), selected, advancedSmoothingOptions);
+        var result = AdvancedSmoother.Apply(ReadTimingValues(), selected, advancedSmoothingOptions, rpmAxis, mapAxis);
         foreach (var cell in selected) SetCellValue(cell.Row, cell.Col, result[cell.Row, cell.Col]);
         UpdateSelection(); SaveState(); StatusText.Text = $"Smoothed {selected.Count} selected timing cells  •  {advancedSmoothingOptions.Algorithm}  •  {advancedSmoothingOptions.Passes} passes";
     }

@@ -26,7 +26,7 @@ public sealed class HelpPanel : Grid
             "Set the matrix size and edit or paste the X and Y axis breakpoints.",
             "Drag across cells to select an area. Ctrl+click or Ctrl+drag adds another area.",
             "Type into a selected cell to apply that value to every selected cell.",
-            "Interpolate or smooth the selection, then inspect it in the 3D view.",
+            "Smooth the selection, then inspect it in the 3D view.",
             "Export the finished map to CSV or Excel. Setup and editing cards are above the map; display, output, and history cards are below it."));
 
         Section(document, "How the Tables Relate", Bullets(
@@ -40,7 +40,7 @@ public sealed class HelpPanel : Grid
             "Ctrl+click or Ctrl+drag to add separated cells or another area.",
             "Click a single unselected cell to replace the previous selection. Ctrl+A selects the complete active table.",
             "With several cells selected, edit one selected cell and press Enter to apply the value to all selected cells.",
-            "Right-click a selection for copy, paste, offset, interpolation, smoothing, and clear commands.",
+            "Right-click a selection for copy, paste, offset, smoothing, and clear commands.",
             "After pasting a complete table of cells, the selection is cleared."));
         document.Blocks.Add(Illustration("Drag selects one area. Hold Ctrl while clicking or dragging to add separated areas.", SelectionDiagram()));
 
@@ -54,13 +54,14 @@ public sealed class HelpPanel : Grid
             "Sandbox X and Y units may be standard, Unitless, or custom. Custom-unit changes relabel the axis without converting values."));
         document.Blocks.Add(Illustration("Y-axis values run vertically; X-axis values run left to right along the bottom.", AxisDiagram()));
 
-        Section(document, "Smoothing and Interpolation", Bullets(
-            "Interpolate rebuilds the selected interior from its outer edge values.",
+        Section(document, "Smoothing", Bullets(
             "Smooth Rows blends horizontally between the outer selected columns; those columns remain anchors.",
             "Smooth Columns blends vertically between the outer selected rows; those rows remain anchors.",
             "Smooth Selected opens Advanced Smoothing and includes every selected cell, including separated Ctrl-selected areas.",
             "Shape-preserving favors gradual transitions. Constrained and standard weighted modes average nearby selected cells.",
             "Spike removal reduces isolated peaks or dips. Edge-preserving retains stronger transitions.",
+            "Smooth to Surroundings changes only selected cells while sampling fixed neighbors outside the selection. Use Across columns for a vertical wrinkle, Across rows for a horizontal wrinkle, or Both directions.",
+            "Neighbor reach is the number of cells sampled on each side of each selected cell. Weights use actual axis spacing. This mode keeps selected edges editable and limits overshoot using the sampled neighborhood, so narrow raised or dipped strips can blend into the surrounding map.",
             "Preserve selection perimeter fixes the outside cells. Prevent overshoot limits results to the selected value range.",
             "Every Apply action creates a separate Undo step."));
         document.Blocks.Add(Illustration("Row and column smoothing use the outside selected cells as anchors and reshape only the cells between them.", SmoothingDiagram()));
@@ -85,7 +86,7 @@ public sealed class HelpPanel : Grid
         Section(document, "Map Sandbox", Bullets(
             "Use Sandbox for custom numeric tables that do not need operating-region boundaries.",
             "Set independent dimensions, breakpoints, and X/Y units. Choose Custom… to add or remove unit names.",
-            "Sandbox includes selection editing, offsets, interpolation, all smoothing algorithms, 3D editing, history, autosave, CSV, and Excel export.",
+            "Sandbox includes selection editing, offsets, all smoothing algorithms, 3D editing, history, autosave, CSV, and Excel export.",
             "Sandbox changes never modify Fueling or Ignition Timing."));
 
         Section(document, "3D View", Bullets(
