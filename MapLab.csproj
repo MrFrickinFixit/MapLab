@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <AssemblyName>MapLab-1.0.0-beta</AssemblyName>
+    <AssemblyName>MapLab-1.0.1-beta</AssemblyName>
     <RootNamespace>TimingTableCalculator</RootNamespace>
     <Title>Map Lab</Title>
     <Product>Map Lab</Product>
@@ -19,7 +19,7 @@
     <ApplicationIcon>Assets\MapLab.ico</ApplicationIcon>
     <StartupObject>TimingTableCalculator.App</StartupObject>
     <PackageId></PackageId>
-    <AssemblyTitle>MapLab-1.0.0-beta</AssemblyTitle>
+    <AssemblyTitle>MapLab-1.0.1-beta</AssemblyTitle>
   </PropertyGroup>
 
   <ItemGroup>

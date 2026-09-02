@@ -43,6 +43,9 @@
  <TabItem Header="MAP SANDBOX">
   <Grid Margin="18"><ContentControl x:Name="SandboxHost"/></Grid>
  </TabItem>
+ <TabItem Header="SETTINGS">
+  <Grid Margin="18"><ContentControl x:Name="SettingsHost"/></Grid>
+ </TabItem>
  <TabItem Header="HELP">
   <Grid Margin="18"><ContentControl x:Name="HelpHost"/></Grid>
  </TabItem>
