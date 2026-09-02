@@ -88,7 +88,7 @@ public sealed class SandboxPanel : Grid
         var xUnits = new StackPanel { Orientation = Orientation.Horizontal }; xUnits.Children.Add(xUnitBox);
         tools.Children.Add(Group("X AXIS UNITS", xUnits));
         tools.Children.Add(Group("CELL EDITING", Button("⧉  Copy", (_, _) => Copy()), Button("▣  Paste", (_, _) => Paste()), Button("×  Clear", Clear)));
-        tools.Children.Add(Group("SMOOTHING", Button("⌁  Interpolate", Interpolate), Button("⚙  Smooth Selected…", AdvancedSmooth, true), Button("↕  Columns", SmoothColumns), Button("↔  Rows", SmoothRows)));
+        tools.Children.Add(Group("SMOOTHING", Button("⚙  Smooth Selected…", AdvancedSmooth, true), Button("↕  Columns", SmoothColumns), Button("↔  Rows", SmoothRows)));
         var commandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = tools, Margin = new Thickness(0, 0, 0, 10) };
         Grid.SetRow(commandBar, 1); Children.Add(commandBar);
 
@@ -163,7 +163,7 @@ public sealed class SandboxPanel : Grid
     }
     private void CellEnter(object sender, MouseEventArgs e) { if (selecting && e.LeftButton == MouseButtonState.Pressed && sender is TextBox { Tag: ValueTuple<int, int> p }) { end = p; UpdateSelection(); } }
     private void CellRight(object sender, MouseButtonEventArgs e) { if (sender is TextBox { Tag: ValueTuple<int, int> p } && !IsSelected(p.Item1, p.Item2)) { pinned.Clear(); start = end = p; UpdateSelection(); } }
-    private ContextMenu CellMenu() { var menu = new ContextMenu(); menu.Items.Add(Item("Copy selected", (_, _) => Copy())); menu.Items.Add(Item("Paste", (_, _) => Paste())); menu.Items.Add(Item("Offset selection…", Offset)); menu.Items.Add(new Separator()); menu.Items.Add(Item("Interpolate selection", Interpolate)); menu.Items.Add(Item("Smooth selected…", AdvancedSmooth)); menu.Items.Add(Item("Smooth rows", SmoothRows)); menu.Items.Add(Item("Smooth columns", SmoothColumns)); menu.Items.Add(new Separator()); menu.Items.Add(Item("Clear selected", Clear)); return menu; }
+    private ContextMenu CellMenu() { var menu = new ContextMenu(); menu.Items.Add(Item("Copy selected", (_, _) => Copy())); menu.Items.Add(Item("Paste", (_, _) => Paste())); menu.Items.Add(Item("Offset selection…", Offset)); menu.Items.Add(new Separator()); menu.Items.Add(Item("Smooth selected…", AdvancedSmooth)); menu.Items.Add(Item("Smooth rows", SmoothRows)); menu.Items.Add(Item("Smooth columns", SmoothColumns)); menu.Items.Add(new Separator()); menu.Items.Add(Item("Clear selected", Clear)); return menu; }
 
     private void CommitCell(TextBox cell)
     {
@@ -246,8 +246,7 @@ public sealed class SandboxPanel : Grid
         Build(); Save(); status.Text = $"Sandbox resized to {cols} X × {rows} Y";
     }
 
-    private void Interpolate(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || !SelectionInterpolator.CanApply(t, b, l, r)) { Info("Select at least three cells in a row or column, or at least 3 × 3 cells."); return; } PushUndo(); values = SelectionInterpolator.Apply(values, t, b, l, r); Changed($"Interpolated {r - l + 1} × {b - t + 1} cells"); }
-    private void AdvancedSmooth(object? sender, RoutedEventArgs e) { var selected = Selected(); if (selected.Count == 0) { Info("Select cells to smooth."); return; } ModelessWindowManager.ShowOrActivate("Sandbox.AdvancedSmoothing", () => new AdvancedSmoothingWindow(smoothing, dialog => WorkingRunner.Run(this, () => { smoothing = dialog.Options; PushUndo(); values = AdvancedSmoother.Apply(values, selected, smoothing); Changed($"Smoothed {selected.Count} sandbox cells"); })) { Owner = Window.GetWindow(this) }); }
+    private void AdvancedSmooth(object? sender, RoutedEventArgs e) { var selected = Selected(); if (selected.Count == 0) { Info("Select cells to smooth."); return; } ModelessWindowManager.ShowOrActivate("Sandbox.AdvancedSmoothing", () => new AdvancedSmoothingWindow(smoothing, dialog => WorkingRunner.Run(this, () => { smoothing = dialog.Options; PushUndo(); values = AdvancedSmoother.Apply(values, selected, smoothing, rpm, map); Changed($"Smoothed {selected.Count} sandbox cells"); })) { Owner = Window.GetWindow(this) }); }
     private void SmoothColumns(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || b - t < 2) { Info("Select at least three rows."); return; } PushUndo(); for (var c = l; c <= r; c++) for (var row = t + 1; row < b; row++) { var x = (map[t] - map[row]) / (map[t] - map[b]); values[row, c] = values[t, c] + (values[b, c] - values[t, c]) * Ease(x); } Changed("Smoothed selected columns"); }
     private void SmoothRows(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || r - l < 2) { Info("Select at least three columns."); return; } PushUndo(); for (var row = t; row <= b; row++) for (var c = l + 1; c < r; c++) { var x = (rpm[c] - rpm[l]) / (rpm[r] - rpm[l]); values[row, c] = values[row, l] + (values[row, r] - values[row, l]) * Ease(x); } Changed("Smoothed selected rows"); }
     private void Clear(object? sender, RoutedEventArgs e) { var selected = Selected(); if (selected.Count == 0) return; PushUndo(); foreach (var p in selected) values[p.Row, p.Col] = 0; Changed($"Cleared {selected.Count} sandbox cells"); }
@@ -272,10 +271,9 @@ public sealed class SandboxPanel : Grid
             case SurfaceSelectionAction.Copy: Copy(); break;
             case SurfaceSelectionAction.Paste: Paste(); Refresh3D(); break;
             case SurfaceSelectionAction.Offset: Offset(this, new RoutedEventArgs()); break;
-            case SurfaceSelectionAction.Interpolate: Interpolate(this, new RoutedEventArgs()); Refresh3D(); break;
             case SurfaceSelectionAction.Smooth: SmoothBasic(); Refresh3D(); break;
             case SurfaceSelectionAction.Advanced:
-                var exact = selected.ToArray(); ModelessWindowManager.ShowOrActivate("Sandbox.AdvancedSmoothing", () => new AdvancedSmoothingWindow(smoothing, dialog => WorkingRunner.Run(this, () => { smoothing = dialog.Options; PushUndo(); values = AdvancedSmoother.Apply(values, exact, smoothing); Changed($"Smoothed {exact.Length} sandbox cells"); Refresh3D(); })) { Owner = Window.GetWindow(this) }); break;
+                var exact = selected.ToArray(); ModelessWindowManager.ShowOrActivate("Sandbox.AdvancedSmoothing", () => new AdvancedSmoothingWindow(smoothing, dialog => WorkingRunner.Run(this, () => { smoothing = dialog.Options; PushUndo(); values = AdvancedSmoother.Apply(values, exact, smoothing, rpm, map); Changed($"Smoothed {exact.Length} sandbox cells"); Refresh3D(); })) { Owner = Window.GetWindow(this) }); break;
             case SurfaceSelectionAction.SmoothRows: SmoothRows(this, new RoutedEventArgs()); Refresh3D(); break;
             case SurfaceSelectionAction.SmoothColumns: SmoothColumns(this, new RoutedEventArgs()); Refresh3D(); break;
             case SurfaceSelectionAction.Clear: Clear(this, new RoutedEventArgs()); Refresh3D(); break;
