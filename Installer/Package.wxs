@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
     Name="Map Lab (Beta)"
     Manufacturer="Map Lab"
@@ -14,12 +13,12 @@
     <Icon Id="MapLabIcon.ico" SourceFile="$(var.ProjectRoot)\Assets\MapLab.ico" />
     <Property Id="ARPPRODUCTICON" Value="MapLabIcon.ico" />
 
-    <!-- Advanced setup includes license acceptance, per-user/per-machine scope,
-         destination-folder selection, and optional-feature selection. -->
-    <ui:WixUI Id="WixUI_Advanced" />
+    <!-- The welcome dialog is overridden so setup always walks through scope,
+         destination-folder, and shortcut-feature selection. -->
     <WixVariable Id="WixUILicenseRtf" Value="$(var.ProjectRoot)\Installer\License.rtf" />
     <Property Id="ApplicationFolderName" Value="Map Lab" />
     <Property Id="WixAppFolder" Value="WixPerMachineFolder" />
+    <UIRef Id="MapLabPromptedUI" />
 
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="APPLICATIONFOLDER" Name="Map Lab" />
