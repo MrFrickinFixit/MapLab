@@ -1136,6 +1136,19 @@ public sealed class FuelingPanel : Grid
         }
         catch { syncingConversion = false; return false; }
     }
+    internal string ExportSettingsJson() { Save(); return !string.IsNullOrWhiteSpace(lastSavedJson) ? lastSavedJson : File.ReadAllText(SavePath); }
+    internal bool CanImportSettingsJson(string json)
+    {
+        try { var state = JsonSerializer.Deserialize<FuelState>(json); return state?.Values is { Length: >= 8 and <= 64 } && state.Values[0].Length is >= 8 and <= 64 && state.Values.All(row => row.Length == state.Values[0].Length); }
+        catch { return false; }
+    }
+    internal bool ImportSettingsJson(string json)
+    {
+        if (!CanImportSettingsJson(json)) return false;
+        Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!); File.WriteAllText(SavePath, json); lastSavedJson = null;
+        if (!Load()) return false;
+        undoHistory.Clear(); redoHistory.Clear(); SyncMapUnitControl(); Build(); Save(); return true;
+    }
     private static void Info(string text) => MessageBox.Show(text, "Fueling selection", MessageBoxButton.OK, MessageBoxImage.Information);
     private sealed class FuelState
     {

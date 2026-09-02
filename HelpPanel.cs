@@ -101,6 +101,8 @@ public sealed class HelpPanel : Grid
             "Copied cells use tab-separated rows and can be moved between Map Lab tables and compatible tuning software.",
             "Select an axis starting point before pasting a copied row or column of breakpoints.",
             "CSV and Excel put the X scale at the bottom. Excel includes matching heat-map formatting without header filters.",
+            "Settings → Export .map saves all Timing, Fueling, and Sandbox tables, axes, units, boundaries, colors, display preferences, smoothing choices, and VE setup options in one portable file.",
+            "Settings → Import .map validates the complete file before replacing the three workspaces, then autosaves the imported settings.",
             "Timing, Fueling, and Sandbox autosave separately. Dialog settings are retained until changed.",
             "Use Undo immediately after an unwanted edit, paste, offset, smoothing operation, resize, or axis change."));
 

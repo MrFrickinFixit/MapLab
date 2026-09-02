@@ -85,6 +85,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         fuelingPanel = new FuelingPanel(ResizeMatrixFromFuel, AutoFillAxisFromFuel, PasteAxisFromFuel, SetRegionBoundariesFromFuel, EditAxisFromFuel); FuelingHost.Content = fuelingPanel;
         sandboxPanel = new SandboxPanel(); SandboxHost.Content = sandboxPanel;
+        SettingsHost.Content = new SettingsPanel(ExportMapSettings, ImportMapSettings);
         HelpHost.Content = new HelpPanel();
         AboutHost.Content = new AboutPanel();
         PreviewKeyDown += MainWindow_PreviewKeyDown;
@@ -98,6 +99,100 @@ public partial class MainWindow : Window
         Closing += (_, _) => { autosaveTimer.Stop(); SaveState(); };
     }
     private void RecalculateTiming_Click(object sender, RoutedEventArgs e) => RecalculateTimingValues();
+
+    private void ExportMapSettings()
+    {
+        try
+        {
+            SaveState();
+            var package = new MapSettingsPackage
+            {
+                ExportedUtc = DateTime.UtcNow,
+                Timing = JsonDocument.Parse(ExportTimingSettingsJson()).RootElement.Clone(),
+                Fueling = JsonDocument.Parse(fuelingPanel.ExportSettingsJson()).RootElement.Clone(),
+                Sandbox = JsonDocument.Parse(sandboxPanel.ExportSettingsJson()).RootElement.Clone()
+            };
+            var dialog = new SaveFileDialog
+            {
+                Title = "Export Map Lab settings",
+                Filter = "Map Lab settings (*.map)|*.map",
+                DefaultExt = ".map",
+                AddExtension = true,
+                FileName = $"MapLab-settings-{DateTime.Now:yyyy-MM-dd}.map"
+            };
+            if (dialog.ShowDialog(this) != true) return;
+            File.WriteAllText(dialog.FileName, JsonSerializer.Serialize(package, new JsonSerializerOptions { WriteIndented = true }));
+            (SettingsHost.Content as SettingsPanel)?.SetStatus($"Exported {Path.GetFileName(dialog.FileName)}");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Map Lab could not export the settings file.\n\n{ex.Message}", "Export settings", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void ImportMapSettings()
+    {
+        var dialog = new OpenFileDialog { Title = "Import Map Lab settings", Filter = "Map Lab settings (*.map)|*.map", DefaultExt = ".map", CheckFileExists = true };
+        if (dialog.ShowDialog(this) != true) return;
+        try
+        {
+            var package = JsonSerializer.Deserialize<MapSettingsPackage>(File.ReadAllText(dialog.FileName));
+            if (package is null || !string.Equals(package.Format, "MapLab", StringComparison.Ordinal) || package.Version != 1)
+                throw new InvalidDataException("This is not a supported Map Lab settings file.");
+            var timingJson = package.Timing.GetRawText();
+            var fuelingJson = package.Fueling.GetRawText();
+            var sandboxJson = package.Sandbox.GetRawText();
+            if (!CanImportTimingSettings(timingJson) || !fuelingPanel.CanImportSettingsJson(fuelingJson) || !sandboxPanel.CanImportSettingsJson(sandboxJson))
+                throw new InvalidDataException("The file contains missing, damaged, or unsupported table settings.");
+            if (MessageBox.Show(this, "Importing replaces the current Timing, Fueling, and Sandbox settings and tables. Continue?", "Import Map Lab settings", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+            if (!ImportTimingSettingsJson(timingJson) || !fuelingPanel.ImportSettingsJson(fuelingJson) || !sandboxPanel.ImportSettingsJson(sandboxJson))
+                throw new InvalidDataException("Map Lab could not apply all settings from this file.");
+            StatusText.Text = "Settings imported";
+            (SettingsHost.Content as SettingsPanel)?.SetStatus($"Imported {Path.GetFileName(dialog.FileName)}");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Map Lab could not import the settings file.\n\n{ex.Message}", "Import settings", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private string ExportTimingSettingsJson()
+    {
+        SaveState();
+        if (!string.IsNullOrWhiteSpace(lastAutosaveJson)) return lastAutosaveJson;
+        return File.ReadAllText(AutosavePath);
+    }
+
+    private bool CanImportTimingSettings(string json)
+    {
+        try
+        {
+            var state = JsonSerializer.Deserialize<AutosaveState>(json);
+            return state?.RpmAxis is { Length: >= 8 and <= 64 } && state.MapAxis is { Length: >= 8 and <= 64 } &&
+                   state.Timing is not null && state.Timing.Length == state.MapAxis.Length && state.Timing.All(row => row?.Length == state.RpmAxis.Length);
+        }
+        catch { return false; }
+    }
+
+    private bool ImportTimingSettingsJson(string json)
+    {
+        if (!CanImportTimingSettings(json)) return false;
+        Directory.CreateDirectory(Path.GetDirectoryName(AutosavePath)!);
+        File.WriteAllText(AutosavePath, json);
+        lastAutosaveJson = null;
+        undoHistory.Clear(); redoHistory.Clear();
+        return LoadState();
+    }
+
+    private sealed class MapSettingsPackage
+    {
+        public string Format { get; set; } = "MapLab";
+        public int Version { get; set; } = 1;
+        public DateTime ExportedUtc { get; set; }
+        public JsonElement Timing { get; set; }
+        public JsonElement Fueling { get; set; }
+        public JsonElement Sandbox { get; set; }
+    }
 
     private void Application_Changed(object sender, SelectionChangedEventArgs e)
     {
