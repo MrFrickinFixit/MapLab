@@ -55,16 +55,41 @@ public sealed class HelpPanel : Grid
         document.Blocks.Add(Illustration("Y-axis values run vertically; X-axis values run left to right along the bottom.", AxisDiagram()));
 
         Section(document, "Smoothing", Bullets(
-            "Smooth Rows blends horizontally between the outer selected columns; those columns remain anchors.",
-            "Smooth Columns blends vertically between the outer selected rows; those rows remain anchors.",
-            "Smooth Selected opens Advanced Smoothing and includes every selected cell, including separated Ctrl-selected areas.",
-            "Shape-preserving favors gradual transitions. Constrained and standard weighted modes average nearby selected cells.",
-            "Spike removal reduces isolated peaks or dips. Edge-preserving retains stronger transitions.",
-            "Smooth to Surroundings changes only selected cells while sampling fixed neighbors outside the selection. Use Across columns for a vertical wrinkle, Across rows for a horizontal wrinkle, or Both directions.",
-            "Neighbor reach is the number of cells sampled on each side of each selected cell. Weights use actual axis spacing. This mode keeps selected edges editable and limits overshoot using the sampled neighborhood, so narrow raised or dipped strips can blend into the surrounding map.",
-            "Preserve selection perimeter fixes the outside cells. Prevent overshoot limits results to the selected value range.",
-            "Every Apply action creates a separate Undo step."));
+            "Rows (Smooth Rows in the right-click menu) reshapes each row between its left and right selected endpoints. It needs at least three columns and leaves those endpoint columns unchanged.",
+            "Columns (Smooth Columns in the right-click menu) reshapes each column between its top and bottom selected endpoints. It needs at least three rows and leaves those endpoint rows unchanged.",
+            "Smooth Selected opens Advanced Smoothing. It works on the exact selected cells, including separated Ctrl-selected areas; use it for irregular selections instead of Rows or Columns, which operate across the selection's bounding rectangle.",
+            "Choose an algorithm inside Advanced Smoothing. Smooth to Surroundings is the option for blending a narrow wrinkle into the good surface beside it.",
+            "These tools are available in Fueling, Ignition Timing, and Map Sandbox, including their editable 3D views. Fueling smoothing edits VE values; the lb/hr view is a calculated display."));
         document.Blocks.Add(Illustration("Row and column smoothing use the outside selected cells as anchors and reshape only the cells between them.", SmoothingDiagram()));
+
+        Section(document, "Advanced Smoothing Algorithms", Bullets(
+            "Standard weighted smoothing averages nearby selected cells, giving more weight to the center and its direct neighbors. It does not sample outside the selection.",
+            "Constrained surface smoothing uses the same local weighted average in Smooth Selected; perimeter and overshoot controls provide the constraints.",
+            "Shape-preserving interpolation blends toward horizontal and vertical trends from the selected endpoints. It can reshape interior peaks; it is not the removed standalone Interpolate command.",
+            "Spike removal (median) blends toward the middle value of nearby selected cells to reduce isolated peaks or dips.",
+            "Edge-preserving smoothing gives less influence to neighbors whose values differ sharply, helping retain stronger transitions.",
+            "Weighted center / perimeter combines local smoothing with the selected area's overall and perimeter averages. Center Influence appears only for this algorithm: 0% favors the perimeter average; 100% favors the average of all selected cells."));
+
+        Section(document, "Advanced Smoothing Controls", Bullets(
+            "Strength (1-100%) controls how far each pass moves toward the smoothing result. Lower values make smaller changes; 100% applies the full result of that pass, not a guarantee that the map becomes flat.",
+            "Passes (1-20) repeats smoothing on the preceding pass's result. More passes increase the cumulative change.",
+            "Preserve selection perimeter leaves selected boundary cells unchanged in the original algorithms. Every cell in a one- or two-cell-wide strip is a boundary cell, so enabling this can prevent any change. This control is not used or shown for Smooth to Surroundings.",
+            "Prevent value overshoot limits the original algorithms to the selection's starting minimum and maximum. Smooth to Surroundings instead uses each cell's sampled neighborhood, including outside references, so a raised strip can fall or a dipped strip can rise.",
+            "Apply changes the current table immediately and leaves the dialog open. Each click creates one Undo step covering all its passes; applying again smooths the already adjusted table. Close does not undo applied changes."));
+
+        Section(document, "Smooth to Surroundings", Bullets(
+            "Select the cells to repair, open Smooth Selected, and choose Smooth to Surroundings in Algorithm. Only selected cells change; unselected surrounding cells remain fixed throughout all passes.",
+            "Direction controls where samples come from: Across columns (left / right) works across a vertical strip; Across rows (above / below) works across a horizontal strip. Both directions includes horizontal, vertical, and diagonal neighbors.",
+            "Neighbor Reach (1-10 cells per side) is measured from each selected cell, not from the selection's outer edge. Reach 2 samples up to two cells away in each enabled direction; it never enlarges the area being edited.",
+            "Samples include selected and unselected neighbors within reach. Gaussian weights favor nearby positions using actual X/Y axis spacing, so uneven RPM or MAP breakpoints affect their influence. At a table edge, only available cells are sampled.",
+            "Selected edge cells remain editable in this mode, including single cells and one- or two-cell-wide strips. If little changes, check the direction and whether Neighbor Reach reaches beyond the raised or dipped area. Similar neighboring values can also produce little change."));
+        document.Blocks.Add(Illustration("Select the wrinkle, not the good surface around it. Arrows show the sampling direction; only the blue cells can change.", SurroundingsDiagram()));
+
+        Section(document, "Remove a Two-Cell-Wide Wrinkle", Numbered(
+            "Select just the two raised or dipped columns or rows along the wrinkle.",
+            "Open Smooth Selected and choose Smooth to Surroundings. For two columns, choose Across columns (left / right); for two rows, choose Across rows (above / below).",
+            "For a small first adjustment, try Neighbor Reach 2, Strength 50%, and 1 pass. Keep Prevent value overshoot enabled. These are example starting settings, not a calibration target.",
+            "Click Apply, inspect the values and 3D contour, then adjust strength, reach, or passes as needed. Unselected reference cells stay unchanged. Use Undo to remove the last Apply before trying another setting."));
 
         Section(document, "Ignition Timing Regions", Bullets(
             "Choose Set boundaries, hover over the table, and click the intersecting cell to lock both lines.",
@@ -77,6 +102,7 @@ public sealed class HelpPanel : Grid
         Section(document, "Fueling and VE Setup", Bullets(
             "Fuel cells store editable volumetric-efficiency percentages. View as lb/hr changes only the display.",
             "VE Setup uses engine information and VE targets to create a preview before values are committed.",
+            "Smooth the generated map before committing runs Smooth Rows, then Smooth Columns across the generated table. It is separate from Smooth to Surroundings and does not use the Advanced Smoothing direction or neighbor-reach settings. Clear the checkbox to skip this final smoothing step.",
             "Forced-induction setup displays MAP inputs in PSI and enables 1-, 2-, 3-bar, or custom MAP sensor selection. Custom ratings must be greater than 1 and no more than 10 bar.",
             "The selected sensor rating proposes an editable maximum boost range. Use Apply MAP Range to rescale the Fueling MAP breakpoints before continuing.",
             "Boosted Fueling setup is performed inside the VE wizard; there is no separate Convert to Boosted command.",
@@ -88,6 +114,11 @@ public sealed class HelpPanel : Grid
             "Set independent dimensions, breakpoints, and X/Y units. Choose Custom… to add or remove unit names.",
             "Sandbox includes selection editing, offsets, all smoothing algorithms, 3D editing, history, autosave, CSV, and Excel export.",
             "Sandbox changes never modify Fueling or Ignition Timing."));
+
+        Section(document, "Fuel Delta Smoothing", Bullets(
+            "Fueling's Delta Compare compares the pasted block with the current values. Use Pasted applies those values exactly, without smoothing.",
+            "Smooth Delta applies the pasted values and then basic weighted smoothing within that pasted block. Cells outside the block remain unchanged and are not sampled.",
+            "Delta Compare has its own strength and passes. To blend a pasted wrinkle toward outside neighbors, apply the paste, select the cells to repair, then use Smooth Selected with Smooth to Surroundings."));
 
         Section(document, "3D View", Bullets(
             "Drag to orbit and use the mouse wheel to zoom.",
@@ -164,6 +195,27 @@ public sealed class HelpPanel : Grid
         AddLabel(canvas, "SMOOTH ROWS", 28, 146, Accent, true); AddLabel(canvas, "anchors", 28, 163, Muted, false); AddLabel(canvas, "anchors", 252, 163, Muted, false);
         DrawGrid(canvas, 405, 25, 7, 5, 36, 22, (row, col) => row is 0 or 4 ? Color.FromRgb(0, 103, 192) : Color.FromRgb(110, (byte)(190 - row * 12), 220));
         AddLabel(canvas, "SMOOTH COLUMNS", 405, 146, Accent, true); AddLabel(canvas, "top anchor", 405, 163, Muted, false); AddLabel(canvas, "bottom anchor", 565, 163, Muted, false);
+        return canvas;
+    }
+
+    private static Canvas SurroundingsDiagram()
+    {
+        var canvas = DiagramCanvas(720, 245);
+        var fixedColor = Color.FromRgb(225, 231, 239);
+        var arrowColor = Color.FromRgb(30, 130, 111);
+        AddLabel(canvas, "ACROSS COLUMNS (LEFT / RIGHT)", 28, 12, Accent, true);
+        DrawGrid(canvas, 28, 40, 6, 6, 42, 23, (_, col) => col is 2 or 3 ? Accent.Color : fixedColor);
+        AddArrow(canvas, 72, 98, 126, 98, arrowColor);
+        AddArrow(canvas, 234, 98, 178, 98, arrowColor);
+        AddLabel(canvas, "Two selected columns", 28, 188, Muted, false);
+
+        AddLabel(canvas, "ACROSS ROWS (ABOVE / BELOW)", 405, 12, Accent, true);
+        DrawGrid(canvas, 405, 40, 6, 6, 42, 23, (row, _) => row is 2 or 3 ? Accent.Color : fixedColor);
+        AddArrow(canvas, 530, 52, 530, 97, arrowColor);
+        AddArrow(canvas, 530, 165, 530, 120, arrowColor);
+        AddLabel(canvas, "Two selected rows", 405, 188, Muted, false);
+        AddLabel(canvas, "BLUE: selected cells can change", 28, 221, Accent, true);
+        AddLabel(canvas, "GRAY: surrounding cells stay fixed", 405, 221, Muted, true);
         return canvas;
     }
 
