@@ -23,11 +23,11 @@ To assign a new installer version:
 .\scripts\build-installer.ps1 -Version 1.1.0
 ```
 
-The setup defaults to an all-users installation under Program Files, but the
-wizard also offers a just-for-me installation under the current user's local app
-data. Open **Advanced** during setup to choose the scope, destination, and whether
-to create the Start menu and Desktop shortcuts. Both shortcuts are enabled by
-default and can be selected independently.
+Setup now walks through the installation choices instead of offering a one-click
+path that skips them. The wizard prompts for an all-users or just-for-me install,
+shows the destination (and allows changing the all-users Program Files location),
+then presents the Start menu and Desktop shortcuts as independent optional
+features. Both shortcuts are enabled by default.
 
 The installed application folder includes the Map Lab freeware license and the
 Microsoft .NET license and third-party notices. The MSI supports upgrades and can
