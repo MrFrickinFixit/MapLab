@@ -34,7 +34,7 @@ public sealed class AboutPanel : Grid
 
         content.Children.Add(Card("ABOUT MAP LAB", Paragraph("Map Lab is a Windows-based editor for ignition timing, volumetric-efficiency, and custom numeric maps. It combines spreadsheet-style cell editing with configurable axes, selection-aware smoothing, operating-region setup, heat-map visualization, and an interactive 3D surface viewer.")));
         var features = new UniformGrid { Columns = 2 };
-        features.Children.Add(Feature("IGNITION TIMING", "Independent MAP scale, timing regions, boost adjustment, interpolation, smoothing, and 3D editing."));
+        features.Children.Add(Feature("IGNITION TIMING", "Independent MAP scale, timing regions, boost adjustment, smoothing, and 3D editing."));
         features.Children.Add(Feature("FUELING", "VE editing, VE Setup Wizard, optional lb/hr display, independent MAP scale, exports, and 3D editing."));
         features.Children.Add(Feature("MAP SANDBOX", "Boundary-free custom tables with independent dimensions, axes, custom units, smoothing, history, and exports."));
         features.Children.Add(Feature("DATA EXCHANGE", "Clipboard-compatible tables and axes, CSV and Excel export, heat-map formatting, and autosave recovery."));

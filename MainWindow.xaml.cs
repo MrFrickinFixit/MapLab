@@ -36,10 +36,12 @@ public partial class MainWindow : Window
     private bool? activeAxisIsMap;
     private int? lastAxisIndex;
     private readonly DispatcherTimer autosaveTimer = new() { Interval = TimeSpan.FromSeconds(15) };
+    private string? lastAutosaveJson;
     private bool loadingState;
     private bool useCustomHeatColors;
     private Color customLowColor = Color.FromRgb(255, 20, 20);
     private Color customHighColor = Color.FromRgb(255, 0, 235);
+    private Brush[] timingHeatPalette = UiBrushCache.Spectrum;
     private double boostRetardPerPsi = 1, boostRetardLowMap, boostRetardHighMap = 15;
     private double refinementStrength = .5;
     private int refinementPasses = 3;
@@ -83,6 +85,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         fuelingPanel = new FuelingPanel(ResizeMatrixFromFuel, AutoFillAxisFromFuel, PasteAxisFromFuel, SetRegionBoundariesFromFuel, EditAxisFromFuel); FuelingHost.Content = fuelingPanel;
         sandboxPanel = new SandboxPanel(); SandboxHost.Content = sandboxPanel;
+        SettingsHost.Content = new SettingsPanel(ExportMapSettings, ImportMapSettings);
         HelpHost.Content = new HelpPanel();
         AboutHost.Content = new AboutPanel();
         PreviewKeyDown += MainWindow_PreviewKeyDown;
@@ -96,6 +99,100 @@ public partial class MainWindow : Window
         Closing += (_, _) => { autosaveTimer.Stop(); SaveState(); };
     }
     private void RecalculateTiming_Click(object sender, RoutedEventArgs e) => RecalculateTimingValues();
+
+    private void ExportMapSettings()
+    {
+        try
+        {
+            SaveState();
+            var package = new MapSettingsPackage
+            {
+                ExportedUtc = DateTime.UtcNow,
+                Timing = JsonDocument.Parse(ExportTimingSettingsJson()).RootElement.Clone(),
+                Fueling = JsonDocument.Parse(fuelingPanel.ExportSettingsJson()).RootElement.Clone(),
+                Sandbox = JsonDocument.Parse(sandboxPanel.ExportSettingsJson()).RootElement.Clone()
+            };
+            var dialog = new SaveFileDialog
+            {
+                Title = "Export Map Lab settings",
+                Filter = "Map Lab settings (*.map)|*.map",
+                DefaultExt = ".map",
+                AddExtension = true,
+                FileName = $"MapLab-settings-{DateTime.Now:yyyy-MM-dd}.map"
+            };
+            if (dialog.ShowDialog(this) != true) return;
+            File.WriteAllText(dialog.FileName, JsonSerializer.Serialize(package, new JsonSerializerOptions { WriteIndented = true }));
+            (SettingsHost.Content as SettingsPanel)?.SetStatus($"Exported {Path.GetFileName(dialog.FileName)}");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Map Lab could not export the settings file.\n\n{ex.Message}", "Export settings", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void ImportMapSettings()
+    {
+        var dialog = new OpenFileDialog { Title = "Import Map Lab settings", Filter = "Map Lab settings (*.map)|*.map", DefaultExt = ".map", CheckFileExists = true };
+        if (dialog.ShowDialog(this) != true) return;
+        try
+        {
+            var package = JsonSerializer.Deserialize<MapSettingsPackage>(File.ReadAllText(dialog.FileName));
+            if (package is null || !string.Equals(package.Format, "MapLab", StringComparison.Ordinal) || package.Version != 1)
+                throw new InvalidDataException("This is not a supported Map Lab settings file.");
+            var timingJson = package.Timing.GetRawText();
+            var fuelingJson = package.Fueling.GetRawText();
+            var sandboxJson = package.Sandbox.GetRawText();
+            if (!CanImportTimingSettings(timingJson) || !fuelingPanel.CanImportSettingsJson(fuelingJson) || !sandboxPanel.CanImportSettingsJson(sandboxJson))
+                throw new InvalidDataException("The file contains missing, damaged, or unsupported table settings.");
+            if (MessageBox.Show(this, "Importing replaces the current Timing, Fueling, and Sandbox settings and tables. Continue?", "Import Map Lab settings", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+            if (!ImportTimingSettingsJson(timingJson) || !fuelingPanel.ImportSettingsJson(fuelingJson) || !sandboxPanel.ImportSettingsJson(sandboxJson))
+                throw new InvalidDataException("Map Lab could not apply all settings from this file.");
+            StatusText.Text = "Settings imported";
+            (SettingsHost.Content as SettingsPanel)?.SetStatus($"Imported {Path.GetFileName(dialog.FileName)}");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"Map Lab could not import the settings file.\n\n{ex.Message}", "Import settings", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private string ExportTimingSettingsJson()
+    {
+        SaveState();
+        if (!string.IsNullOrWhiteSpace(lastAutosaveJson)) return lastAutosaveJson;
+        return File.ReadAllText(AutosavePath);
+    }
+
+    private bool CanImportTimingSettings(string json)
+    {
+        try
+        {
+            var state = JsonSerializer.Deserialize<AutosaveState>(json);
+            return state?.RpmAxis is { Length: >= 8 and <= 64 } && state.MapAxis is { Length: >= 8 and <= 64 } &&
+                   state.Timing is not null && state.Timing.Length == state.MapAxis.Length && state.Timing.All(row => row?.Length == state.RpmAxis.Length);
+        }
+        catch { return false; }
+    }
+
+    private bool ImportTimingSettingsJson(string json)
+    {
+        if (!CanImportTimingSettings(json)) return false;
+        Directory.CreateDirectory(Path.GetDirectoryName(AutosavePath)!);
+        File.WriteAllText(AutosavePath, json);
+        lastAutosaveJson = null;
+        undoHistory.Clear(); redoHistory.Clear();
+        return LoadState();
+    }
+
+    private sealed class MapSettingsPackage
+    {
+        public string Format { get; set; } = "MapLab";
+        public int Version { get; set; } = 1;
+        public DateTime ExportedUtc { get; set; }
+        public JsonElement Timing { get; set; }
+        public JsonElement Fueling { get; set; }
+        public JsonElement Sandbox { get; set; }
+    }
 
     private void Application_Changed(object sender, SelectionChangedEventArgs e)
     {
@@ -304,7 +401,7 @@ public partial class MainWindow : Window
         var menu = new ContextMenu();
         menu.Items.Add(ContextItem("Copy selected", (_, _) => CopySelection())); menu.Items.Add(ContextItem("Paste", (_, _) => PasteSelection()));
         menu.Items.Add(ContextItem("Offset selection…", OffsetSelection_Click));
-        menu.Items.Add(new Separator()); menu.Items.Add(ContextItem("Interpolate selection", Interpolate_Click)); menu.Items.Add(ContextItem("Smooth selected…", AdvancedSmooth_Click));
+        menu.Items.Add(new Separator()); menu.Items.Add(ContextItem("Smooth selected…", AdvancedSmooth_Click));
         menu.Items.Add(ContextItem("Smooth rows", SmoothRows_Click)); menu.Items.Add(ContextItem("Smooth columns", SmoothColumns_Click));
         menu.Items.Add(new Separator()); menu.Items.Add(ContextItem("Clear selected", ClearSelectedTiming)); return menu;
     }
@@ -491,15 +588,6 @@ public partial class MainWindow : Window
         SmoothSelectionBounds(top, bottom, left, right);
     }
 
-    private void Interpolate_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryGetSelectionBounds(out var top, out var bottom, out var left, out var right) || !SelectionInterpolator.CanApply(top, bottom, left, right))
-        { MessageBox.Show("Select at least three cells in a row or column, or a selection at least 3 × 3.", "Select a larger area", MessageBoxButton.OK, MessageBoxImage.Information); return; }
-        PushUndo(); var interpolated = SelectionInterpolator.Apply(ReadTimingValues(), top, bottom, left, right);
-        for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) SetCellValue(row, col, interpolated[row, col]);
-        UpdateSelection(); SaveState(); StatusText.Text = $"Interpolated {right - left + 1} × {bottom - top + 1} timing cells from the selected perimeter";
-    }
-
     private void SmoothSelectionBounds(int top, int bottom, int left, int right)
     {
         PushUndo();
@@ -550,7 +638,6 @@ public partial class MainWindow : Window
             case SurfaceSelectionAction.Offset:
                 ModelessWindowManager.ShowOrActivate("Timing.Offset", () => new OffsetSelectionWindow(selectionOffsetAmount, selectionOffsetIsPercentage, (direction, amount, percentage) => { ApplyTimingOffset(top, bottom, left, right, direction, amount, percentage); Refresh(); }) { Owner = this }); break;
             case SurfaceSelectionAction.Smooth: Smooth_Click(this, new RoutedEventArgs()); Refresh(); break;
-            case SurfaceSelectionAction.Interpolate: Interpolate_Click(this, new RoutedEventArgs()); Refresh(); break;
             case SurfaceSelectionAction.Refine:
                 ModelessWindowManager.ShowOrActivate("Timing.Refinement", () => new SmoothRefinementWindow(refinementStrength, refinementPasses, dialog => WorkingRunner.Run(this, () => { ApplyRefinement(dialog, top, bottom, left, right); Refresh(); })) { Owner = this }); break;
             case SurfaceSelectionAction.Advanced:
@@ -605,7 +692,7 @@ public partial class MainWindow : Window
     private void ApplyAdvancedSmoothing(AdvancedSmoothingWindow dialog, IReadOnlyCollection<(int Row, int Col)> selected)
     {
         advancedSmoothingOptions = dialog.Options; PushUndo();
-        var result = AdvancedSmoother.Apply(ReadTimingValues(), selected, advancedSmoothingOptions);
+        var result = AdvancedSmoother.Apply(ReadTimingValues(), selected, advancedSmoothingOptions, rpmAxis, mapAxis);
         foreach (var cell in selected) SetCellValue(cell.Row, cell.Col, result[cell.Row, cell.Col]);
         UpdateSelection(); SaveState(); StatusText.Text = $"Smoothed {selected.Count} selected timing cells  •  {advancedSmoothingOptions.Algorithm}  •  {advancedSmoothingOptions.Passes} passes";
     }
@@ -952,10 +1039,10 @@ public partial class MainWindow : Window
 
     private Brush RegionBrush(int row, int col) => RegionNameAtMarkers(row, col) switch
     {
-        "Idle" => new SolidColorBrush(Color.FromRgb(67, 145, 208)),
-        "IdleHigh" => new SolidColorBrush(Color.FromRgb(73, 119, 188)),
-        "WOT" => new SolidColorBrush(Color.FromRgb(236, 138, 69)),
-        _ => new SolidColorBrush(Color.FromRgb(54, 199, 173))
+        "Idle" => UiBrushCache.Idle,
+        "IdleHigh" => UiBrushCache.IdleHigh,
+        "WOT" => UiBrushCache.Wot,
+        _ => UiBrushCache.Cruise
     };
 
     private bool IsRegionMarker(int row, int col) => col == idleMarkerCol || row == wotMarkerRow;
@@ -984,6 +1071,7 @@ public partial class MainWindow : Window
     private void ApplyColors(ColorCustomizerWindow dialog)
     {
         useCustomHeatColors = dialog.UseCustomColors; customLowColor = dialog.LowColor; customHighColor = dialog.HighColor;
+        RefreshTimingHeatPalette();
         for (var row = 0; row < RowCount; row++) for (var col = 0; col < ColumnCount; col++) RefreshCellColor(valueCells[row, col]);
         StatusText.Text = useCustomHeatColors ? "Custom heat-map colors applied" : "Default spectrum heat map applied";
         SaveState();
@@ -1180,14 +1268,9 @@ public partial class MainWindow : Window
     private Brush TimingBrush(double value)
     {
         var t = Math.Clamp((value - 12) / 34, 0, 1);
-        if (useCustomHeatColors)
-        {
-            byte Blend(byte low, byte high) => (byte)Math.Round(low + (high - low) * t);
-            return new SolidColorBrush(Color.FromRgb(Blend(customLowColor.R, customHighColor.R), Blend(customLowColor.G, customHighColor.G), Blend(customLowColor.B, customHighColor.B)));
-        }
-        // Default full-spectrum ignition heat map: red → yellow → green → cyan → blue → magenta.
-        return new SolidColorBrush(HslToColor(t * 300, .96, .52));
+        return timingHeatPalette[(int)Math.Round(t * (timingHeatPalette.Length - 1))];
     }
+    private void RefreshTimingHeatPalette() => timingHeatPalette = useCustomHeatColors ? UiBrushCache.CreateLinearPalette(customLowColor, customHighColor) : UiBrushCache.Spectrum;
     private static Color HslToColor(double h, double s, double l)
     {
         var c = (1 - Math.Abs(2 * l - 1)) * s; var x = c * (1 - Math.Abs(h / 60 % 2 - 1)); var m = l - c / 2;
@@ -1562,7 +1645,7 @@ public partial class MainWindow : Window
     private void Clear_Click(object sender, RoutedEventArgs e) { PushUndo(); for (var row = 0; row < RowCount; row++) for (var col = 0; col < ColumnCount; col++) SetCellValue(row, col, 0); StatusText.Text = "Timing values cleared"; }
     private void Export_Click(object sender, RoutedEventArgs e)
     {
-        if (rpmAxis.Length == 0) return; var dialog = new SaveFileDialog { Filter = "CSV file (*.csv)|*.csv", FileName = "timing-table.csv" }; if (dialog.ShowDialog() != true) return;
+        if (rpmAxis.Length == 0) return; var dialog = new SaveFileDialog { Filter = "CSV file (*.csv)|*.csv", FileName = "timing-table.csv" }; if (dialog.ShowDialog(this) != true) return;
         var csv = new StringBuilder();
         for (var row = 0; row < RowCount; row++) { csv.Append(FormatExactAxisValue(mapAxis[row])); for (var col = 0; col < ColumnCount; col++) csv.Append(',').Append(FormatEditableTiming(timingValues[row, col])); csv.AppendLine(); }
         csv.Append("Engine RPM"); foreach (var rpm in rpmAxis) csv.Append(',').Append(FormatExactAxisValue(rpm)); csv.AppendLine();
@@ -1573,7 +1656,7 @@ public partial class MainWindow : Window
     {
         if (rpmAxis.Length == 0) return;
         var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "timing-table.xlsx" };
-        if (dialog.ShowDialog() != true) return;
+        if (dialog.ShowDialog(this) != true) return;
 
         var timing = ReadTimingValues();
 
@@ -1768,7 +1851,9 @@ public partial class MainWindow : Window
                 TimingTrailingDisplayDecimals = timingTrailingDisplayDecimals
             };
             Directory.CreateDirectory(Path.GetDirectoryName(AutosavePath)!);
-            File.WriteAllText(AutosavePath, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
+            var json = JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true });
+            if (string.Equals(json, lastAutosaveJson, StringComparison.Ordinal)) return;
+            File.WriteAllText(AutosavePath, json); lastAutosaveJson = json;
         }
         catch (Exception) { /* Autosave must never interrupt tuning work or application shutdown. */ }
     }
@@ -1778,7 +1863,8 @@ public partial class MainWindow : Window
         if (!File.Exists(AutosavePath)) return false;
         try
         {
-            var state = JsonSerializer.Deserialize<AutosaveState>(File.ReadAllText(AutosavePath));
+            var savedJson = File.ReadAllText(AutosavePath);
+            var state = JsonSerializer.Deserialize<AutosaveState>(savedJson);
             if (state?.RpmAxis is null || state.MapAxis is null || state.Timing is null || state.RpmAxis.Length is < 8 or > 64 || state.MapAxis.Length is < 8 or > 64 || state.Timing.Length != state.MapAxis.Length || state.Timing.Any(row => row?.Length != state.RpmAxis.Length)) return false;
             loadingState = true;
             ColumnCount = state.RpmAxis.Length; RowCount = state.MapAxis.Length;
@@ -1791,6 +1877,7 @@ public partial class MainWindow : Window
             useCustomHeatColors = state.UseCustomHeatColors;
             if (ColorConverter.ConvertFromString(state.LowHeatColor) is Color lowColor) customLowColor = lowColor;
             if (ColorConverter.ConvertFromString(state.HighHeatColor) is Color highColor) customHighColor = highColor;
+            RefreshTimingHeatPalette();
             boostRetardPerPsi = state.BoostRetardPerPsi; boostRetardLowMap = state.BoostRetardLowMap; boostRetardHighMap = state.BoostRetardHighMap;
             refinementStrength = state.RefinementStrength; refinementPasses = state.RefinementPasses; advancedSmoothingOptions = state.AdvancedOptions ?? advancedSmoothingOptions;
             directionalOuterToInner = state.DirectionalOuterToInner; directionalStrength = state.DirectionalStrength; directionalPasses = state.DirectionalPasses;
@@ -1819,6 +1906,7 @@ public partial class MainWindow : Window
             ReadAndApplyRegions(false);
             selectionStart = selectionEnd = null; selectedRpmAxis.Clear(); selectedMapAxis.Clear(); activeAxisIsMap = null;
             StatusText.Text = "Autosaved table restored";
+            lastAutosaveJson = savedJson;
             return true;
         }
         catch (Exception) { return false; }

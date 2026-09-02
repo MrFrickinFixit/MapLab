@@ -6,7 +6,7 @@ using System.Windows.Media.Media3D;
 
 namespace TimingTableCalculator;
 
-public enum SurfaceSelectionAction { Undo, Redo, Copy, Paste, Offset, Interpolate, Smooth, Refine, Advanced, SmoothRows, SmoothColumns, Clear }
+public enum SurfaceSelectionAction { Undo, Redo, Copy, Paste, Offset, Smooth, Refine, Advanced, SmoothRows, SmoothColumns, Clear }
 
 public sealed class Surface3DWindow : Window
 {
@@ -119,7 +119,6 @@ public sealed class Surface3DWindow : Window
         menu.Items.Add(ActionItem("Paste", SurfaceSelectionAction.Paste));
         menu.Items.Add(ActionItem("Offset selection…", SurfaceSelectionAction.Offset));
         menu.Items.Add(new Separator());
-        menu.Items.Add(ActionItem("Interpolate selection", SurfaceSelectionAction.Interpolate));
         menu.Items.Add(ActionItem("Smooth selected…", SurfaceSelectionAction.Advanced));
         menu.Items.Add(ActionItem("Smooth rows", SurfaceSelectionAction.SmoothRows));
         menu.Items.Add(ActionItem("Smooth columns", SurfaceSelectionAction.SmoothColumns));
@@ -167,7 +166,7 @@ public sealed class Surface3DWindow : Window
 
     private static UIElement CreateAxisOverlay(double[,] values, double[] rpm, double[] map, string mapUnit)
     {
-        var timingMin = values.Cast<double>().Min(); var timingMax = values.Cast<double>().Max();
+        var (timingMin, timingMax) = ValueRange(values);
         var overlay = new Grid { IsHitTestVisible = false, Margin = new Thickness(12) };
         overlay.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(72) });
         overlay.ColumnDefinitions.Add(new ColumnDefinition());
@@ -216,7 +215,7 @@ public sealed class Surface3DWindow : Window
 
     private void AddRotatingScaleLabels(Viewport3D viewport, Transform3D transform, double[,] values, double[] rpm, double[] map, string mapUnit, string valueAxisTitle, string axisTitle, string xAxisTitle, string xFormat, string displayedValueFormat)
     {
-        var timingMin = values.Cast<double>().Min(); var timingMax = values.Cast<double>().Max();
+        var (timingMin, timingMax) = ValueRange(values);
         AddScaleOverlay(xAxisTitle, new Point3D(0, -.15, 9.25), true);
         AddScaleOverlay(xAxisTitle, new Point3D(0, -.15, -9.25), true);
         for (var labelIndex = 0; labelIndex < 7; labelIndex++)
@@ -315,7 +314,7 @@ public sealed class Surface3DWindow : Window
     private static GeometryModel3D CreateSurface(double[,] values, bool useCustomColors, Color lowColor, Color highColor)
     {
         var rows = values.GetLength(0); var cols = values.GetLength(1);
-        var min = values.Cast<double>().Min(); var max = values.Cast<double>().Max(); var span = Math.Max(.1, max - min);
+        var (min, max) = ValueRange(values); var span = Math.Max(.1, max - min);
         var mesh = new MeshGeometry3D();
         for (var r = 0; r < rows; r++) for (var c = 0; c < cols; c++)
         {
@@ -338,14 +337,16 @@ public sealed class Surface3DWindow : Window
         {
             for (var i = 0; i <= 6; i++) gradient.GradientStops.Add(new GradientStop(HslToColor(i * 50, .96, .52), i / 6d));
         }
-        var material = new DiffuseMaterial(gradient);
+        mesh.Freeze(); gradient.Freeze(); var material = new DiffuseMaterial(gradient); material.Freeze();
+        // Keep the model writable because the shared rotation transform is assigned
+        // after construction. The expensive mesh and material resources are frozen.
         return new GeometryModel3D(mesh, material) { BackMaterial = material };
     }
 
     private static GeometryModel3D CreateContourGrid(double[,] values)
     {
         var rows = values.GetLength(0); var cols = values.GetLength(1);
-        var min = values.Cast<double>().Min(); var max = values.Cast<double>().Max(); var span = Math.Max(.1, max - min);
+        var (min, max) = ValueRange(values); var span = Math.Max(.1, max - min);
         Point3D PointAt(int row, int col) => new(-10 + col * 20d / (cols - 1), (values[row, col] - min) / span * 7 + .045, -8 + row * 16d / (rows - 1));
         var mesh = new MeshGeometry3D();
 
@@ -357,7 +358,7 @@ public sealed class Surface3DWindow : Window
         for (var col = 0; col < cols; col++) for (var row = 0; row < rows - 1; row++)
             AddRibbon(mesh, PointAt(row, col), PointAt(row + 1, col), .018, 0);
 
-        var material = new DiffuseMaterial(Brushes.Black);
+        mesh.Freeze(); var material = new DiffuseMaterial(Brushes.Black); material.Freeze();
         return new GeometryModel3D(mesh, material) { BackMaterial = material };
     }
 
@@ -388,8 +389,15 @@ public sealed class Surface3DWindow : Window
             AddRibbon(mesh, new Point3D(left - .3, y, back), new Point3D(left, y, back), 0, .014);
             AddRibbon(mesh, new Point3D(right, y, front), new Point3D(right + .3, y, front), 0, .014);
         }
-        var material = new DiffuseMaterial(new SolidColorBrush(Color.FromRgb(72, 82, 95)));
+        mesh.Freeze(); var material = new DiffuseMaterial(UiBrushCache.Frozen(Color.FromRgb(72, 82, 95))); material.Freeze();
         return new GeometryModel3D(mesh, material) { BackMaterial = material };
+    }
+
+    private static (double Min, double Max) ValueRange(double[,] source)
+    {
+        var min = double.PositiveInfinity; var max = double.NegativeInfinity;
+        for (var row = 0; row < source.GetLength(0); row++) for (var col = 0; col < source.GetLength(1); col++) { var value = source[row, col]; if (value < min) min = value; if (value > max) max = value; }
+        return (min, max);
     }
 
     private static void AddVerticalRibbon(MeshGeometry3D mesh, double x, double z)
@@ -498,7 +506,7 @@ public sealed class Surface3DWindow : Window
 
     private GeometryModel3D CreateHoverCrosshair(int hoverRow, int hoverCol)
     {
-        var min = values.Cast<double>().Min(); var max = values.Cast<double>().Max(); var span = Math.Max(.1, max - min);
+        var (min, max) = ValueRange(values); var span = Math.Max(.1, max - min);
         Point3D PointAt(int row, int col) => new(-10 + col * 20d / (cols - 1), (values[row, col] - min) / span * 7 + .16, -8 + row * 16d / (rows - 1));
         var mesh = new MeshGeometry3D();
         for (var col = 0; col < cols - 1; col++) AddRibbon(mesh, PointAt(hoverRow, col), PointAt(hoverRow, col + 1), 0, .045);
@@ -539,7 +547,7 @@ public sealed class Surface3DWindow : Window
 
     private GeometryModel3D CreateSelectionOverlay(HashSet<(int Row, int Col)> selectedCells)
     {
-        var min = values.Cast<double>().Min(); var max = values.Cast<double>().Max(); var span = Math.Max(.1, max - min);
+        var (min, max) = ValueRange(values); var span = Math.Max(.1, max - min);
         Point3D PointAt(int row, int col) => new(-10 + col * 20d / (cols - 1), (values[row, col] - min) / span * 7 + .11, -8 + row * 16d / (rows - 1));
         var mesh = new MeshGeometry3D();
         var halfX = Math.Min(.22, 6d / cols); var halfZ = Math.Min(.22, 5d / rows);

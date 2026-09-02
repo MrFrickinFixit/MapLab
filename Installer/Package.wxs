@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
     Name="Map Lab (Beta)"
     Manufacturer="Map Lab"
@@ -17,12 +16,12 @@
     <Property Id="INSTALLSTARTMENUSHORTCUT" Value="1" Secure="yes" />
     <Property Id="WixAppFolder" Value="WixPerUserFolder" />
 
-    <!-- Standard Windows setup wizard with destination-folder selection and
-         modify/repair/remove support when the installer is run again. -->
-    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <!-- The welcome dialog is overridden so setup always walks through scope,
+         destination-folder, and shortcut-feature selection. -->
     <WixVariable Id="WixUILicenseRtf" Value="$(var.ProjectRoot)\Installer\License.rtf" />
     <Property Id="ApplicationFolderName" Value="Map Lab" />
     <Property Id="WixAppFolder" Value="WixPerMachineFolder" />
+    <UIRef Id="MapLabPromptedUI" />
 
     <!-- Installation scope and shortcut choices are shown before the folder
          page. The scope choice also supplies the appropriate default folder. -->
