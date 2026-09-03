@@ -1129,18 +1129,34 @@ public partial class MainWindow : Window
 
     private void View3D_Click(object sender, RoutedEventArgs e)
     {
-        ClearTimingSelection();
-        var values = ReadTimingValues();
-        ModelessWindowManager.ShowOrActivate("Timing.3D", () =>
+        if (ModelessWindowManager.ActivateIfOpen("Timing.3D")) return;
+        var values = ReadTimingValues(); var tableSelection = SelectedTimingCells();
+        if (!SurfaceTableRegion.TryCreate(RowCount, ColumnCount, tableSelection, out var region, out var error))
         {
-            var window = new Surface3DWindow(values, rpmAxis, mapAxis, MapUnit, useCustomHeatColors, customLowColor, customHighColor, SmoothFrom3D, selectionAction: Handle3DSelectionAction, rpmFormat: "0.########", valueFormatter: FormatTimingDisplayValue, sculptCommit: CommitTiming3DSculpt) { Owner = this };
-            window.Closed += (_, _) =>
+            MessageBox.Show(this, error, "Select a 3D region", MessageBoxButton.OK, MessageBoxImage.Information); return;
+        }
+        var cropped = tableSelection.Count > 0;
+        var viewValues = region.Extract(values); var viewRpm = region.ExtractColumns(rpmAxis); var viewMap = region.ExtractRows(mapAxis);
+        double[,] SmoothRegion(int top, int bottom, int left, int right) => region.Extract(SmoothFrom3D(region.Top + top, region.Top + bottom, region.Left + left, region.Left + right));
+        void HandleRegionAction(SurfaceSelectionAction action, int top, int bottom, int left, int right, IReadOnlyCollection<(int Row, int Col)> selected, Action<double[,]> refresh) =>
+            Handle3DSelectionAction(action, region.Top + top, region.Top + bottom, region.Left + left, region.Left + right, region.ToSource(selected), updated => refresh(region.Extract(updated)));
+        double[,] CommitRegionSculpt(double[,] updated, IReadOnlyCollection<(int Row, int Col)> affected)
+        {
+            var merged = region.Merge(ReadTimingValues(), updated, affected);
+            return region.Extract(CommitTiming3DSculpt(merged, region.ToSource(affected)));
+        }
+        var window = ModelessWindowManager.ShowOrActivate("Timing.3D", () =>
+        {
+            var title = cropped ? $"3D Timing Map - Selected {region.ColumnCount} x {region.RowCount}" : "3D Timing Map";
+            var created = new Surface3DWindow(viewValues, viewRpm, viewMap, MapUnit, useCustomHeatColors, customLowColor, customHighColor, SmoothRegion, title, selectionAction: HandleRegionAction, rpmFormat: "0.########", valueFormatter: FormatTimingDisplayValue, sculptCommit: CommitRegionSculpt) { Owner = this };
+            created.Closed += (_, _) =>
             {
-                selectionStart = selectionEnd = null; selecting = false;
+                selectionStart = selectionEnd = null; selecting = false; pinnedTimingSelection.Clear();
                 if (IsLoaded) { ApplyRegionVisualization(); StatusText.Text = "3D view closed  •  timing selection cleared"; }
             };
-            return window;
+            return created;
         });
+        window.SetTableContext(viewValues, cropped ? region.AllLocalCells() : Array.Empty<(int Row, int Col)>(), cropped);
     }
 
     private void Colors_Click(object sender, RoutedEventArgs e)

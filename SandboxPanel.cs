@@ -300,12 +300,33 @@ public sealed class SandboxPanel : Grid
 
     private void View3D(object? sender, RoutedEventArgs e)
     {
-        ClearCellSelection();
-        ModelessWindowManager.ShowOrActivate("Sandbox.3D", () =>
+        if (ModelessWindowManager.ActivateIfOpen("Sandbox.3D")) return;
+        var displayed = (double[,])values.Clone(); var tableSelection = Selected();
+        if (!SurfaceTableRegion.TryCreate(values.GetLength(0), values.GetLength(1), tableSelection, out var region, out var error))
         {
-            var window = new Surface3DWindow(values, rpm, map, mapUnit, false, Colors.Red, Colors.Magenta, (t, b, l, r) => { start = (t, l); end = (b, r); SmoothBasic(); return (double[,])values.Clone(); }, "3D Map Sandbox", "TABLE VALUE", Handle3D, "Y AXIS", XAxisTitle, "0.########", valueFormatter: FormatDisplayValue, sculptCommit: Commit3DSculpt) { Owner = Window.GetWindow(this) };
-            window.Closed += (_, _) => { ClearCellSelection(); status.Text = "3D sandbox closed  •  selection cleared"; }; return window;
+            Info(error); return;
+        }
+        var cropped = tableSelection.Count > 0;
+        var viewValues = region.Extract(displayed); var viewRpm = region.ExtractColumns(rpm); var viewMap = region.ExtractRows(map);
+        double[,] SmoothRegion(int top, int bottom, int left, int right)
+        {
+            start = (region.Top + top, region.Left + left); end = (region.Top + bottom, region.Left + right); SmoothBasic();
+            return region.Extract(values);
+        }
+        void HandleRegionAction(SurfaceSelectionAction action, int top, int bottom, int left, int right, IReadOnlyCollection<(int Row, int Col)> selected, Action<double[,]> refresh) =>
+            Handle3D(action, region.Top + top, region.Top + bottom, region.Left + left, region.Left + right, region.ToSource(selected), updated => refresh(region.Extract(updated)));
+        double[,] CommitRegionSculpt(double[,] updated, IReadOnlyCollection<(int Row, int Col)> affected)
+        {
+            var merged = region.Merge(values, updated, affected);
+            return region.Extract(Commit3DSculpt(merged, region.ToSource(affected)));
+        }
+        var window = ModelessWindowManager.ShowOrActivate("Sandbox.3D", () =>
+        {
+            var title = cropped ? $"3D Map Sandbox - Selected {region.ColumnCount} x {region.RowCount}" : "3D Map Sandbox";
+            var created = new Surface3DWindow(viewValues, viewRpm, viewMap, mapUnit, false, Colors.Red, Colors.Magenta, SmoothRegion, title, "TABLE VALUE", HandleRegionAction, "Y AXIS", XAxisTitle, "0.########", valueFormatter: FormatDisplayValue, sculptCommit: CommitRegionSculpt) { Owner = Window.GetWindow(this) };
+            created.Closed += (_, _) => { ClearCellSelection(); status.Text = "3D sandbox closed  •  selection cleared"; }; return created;
         });
+        window.SetTableContext(viewValues, cropped ? region.AllLocalCells() : Array.Empty<(int Row, int Col)>(), cropped);
     }
     private void Handle3D(SurfaceSelectionAction action, int top, int bottom, int left, int right, IReadOnlyCollection<(int Row, int Col)> selected, Action<double[,]> refresh)
     {

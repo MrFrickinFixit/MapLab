@@ -37,6 +37,7 @@ public sealed class Surface3DWindow : Window
     private readonly Color lowColor, highColor;
     private (int Row, int Col)? selectionStart, selectionEnd;
     private readonly HashSet<(int Row, int Col)> pinnedSurfaceSelection = [];
+    private bool hideSelectionOverlay;
     private Button smoothButton = null!, selectButton = null!;
     private readonly List<ToggleButton> sculptButtons = [];
     private Slider brushRadius = null!, brushStrength = null!;
@@ -202,7 +203,7 @@ public sealed class Surface3DWindow : Window
         selectionAction(action, top, bottom, left, right, selected, updated => UpdateSurfaceValues(updated));
         if (action == SurfaceSelectionAction.Paste)
         {
-            selectionStart = selectionEnd = null; pinnedSurfaceSelection.Clear(); selectionVisual.Content = null; smoothButton.IsEnabled = false;
+            hideSelectionOverlay = false; selectionStart = selectionEnd = null; pinnedSurfaceSelection.Clear(); selectionVisual.Content = null; smoothButton.IsEnabled = false;
             UpdateSculptSelectionState();
             selectionStatus.Text = "Paste complete  •  selection cleared";
         }
@@ -215,6 +216,7 @@ public sealed class Surface3DWindow : Window
         void Apply(int width)
         {
             transitionRingThickness = width; var ring = TransitionRingSelection.Create(top, bottom, left, right, width);
+            hideSelectionOverlay = false;
             pinnedSurfaceSelection.Clear(); foreach (var cell in ring) pinnedSurfaceSelection.Add(cell);
             selectionStart = selectionEnd = null; selectionVisual.Content = CreateSelectionOverlay(ring); smoothButton.IsEnabled = true;
             UpdateSculptSelectionState();
@@ -230,6 +232,25 @@ public sealed class Surface3DWindow : Window
         selectionAction?.Invoke(action, 0, 0, 0, 0, Array.Empty<(int Row, int Col)>(), updated => UpdateSurfaceValues(updated));
     }
 
+    internal void SetTableContext(double[,] updated, IReadOnlyCollection<(int Row, int Col)> tableSelection, bool hideImportedSelection = false)
+    {
+        if (updated.GetLength(0) != rows || updated.GetLength(1) != cols) return;
+        CancelSculptStroke();
+        if (!ReferenceEquals(updated, values)) UpdateSurfaceValues(updated, false);
+        selectionStart = selectionEnd = null; selectingSurface = false;
+        pinnedSurfaceSelection.Clear();
+        foreach (var cell in tableSelection)
+            if (cell.Row >= 0 && cell.Row < rows && cell.Col >= 0 && cell.Col < cols) pinnedSurfaceSelection.Add(cell);
+        hideSelectionOverlay = hideImportedSelection && pinnedSurfaceSelection.Count > 0;
+        selectionVisual.Content = pinnedSurfaceSelection.Count > 0 && !hideSelectionOverlay ? CreateSelectionOverlay(pinnedSurfaceSelection) : null;
+        smoothButton.IsEnabled = pinnedSurfaceSelection.Count > 0;
+        if (sculptCommit is not null && pinnedSurfaceSelection.Count > 0) limitSculptToSelection.IsChecked = true;
+        UpdateSculptSelectionState();
+        selectionStatus.Text = pinnedSurfaceSelection.Count > 0
+            ? hideSelectionOverlay ? $"Cropped 2D workspace  •  {pinnedSurfaceSelection.Count} cells  •  close to choose another area" : $"{pinnedSurfaceSelection.Count} cells selected from the 2D table"
+            : "Table synchronized  •  full surface available";
+    }
+
     private void UpdateSurfaceValues(double[,] updated, bool updateStatus = true)
     {
         if (updated.GetLength(0) != rows || updated.GetLength(1) != cols) return;
@@ -240,7 +261,7 @@ public sealed class Surface3DWindow : Window
         contourGrid.Geometry = updatedGrid.Geometry; contourGrid.Material = updatedGrid.Material; contourGrid.BackMaterial = updatedGrid.BackMaterial;
         RefreshValueScaleLabels();
         var selected = SelectedSurfaceCells();
-        if (selected.Count > 0) selectionVisual.Content = CreateSelectionOverlay(selected);
+        selectionVisual.Content = selected.Count > 0 && !hideSelectionOverlay ? CreateSelectionOverlay(selected) : null;
         hoverCell = null; hoverVisual.Content = null;
         if (updateStatus) selectionStatus.Text = "Table updated  •  selection retained";
     }
@@ -714,6 +735,7 @@ public sealed class Surface3DWindow : Window
     private void UpdateSelectionHighlight()
     {
         if (selectionStart is null || selectionEnd is null) return;
+        hideSelectionOverlay = false;
         var top = Math.Min(selectionStart.Value.Row, selectionEnd.Value.Row); var bottom = Math.Max(selectionStart.Value.Row, selectionEnd.Value.Row);
         var left = Math.Min(selectionStart.Value.Col, selectionEnd.Value.Col); var right = Math.Max(selectionStart.Value.Col, selectionEnd.Value.Col);
         var selectedCells = SelectedSurfaceCells(); selectionVisual.Content = CreateSelectionOverlay(selectedCells);

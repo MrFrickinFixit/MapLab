@@ -850,20 +850,44 @@ public sealed class FuelingPanel : Grid
     }
     private void View3D(object? sender, RoutedEventArgs e)
     {
-        ClearFuelSelection();
-        ModelessWindowManager.ShowOrActivate("Fuel.3D", () =>
+        var flowView = showFuelFlow;
+        var windowKey = flowView ? "Fuel.3D.Flow" : "Fuel.3D.VE";
+        if (ModelessWindowManager.ActivateIfOpen(windowKey)) return;
+        var displayed = DisplayValues(); var tableSelection = SelectedFuelCells();
+        if (!SurfaceTableRegion.TryCreate(ve.GetLength(0), ve.GetLength(1), tableSelection, out var region, out var error))
         {
-            var displayed = DisplayValues();
-            var window = new Surface3DWindow(displayed, rpm, map, mapUnit, false, Colors.Red, Colors.Magenta,
-                showFuelFlow ? (_, _, _, _) => displayed : (t, b, l, r) => { start = (t, l); end = (b, r); Smooth(t, b, l, r, 2, .65); return (double[,])ve.Clone(); },
-                showFuelFlow ? "3D Fuel Flow Map" : "3D Volumetric Efficiency Map", showFuelFlow ? "FUEL FLOW (lb/hr)" : "VOLUMETRIC EFFICIENCY (%)", showFuelFlow ? null : Handle3DSelectionAction, rpmFormat: "0.########", valueFormat: showFuelFlow ? "0.0" : "0", valueFormatter: showFuelFlow ? null : FormatVeDisplayValue, sculptCommit: showFuelFlow ? null : CommitFuel3DSculpt) { Owner = Window.GetWindow(this) };
-            window.Closed += (_, _) =>
+            Info(error); return;
+        }
+        var cropped = tableSelection.Count > 0;
+        var viewValues = region.Extract(displayed); var viewRpm = region.ExtractColumns(rpm); var viewMap = region.ExtractRows(map);
+        double[,] SmoothRegion(int top, int bottom, int left, int right)
+        {
+            if (flowView) return (double[,])viewValues.Clone();
+            var sourceTop = region.Top + top; var sourceBottom = region.Top + bottom; var sourceLeft = region.Left + left; var sourceRight = region.Left + right;
+            start = (sourceTop, sourceLeft); end = (sourceBottom, sourceRight); Smooth(sourceTop, sourceBottom, sourceLeft, sourceRight, 2, .65);
+            return region.Extract(ve);
+        }
+        void HandleRegionAction(SurfaceSelectionAction action, int top, int bottom, int left, int right, IReadOnlyCollection<(int Row, int Col)> selected, Action<double[,]> refresh) =>
+            Handle3DSelectionAction(action, region.Top + top, region.Top + bottom, region.Left + left, region.Left + right, region.ToSource(selected), updated => refresh(region.Extract(updated)));
+        double[,] CommitRegionSculpt(double[,] updated, IReadOnlyCollection<(int Row, int Col)> affected)
+        {
+            var merged = region.Merge(ve, updated, affected);
+            return region.Extract(CommitFuel3DSculpt(merged, region.ToSource(affected)));
+        }
+        var window = ModelessWindowManager.ShowOrActivate(windowKey, () =>
+        {
+            var baseTitle = flowView ? "3D Fuel Flow Map" : "3D Volumetric Efficiency Map";
+            var title = cropped ? $"{baseTitle} - Selected {region.ColumnCount} x {region.RowCount}" : baseTitle;
+            var created = new Surface3DWindow(viewValues, viewRpm, viewMap, mapUnit, false, Colors.Red, Colors.Magenta,
+                SmoothRegion, title, flowView ? "FUEL FLOW (lb/hr)" : "VOLUMETRIC EFFICIENCY (%)", flowView ? null : HandleRegionAction, rpmFormat: "0.########", valueFormat: flowView ? "0.0" : "0", valueFormatter: flowView ? null : FormatVeDisplayValue, sculptCommit: flowView ? null : CommitRegionSculpt) { Owner = Window.GetWindow(this) };
+            created.Closed += (_, _) =>
             {
-                start = end = null; selecting = false;
+                start = end = null; selecting = false; pinnedFuelSelection.Clear();
                 if (IsLoaded) { ApplyBoundaries(); status.Text = "3D view closed  •  fuel selection cleared"; }
             };
-            return window;
+            return created;
         });
+        window.SetTableContext(viewValues, cropped ? region.AllLocalCells() : Array.Empty<(int Row, int Col)>(), cropped);
     }
 
     private void ExportCsv(object? sender, RoutedEventArgs e)

@@ -143,6 +143,8 @@ public sealed class HelpPanel : Grid
 
         Section(document, "3D View", Bullets(
             "Drag to orbit and use the mouse wheel to zoom.",
+            "Select one solid rectangular area of at least 2 rows by 2 columns in the 2D Timing, Fueling, or Sandbox table before opening 3D Map. Only those cells and their matching axis ranges are shown; opening 3D Map with no selection shows the full table.",
+            "The selected rectangle is the fixed 3D workspace until that viewer closes. Close it and choose another 2D rectangle to work on a different area; edits and Undo still map to the original table cells.",
             "Hover over the surface for the live X/Y/value tooltip and crosshair.",
             "Choose Select surface cells, then click or drag. Hold Ctrl to add separated cells or areas.",
             "Right-click a 3D selection for the same editing and smoothing commands as the 2D table.",

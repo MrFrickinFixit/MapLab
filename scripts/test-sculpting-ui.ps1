@@ -41,6 +41,17 @@ function Render([string]$name, [int]$width, [int]$height) {
 try {
     $window.Show(); $window.UpdateLayout(); Write-Host 'Sculpt window shown'
     if ((Private-Field 'sculptButtons').GetValue($window).Count -ne 4) { throw 'Sculpt toolbar does not contain all four modes' }
+    $tableSelection = [ValueTuple[int,int][]]@(2..5 | ForEach-Object { [ValueTuple[int,int]]::new(3,$_) })
+    Invoke-Private 'SetTableContext' @($values,$tableSelection,$false) | Out-Null
+    $pinnedFromTable = (Private-Field 'pinnedSurfaceSelection').GetValue($window)
+    $selectionLimit = (Private-Field 'limitSculptToSelection').GetValue($window)
+    if ($pinnedFromTable.Count -ne 4 -or -not $selectionLimit.IsEnabled -or $selectionLimit.IsChecked -ne $true) { throw '2D table selection did not initialize and enable the 3D mask' }
+    $allCells = [Collections.Generic.List[ValueTuple[int,int]]]::new()
+    for ($r=0;$r -lt 8;$r++) { for ($c=0;$c -lt 8;$c++) { $allCells.Add([ValueTuple[int,int]]::new($r,$c)) } }
+    Invoke-Private 'SetTableContext' @($values,$allCells,$true) | Out-Null
+    $selectionVisual = (Private-Field 'selectionVisual').GetValue($window)
+    if ($pinnedFromTable.Count -ne 64 -or $null -ne $selectionVisual.Content) { throw 'Cropped 2D workspace was not retained as a hidden full-surface selection' }
+    Invoke-Private 'SetTableContext' @($values,$tableSelection,$false) | Out-Null
     $radius = Private-Field 'brushRadius'; $strength = Private-Field 'brushStrength'; $falloff = Private-Field 'brushFalloff'; $amount = Private-Field 'brushAmount'
     $radius.GetValue($window).Value = 1; $strength.GetValue($window).Value = 100; $falloff.GetValue($window).SelectedIndex = 2; $amount.GetValue($window).Text = '5'
     $scaleLabels = (Private-Field 'valueScaleLabels').GetValue($window); $oldMaximumLabel = $scaleLabels[10].Text
@@ -76,4 +87,4 @@ try {
     Render 'sculpting-1100.png' 1100 760; Write-Host 'Large sculpt view rendered'
     Render 'sculpting-800.png' 800 620; Write-Host 'Compact sculpt view rendered'
 } finally { $window.Close() }
-'3D sculpt integration passed: one commit per stroke, path interpolation, cancellation, selection mask, responsive layouts, and nonblank rendering.'
+'3D sculpt integration passed: cropped 2D workspace, one commit per stroke, path interpolation, cancellation, selection mask, responsive layouts, and nonblank rendering.'
