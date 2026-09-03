@@ -680,6 +680,24 @@ public partial class MainWindow : Window
         return ReadTimingValues();
     }
 
+    private double[,] CommitTiming3DSculpt(double[,] updated, IReadOnlyCollection<(int Row, int Col)> affected)
+    {
+        if (updated.GetLength(0) != RowCount || updated.GetLength(1) != ColumnCount) throw new ArgumentException("The sculpted timing surface does not match the table.");
+        var candidate = ReadTimingValues(); var changed = 0;
+        foreach (var (row, col) in affected)
+        {
+            if (row < 0 || row >= RowCount || col < 0 || col >= ColumnCount) throw new ArgumentException("A sculpted timing cell is outside the table.");
+            candidate[row, col] = RoundEditableTiming(updated[row, col]);
+            if (candidate[row, col] != timingValues[row, col]) changed++;
+        }
+        if (changed == 0) { StatusText.Text = "Sculpt stroke rounded to the current timing values"; return ReadTimingValues(); }
+        PushUndo();
+        foreach (var (row, col) in affected)
+            if (candidate[row, col] != timingValues[row, col]) SetCellValue(row, col, candidate[row, col]);
+        SaveState(); UpdateSelection(); StatusText.Text = $"Committed a 3D sculpt stroke to {changed} timing cells";
+        return ReadTimingValues();
+    }
+
     private void Handle3DSelectionAction(SurfaceSelectionAction action, int top, int bottom, int left, int right, IReadOnlyCollection<(int Row, int Col)> selectedCells, Action<double[,]> refresh)
     {
         if (action == SurfaceSelectionAction.Undo) { Undo(); refresh(ReadTimingValues()); return; }
@@ -1115,7 +1133,7 @@ public partial class MainWindow : Window
         var values = ReadTimingValues();
         ModelessWindowManager.ShowOrActivate("Timing.3D", () =>
         {
-            var window = new Surface3DWindow(values, rpmAxis, mapAxis, MapUnit, useCustomHeatColors, customLowColor, customHighColor, SmoothFrom3D, selectionAction: Handle3DSelectionAction, rpmFormat: "0.########", valueFormatter: FormatTimingDisplayValue) { Owner = this };
+            var window = new Surface3DWindow(values, rpmAxis, mapAxis, MapUnit, useCustomHeatColors, customLowColor, customHighColor, SmoothFrom3D, selectionAction: Handle3DSelectionAction, rpmFormat: "0.########", valueFormatter: FormatTimingDisplayValue, sculptCommit: CommitTiming3DSculpt) { Owner = this };
             window.Closed += (_, _) =>
             {
                 selectionStart = selectionEnd = null; selecting = false;

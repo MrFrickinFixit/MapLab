@@ -35,6 +35,25 @@ $model = $fuel.GetType().GetProperty('LearnApply',$flags).GetValue($fuel)
 $ve = [double[,]]::new(8,8)
 for ($r=0;$r -lt 8;$r++) { for ($c=0;$c -lt 8;$c++) { $ve[$r,$c]=80 } }
 $fuel.GetType().GetField('ve',$flags).SetValue($fuel,$ve)
+$currentWithExternalEdit = $ve.Clone(); $currentWithExternalEdit[7,7] = 90; $fuel.GetType().GetField('ve',$flags).SetValue($fuel,$currentWithExternalEdit)
+$sculptedVe = $ve.Clone(); $sculptedVe[0,0] = 81.23456
+$sculptedCells = [ValueTuple[int,int][]]@([ValueTuple[int,int]]::new(0,0))
+$committedSculpt = $fuel.GetType().GetMethod('CommitFuel3DSculpt',$flags).Invoke($fuel,@($sculptedVe,$sculptedCells))
+$fuelUndo = $fuel.GetType().GetField('undoHistory',$flags).GetValue($fuel)
+if ($committedSculpt[0,0] -ne 81.235 -or $committedSculpt[7,7] -ne 90 -or $fuelUndo.Count -ne 1 -or $fuelUndo.Peek()[0,0] -ne 80 -or $fuelUndo.Peek()[7,7] -ne 90) { throw '3D fuel sculpt did not round, preserve unrelated edits, and capture one Undo snapshot' }
+$fuel.GetType().GetMethod('CommitFuel3DSculpt',$flags).Invoke($fuel,@($committedSculpt,$sculptedCells)) | Out-Null
+if ($fuelUndo.Count -ne 1) { throw 'Unchanged 3D fuel sculpt added an Undo snapshot' }
+$sculptProgressType = [TimingTableCalculator.WorkingRunner].Assembly.GetType('TimingTableCalculator.WorkingWindow')
+$sculptProgress = [Activator]::CreateInstance($sculptProgressType,[object[]]@('Test'))
+$sculptCurrentProgress = [TimingTableCalculator.WorkingRunner].GetField('current',[Reflection.BindingFlags]'Static,NonPublic')
+$sculptCurrentProgress.SetValue($null,$sculptProgress)
+try {
+    $fuel.GetType().GetMethod('Undo',$flags).Invoke($fuel,@()) | Out-Null
+    if ($fuel.GetType().GetField('ve',$flags).GetValue($fuel)[0,0] -ne 80 -or $fuel.GetType().GetField('ve',$flags).GetValue($fuel)[7,7] -ne 90) { throw '3D fuel sculpt Undo did not restore the pre-stroke table' }
+    $fuel.GetType().GetMethod('Redo',$flags).Invoke($fuel,@()) | Out-Null
+    if ($fuel.GetType().GetField('ve',$flags).GetValue($fuel)[0,0] -ne 81.235 -or $fuel.GetType().GetField('ve',$flags).GetValue($fuel)[7,7] -ne 90) { throw '3D fuel sculpt Redo did not restore the stroke' }
+} finally { $sculptCurrentProgress.SetValue($null,$null); $sculptProgress.Complete() }
+$fuel.GetType().GetField('ve',$flags).SetValue($fuel,$ve.Clone()); $fuelUndo.Clear(); $fuel.GetType().GetField('redoHistory',$flags).GetValue($fuel).Clear()
 $transferMethod = $fuel.GetType().GetMethod('TransferLearnOffsets',$flags)
 $callback = [Func[bool,int]] { param($smooth) return [int]$transferMethod.Invoke($fuel,@($smooth)) }
 $panel = [TimingTableCalculator.LearnApplyPanel]::new($model,$callback)
@@ -145,4 +164,4 @@ try {
 [xml]$xaml = Get-Content -LiteralPath (Join-Path $root 'MainWindow.xaml')
 $tabs = @($xaml.Window.TabControl.TabItem)
 if ($tabs[0].Header -ne 'FUELING' -or $tabs[1].Header -ne 'LEARN APPLY TABLE') { throw 'Incorrect tab placement' }
-'Learn Apply integration passed: partial/full pastes, deselection, underlying VE in lb/hr view, conversion refresh, full-table fuel Undo/Redo for plain and smoothed transfers even after clearing learn offsets, autosave/restore, .map validation, legacy import, MAP/precision sync, independent learn clear/Undo, dialog options and tab order.'
+'Learn Apply integration passed: fuel sculpt rounding/history, partial/full pastes, deselection, underlying VE in lb/hr view, conversion refresh, full-table fuel Undo/Redo for plain and smoothed transfers even after clearing learn offsets, autosave/restore, .map validation, legacy import, MAP/precision sync, independent learn clear/Undo, dialog options and tab order.'

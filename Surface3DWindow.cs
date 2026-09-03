@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
@@ -26,6 +27,7 @@ public sealed class Surface3DWindow : Window
     private string FormatMap(double value) => value.ToString(MapFormat, System.Globalization.CultureInfo.InvariantCulture);
     private readonly Func<int, int, int, int, double[,]> smoothSelection;
     private readonly Action<SurfaceSelectionAction, int, int, int, int, IReadOnlyCollection<(int Row, int Col)>, Action<double[,]>>? selectionAction;
+    private readonly Func<double[,], IReadOnlyCollection<(int Row, int Col)>, double[,]>? sculptCommit;
     private readonly ModelVisual3D selectionVisual = new();
     private readonly ModelVisual3D hoverVisual = new();
     private readonly Transform3DGroup transforms = new();
@@ -36,18 +38,31 @@ public sealed class Surface3DWindow : Window
     private (int Row, int Col)? selectionStart, selectionEnd;
     private readonly HashSet<(int Row, int Col)> pinnedSurfaceSelection = [];
     private Button smoothButton = null!, selectButton = null!;
+    private readonly List<ToggleButton> sculptButtons = [];
+    private Slider brushRadius = null!, brushStrength = null!;
+    private TextBox brushAmount = null!;
+    private ComboBox brushFalloff = null!;
+    private CheckBox limitSculptToSelection = null!, preventSculptOvershoot = null!;
+    private TextBlock brushRadiusLabel = null!, brushStrengthLabel = null!;
     private TextBlock selectionStatus = null!;
     private Border hoverTip = null!;
     private TextBlock hoverText = null!;
     private (int Row, int Col)? hoverCell;
     private readonly List<(TextBlock Label, Point3D LocalPosition)> scaleOverlayLabels = [];
+    private readonly List<TextBlock> valueScaleLabels = [];
     private int transitionRingThickness = 1;
+    private SurfaceSculptMode? sculptMode;
+    private bool sculptingSurface;
+    private double[,]? sculptStrokeOriginal;
+    private (int Row, int Col)? lastSculptCell;
+    private double flattenTarget;
+    private readonly HashSet<(int Row, int Col)> sculptedCells = [];
 
-    public Surface3DWindow(double[,] values, double[] rpm, double[] map, string mapUnit, bool useCustomColors, Color lowColor, Color highColor, Func<int, int, int, int, double[,]> smoothSelection, string windowTitle = "3D Timing Map", string valueAxisTitle = "SPARK TIMING (°)", Action<SurfaceSelectionAction, int, int, int, int, IReadOnlyCollection<(int Row, int Col)>, Action<double[,]>>? selectionAction = null, string mapAxisTitle = "MAP", string rpmAxisTitle = "ENGINE RPM", string rpmFormat = "0", string valueFormat = "0.0", Func<double, string>? valueFormatter = null)
+    public Surface3DWindow(double[,] values, double[] rpm, double[] map, string mapUnit, bool useCustomColors, Color lowColor, Color highColor, Func<int, int, int, int, double[,]> smoothSelection, string windowTitle = "3D Timing Map", string valueAxisTitle = "SPARK TIMING (°)", Action<SurfaceSelectionAction, int, int, int, int, IReadOnlyCollection<(int Row, int Col)>, Action<double[,]>>? selectionAction = null, string mapAxisTitle = "MAP", string rpmAxisTitle = "ENGINE RPM", string rpmFormat = "0", string valueFormat = "0.0", Func<double, string>? valueFormatter = null, Func<double[,], IReadOnlyCollection<(int Row, int Col)>, double[,]>? sculptCommit = null)
     {
         this.values = values; rows = values.GetLength(0); cols = values.GetLength(1); this.smoothSelection = smoothSelection;
         rpmAxis = rpm.ToArray(); mapAxis = map.ToArray(); this.mapUnit = mapUnit; this.valueAxisTitle = valueAxisTitle; this.mapAxisTitle = mapAxisTitle; this.rpmAxisTitle = rpmAxisTitle; this.rpmFormat = rpmFormat; this.valueFormat = valueFormat; this.valueFormatter = valueFormatter;
-        this.selectionAction = selectionAction;
+        this.selectionAction = selectionAction; this.sculptCommit = sculptCommit;
         this.useCustomColors = useCustomColors; this.lowColor = lowColor; this.highColor = highColor;
         Title = windowTitle; Width = 1100; Height = 760; MinWidth = 720; MinHeight = 520;
         WindowStartupLocation = WindowStartupLocation.CenterOwner; Background = new SolidColorBrush(Color.FromRgb(8, 13, 20));
@@ -59,7 +74,7 @@ public sealed class Surface3DWindow : Window
         var heading = new StackPanel { Margin = new Thickness(4, 0, 0, 14) };
         heading.Children.Add(new TextBlock { Text = windowTitle.ToUpperInvariant(), Foreground = new SolidColorBrush(Color.FromRgb(85, 214, 190)), FontSize = 12, FontWeight = FontWeights.Bold });
         heading.Children.Add(new TextBlock { Text = $"{rpm.First().ToString(rpmFormat)}–{rpm.Last().ToString(rpmFormat)} {rpmAxisTitle}  •  {FormatMap(map.Last())}–{FormatMap(map.First())} {mapUnit}", Foreground = Brushes.White, FontSize = 22, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 0) });
-        var selectionControls = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
+        var selectionControls = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
         var undoButton = new Button { Content = "↶  Undo", Padding = new Thickness(12, 6, 12, 6), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White };
         var redoButton = new Button { Content = "↷  Redo", Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(8, 0, 0, 0), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White };
         selectButton = new Button { Content = "Select surface cells", Padding = new Thickness(12, 6, 12, 6), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White };
@@ -71,15 +86,17 @@ public sealed class Surface3DWindow : Window
         selectButton.Click += (_, _) => ToggleSelectionMode();
         smoothButton.Click += (_, _) => { if (selectionAction is not null) RunSelectionAction(SurfaceSelectionAction.Advanced); else ApplySelectedSmoothing(); };
         selectionControls.Children.Add(undoButton); selectionControls.Children.Add(redoButton); selectionControls.Children.Add(selectButton); selectionControls.Children.Add(smoothButton); selectionControls.Children.Add(selectionStatus); heading.Children.Add(selectionControls);
+        if (sculptCommit is not null) heading.Children.Add(CreateSculptControls());
         root.Children.Add(heading);
 
         viewport = new Viewport3D { ClipToBounds = true };
         if (selectionAction is not null) viewport.ContextMenu = CreateSelectionContextMenu();
         viewport.MouseLeftButtonDown += (_, e) => BeginPointer(viewport, e);
-        viewport.MouseLeftButtonUp += (_, _) => { rotating = false; selectingSurface = false; viewport.ReleaseMouseCapture(); };
+        viewport.MouseLeftButtonUp += (_, _) => EndPointer(viewport);
         viewport.MouseMove += (_, e) => { MovePointer(viewport, e); UpdateHover(viewport, e.GetPosition(viewport)); };
         viewport.MouseLeave += (_, _) => ClearHover();
         viewport.MouseWheel += (_, e) => Zoom(e.Delta);
+        PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape && sculptingSurface) { CancelSculptStroke(); e.Handled = true; } };
         camera = new PerspectiveCamera(new Point3D(0, 18, 28), new Vector3D(0, -15, -28), new Vector3D(0, 1, 0), 45);
         viewport.Camera = camera;
 
@@ -111,6 +128,38 @@ public sealed class Surface3DWindow : Window
         Grid.SetRow(help, 2); root.Children.Add(help); Content = root;
         viewport.Loaded += (_, _) => UpdateScaleOverlayPositions();
         viewport.SizeChanged += (_, _) => UpdateScaleOverlayPositions();
+    }
+
+    private FrameworkElement CreateSculptControls()
+    {
+        var panel = new WrapPanel { Margin = new Thickness(0, 9, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        panel.Children.Add(new TextBlock { Text = "SCULPT", Foreground = UiBrushCache.Cruise, FontSize = 11, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 5) });
+        foreach (var mode in Enum.GetValues<SurfaceSculptMode>())
+        {
+            var button = new ToggleButton { Content = mode.ToString(), MinWidth = 66, Height = 30, Margin = new Thickness(0, 0, 5, 5), Padding = new Thickness(9, 4, 9, 4), Foreground = Brushes.White, Background = UiBrushCache.GridLine, BorderBrush = UiBrushCache.AxisLine, ToolTip = mode switch { SurfaceSculptMode.Raise => "Paint higher table values.", SurfaceSculptMode.Lower => "Paint lower table values.", SurfaceSculptMode.Smooth => "Blend values toward their local neighbors.", _ => "Move values toward the value sampled when the stroke begins." } };
+            button.Click += (_, _) => ToggleSculptMode(mode);
+            sculptButtons.Add(button); panel.Children.Add(button);
+        }
+
+        brushRadiusLabel = SculptLabel("Radius 2");
+        brushRadius = new Slider { Minimum = 1, Maximum = 10, Value = 2, TickFrequency = 1, IsSnapToTickEnabled = true, Width = 86, VerticalAlignment = VerticalAlignment.Center, ToolTip = "Brush radius measured against the real RPM and MAP breakpoint spacing." };
+        brushRadius.ValueChanged += (_, _) => brushRadiusLabel.Text = $"Radius {(int)brushRadius.Value}"; panel.Children.Add(SculptField(brushRadiusLabel, brushRadius));
+        brushStrengthLabel = SculptLabel("Strength 35%");
+        brushStrength = new Slider { Minimum = 1, Maximum = 100, Value = 35, TickFrequency = 1, Width = 86, VerticalAlignment = VerticalAlignment.Center, ToolTip = "How strongly each brush stamp changes the surface." };
+        brushStrength.ValueChanged += (_, _) => brushStrengthLabel.Text = $"Strength {(int)brushStrength.Value}%"; panel.Children.Add(SculptField(brushStrengthLabel, brushStrength));
+        brushAmount = new TextBox { Text = "1", Width = 50, Height = 28, Padding = new Thickness(5, 3, 5, 3), TextAlignment = TextAlignment.Right, VerticalContentAlignment = VerticalAlignment.Center, ToolTip = "Center-point change per Raise or Lower brush stamp, in table units." }; panel.Children.Add(SculptField(SculptLabel("Amount"), brushAmount));
+        brushFalloff = new ComboBox { Width = 82, Height = 28, ItemsSource = Enum.GetNames<SurfaceBrushFalloff>(), SelectedIndex = 0, ToolTip = "How the brush strength fades from its center to its edge." }; panel.Children.Add(SculptField(SculptLabel("Falloff"), brushFalloff));
+        limitSculptToSelection = new CheckBox { Content = "Limit to selection", IsChecked = true, IsEnabled = false, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 5), ToolTip = "When selected cells exist, prevent the brush from changing cells outside them." }; panel.Children.Add(limitSculptToSelection);
+        preventSculptOvershoot = new CheckBox { Content = "Prevent overshoot", IsChecked = false, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 0, 5), ToolTip = "Keep sculpted values inside the table's range at the start of the stroke." }; panel.Children.Add(preventSculptOvershoot);
+        return panel;
+    }
+
+    private static TextBlock SculptLabel(string text) => new() { Text = text, Foreground = Brushes.White, FontSize = 11, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 0, 5) };
+    private static StackPanel SculptField(TextBlock label, Control control)
+    {
+        label.Margin = new Thickness(0); control.Margin = new Thickness(5, 0, 0, 0);
+        var field = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 10, 5), VerticalAlignment = VerticalAlignment.Center };
+        field.Children.Add(label); field.Children.Add(control); return field;
     }
 
     private ContextMenu CreateSelectionContextMenu()
@@ -150,10 +199,11 @@ public sealed class Surface3DWindow : Window
             return;
         }
         if (action == SurfaceSelectionAction.SelectRing) { OpenTransitionRing(top, bottom, left, right); return; }
-        selectionAction(action, top, bottom, left, right, selected, UpdateSurfaceValues);
+        selectionAction(action, top, bottom, left, right, selected, updated => UpdateSurfaceValues(updated));
         if (action == SurfaceSelectionAction.Paste)
         {
             selectionStart = selectionEnd = null; pinnedSurfaceSelection.Clear(); selectionVisual.Content = null; smoothButton.IsEnabled = false;
+            UpdateSculptSelectionState();
             selectionStatus.Text = "Paste complete  •  selection cleared";
         }
     }
@@ -167,8 +217,9 @@ public sealed class Surface3DWindow : Window
             transitionRingThickness = width; var ring = TransitionRingSelection.Create(top, bottom, left, right, width);
             pinnedSurfaceSelection.Clear(); foreach (var cell in ring) pinnedSurfaceSelection.Add(cell);
             selectionStart = selectionEnd = null; selectionVisual.Content = CreateSelectionOverlay(ring); smoothButton.IsEnabled = true;
+            UpdateSculptSelectionState();
             selectionStatus.Text = $"{ring.Count} transition-ring cells selected";
-            selectionAction?.Invoke(SurfaceSelectionAction.SelectRing, top, bottom, left, right, ring, UpdateSurfaceValues);
+            selectionAction?.Invoke(SurfaceSelectionAction.SelectRing, top, bottom, left, right, ring, updated => UpdateSurfaceValues(updated));
         }
         var dialog = ModelessWindowManager.ShowOrActivate($"3D.{Title}.TransitionRing", () => new TransitionRingWindow(maximum, transitionRingThickness, Apply) { Owner = this });
         dialog.Configure(maximum, transitionRingThickness, Apply);
@@ -176,10 +227,10 @@ public sealed class Surface3DWindow : Window
 
     private void RunHistoryAction(SurfaceSelectionAction action)
     {
-        selectionAction?.Invoke(action, 0, 0, 0, 0, Array.Empty<(int Row, int Col)>(), UpdateSurfaceValues);
+        selectionAction?.Invoke(action, 0, 0, 0, 0, Array.Empty<(int Row, int Col)>(), updated => UpdateSurfaceValues(updated));
     }
 
-    private void UpdateSurfaceValues(double[,] updated)
+    private void UpdateSurfaceValues(double[,] updated, bool updateStatus = true)
     {
         if (updated.GetLength(0) != rows || updated.GetLength(1) != cols) return;
         Array.Copy(updated, values, values.Length);
@@ -187,7 +238,11 @@ public sealed class Surface3DWindow : Window
         surface.Geometry = updatedSurface.Geometry; surface.Material = updatedSurface.Material; surface.BackMaterial = updatedSurface.BackMaterial;
         var updatedGrid = CreateContourGrid(values);
         contourGrid.Geometry = updatedGrid.Geometry; contourGrid.Material = updatedGrid.Material; contourGrid.BackMaterial = updatedGrid.BackMaterial;
-        selectionStatus.Text = "Table updated  •  selection retained";
+        RefreshValueScaleLabels();
+        var selected = SelectedSurfaceCells();
+        if (selected.Count > 0) selectionVisual.Content = CreateSelectionOverlay(selected);
+        hoverCell = null; hoverVisual.Content = null;
+        if (updateStatus) selectionStatus.Text = "Table updated  •  selection retained";
     }
 
     private static UIElement CreateAxisOverlay(double[,] values, double[] rpm, double[] map, string mapUnit)
@@ -277,8 +332,8 @@ public sealed class Surface3DWindow : Window
             var scaleValue = timingMin + (timingMax - timingMin) * fraction;
             var label = valueFormatter?.Invoke(scaleValue) ?? scaleValue.ToString(displayedValueFormat, System.Globalization.CultureInfo.InvariantCulture);
             var y = .15 + 6.7 * fraction;
-            AddScaleOverlay(label, new Point3D(-10.7, y, -8.25));
-            AddScaleOverlay(label, new Point3D(10.7, y, 8.25));
+            valueScaleLabels.Add(AddScaleOverlay(label, new Point3D(-10.7, y, -8.25)));
+            valueScaleLabels.Add(AddScaleOverlay(label, new Point3D(10.7, y, 8.25)));
         }
         UpdateScaleOverlayPositions();
     }
@@ -446,12 +501,115 @@ public sealed class Surface3DWindow : Window
         mesh.TriangleIndices.Add(index + 2); mesh.TriangleIndices.Add(index + 1); mesh.TriangleIndices.Add(index + 3);
     }
 
+    private void ToggleSculptMode(SurfaceSculptMode mode)
+    {
+        CancelSculptStroke();
+        var enable = sculptMode != mode;
+        selectionMode = selectingSurface = rotating = false;
+        selectButton.Content = "Select surface cells";
+        selectButton.Background = UiBrushCache.GridLine;
+        SetSculptMode(enable ? mode : null);
+        selectionStatus.Text = enable ? $"{mode} sculpt ready  •  drag on the surface" : "Rotation mode";
+    }
+
+    private void SetSculptMode(SurfaceSculptMode? mode)
+    {
+        sculptMode = mode;
+        foreach (var button in sculptButtons)
+        {
+            var active = mode is not null && string.Equals(button.Content?.ToString(), mode.ToString(), StringComparison.Ordinal);
+            button.IsChecked = active;
+            button.Background = active ? UiBrushCache.Idle : UiBrushCache.GridLine;
+        }
+        viewport.Cursor = mode is null ? Cursors.Arrow : Cursors.Cross;
+    }
+
+    private bool BeginSculptStroke((int Row, int Col) cell)
+    {
+        if (sculptMode is null || sculptCommit is null) return false;
+        var amount = 1d;
+        if (sculptMode is SurfaceSculptMode.Raise or SurfaceSculptMode.Lower &&
+            (!double.TryParse(brushAmount.Text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out amount) || !double.IsFinite(amount) || amount < 0))
+        {
+            MessageBox.Show(this, "Amount must be a finite number of zero or greater.", "Check sculpt amount", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+        sculptStrokeOriginal = (double[,])values.Clone();
+        flattenTarget = values[cell.Row, cell.Col];
+        lastSculptCell = null; sculptedCells.Clear(); sculptingSurface = true;
+        ApplySculptThrough(cell, amount);
+        return true;
+    }
+
+    private void ApplySculptThrough((int Row, int Col) cell, double? parsedAmount = null)
+    {
+        if (!sculptingSurface || sculptStrokeOriginal is null || sculptMode is null) return;
+        var amount = parsedAmount ?? (double.TryParse(brushAmount.Text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed) && double.IsFinite(parsed) && parsed >= 0 ? parsed : 1);
+        var centers = lastSculptCell is { } previous ? SurfaceSculptor.Line(previous, cell).Skip(1).ToArray() : [cell];
+        lastSculptCell = cell;
+        if (centers.Length == 0) return;
+        var selected = SelectedSurfaceCells();
+        IReadOnlySet<(int Row, int Col)>? mask = limitSculptToSelection.IsChecked == true && selected.Count > 0 ? selected : null;
+        var options = new SurfaceSculptOptions(sculptMode.Value, (int)brushRadius.Value, brushStrength.Value / 100d, amount,
+            (SurfaceBrushFalloff)Math.Max(0, brushFalloff.SelectedIndex), preventSculptOvershoot.IsChecked == true);
+        var result = SurfaceSculptor.ApplyPath(values, sculptStrokeOriginal, centers, options, rpmAxis, mapAxis, flattenTarget, mask);
+        sculptedCells.UnionWith(result.AffectedCells);
+        UpdateSurfaceValues(result.Values, false);
+        var deltas = sculptedCells.Select(point => values[point.Row, point.Col] - sculptStrokeOriginal[point.Row, point.Col]).ToArray();
+        var range = deltas.Length == 0 ? "no value change" : $"delta {deltas.Min():+0.###;-0.###;0} to {deltas.Max():+0.###;-0.###;0}";
+        selectionStatus.Text = $"{sculptMode} sculpt preview  •  {sculptedCells.Count} cells  •  {range}";
+    }
+
+    private void EndPointer(Viewport3D target)
+    {
+        if (sculptingSurface) FinishSculptStroke();
+        rotating = selectingSurface = false;
+        target.ReleaseMouseCapture();
+    }
+
+    private void FinishSculptStroke()
+    {
+        var original = sculptStrokeOriginal;
+        sculptingSurface = false; sculptStrokeOriginal = null; lastSculptCell = null;
+        if (original is null || sculptedCells.Count == 0 || sculptCommit is null) { sculptedCells.Clear(); return; }
+        try
+        {
+            var committed = sculptCommit((double[,])values.Clone(), sculptedCells.ToArray());
+            UpdateSurfaceValues(committed, false);
+            selectionStatus.Text = $"Sculpt stroke committed  •  {sculptedCells.Count} cells  •  one Undo step";
+        }
+        catch (Exception exception)
+        {
+            UpdateSurfaceValues(original, false);
+            MessageBox.Show(this, exception.Message, "Sculpting could not be applied", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally { sculptedCells.Clear(); }
+    }
+
+    private void CancelSculptStroke()
+    {
+        if (!sculptingSurface || sculptStrokeOriginal is null) return;
+        var original = sculptStrokeOriginal;
+        sculptingSurface = false; sculptStrokeOriginal = null; lastSculptCell = null; sculptedCells.Clear();
+        UpdateSurfaceValues(original, false); selectionStatus.Text = "Sculpt preview cancelled";
+    }
+
+    private void UpdateSculptSelectionState()
+    {
+        if (sculptCommit is null) return;
+        var hasSelection = SelectedSurfaceCells().Count > 0;
+        limitSculptToSelection.IsEnabled = hasSelection;
+        if (!hasSelection) limitSculptToSelection.IsChecked = true;
+    }
+
     private void ToggleSelectionMode()
     {
+        CancelSculptStroke(); SetSculptMode(null);
         selectionMode = !selectionMode; rotating = selectingSurface = false;
         if (!selectionMode)
         {
             selectionStart = selectionEnd = null; pinnedSurfaceSelection.Clear(); selectionVisual.Content = null; smoothButton.IsEnabled = false;
+            UpdateSculptSelectionState();
         }
         selectButton.Content = selectionMode ? "Return to rotation" : "Select surface cells";
         selectButton.Background = new SolidColorBrush(selectionMode ? Color.FromRgb(67, 145, 208) : Color.FromRgb(28, 38, 53));
@@ -461,7 +619,12 @@ public sealed class Surface3DWindow : Window
     private void BeginPointer(Viewport3D viewport, MouseButtonEventArgs e)
     {
         var point = e.GetPosition(viewport);
-        if (selectionMode)
+        if (sculptMode is not null)
+        {
+            var cell = HitSurfaceCell(viewport, point);
+            if (cell is null || !BeginSculptStroke(cell.Value)) return;
+        }
+        else if (selectionMode)
         {
             var cell = HitSurfaceCell(viewport, point);
             if (cell is null) return;
@@ -475,7 +638,12 @@ public sealed class Surface3DWindow : Window
     private void MovePointer(Viewport3D viewport, MouseEventArgs e)
     {
         var point = e.GetPosition(viewport);
-        if (selectionMode && selectingSurface)
+        if (sculptingSurface)
+        {
+            var cell = HitSurfaceCell(viewport, point);
+            if (cell is not null && cell != lastSculptCell) ApplySculptThrough(cell.Value);
+        }
+        else if (selectionMode && selectingSurface)
         {
             var cell = HitSurfaceCell(viewport, point);
             if (cell is not null && cell != selectionEnd) { selectionEnd = cell; UpdateSelectionHighlight(); }
@@ -550,6 +718,7 @@ public sealed class Surface3DWindow : Window
         var left = Math.Min(selectionStart.Value.Col, selectionEnd.Value.Col); var right = Math.Max(selectionStart.Value.Col, selectionEnd.Value.Col);
         var selectedCells = SelectedSurfaceCells(); selectionVisual.Content = CreateSelectionOverlay(selectedCells);
         smoothButton.IsEnabled = selectedCells.Count > 0;
+        UpdateSculptSelectionState();
         selectionStatus.Text = $"{selectedCells.Count} surface cells selected";
     }
 
@@ -608,7 +777,7 @@ public sealed class Surface3DWindow : Window
         pitch.Angle = Math.Clamp(pitch.Angle, -80, 80); lastPoint = point; UpdateScaleOverlayPositions();
     }
 
-    private void AddScaleOverlay(string text, Point3D localPosition, bool title = false)
+    private TextBlock AddScaleOverlay(string text, Point3D localPosition, bool title = false)
     {
         var label = new TextBlock
         {
@@ -617,6 +786,20 @@ public sealed class Surface3DWindow : Window
             IsHitTestVisible = false
         };
         scaleOverlayLabels.Add((label, localPosition)); overlayLayer.Children.Add(label);
+        return label;
+    }
+
+    private void RefreshValueScaleLabels()
+    {
+        if (valueScaleLabels.Count != 12) return;
+        var (minimum, maximum) = ValueRange(values);
+        for (var labelIndex = 0; labelIndex < 6; labelIndex++)
+        {
+            var value = minimum + (maximum - minimum) * labelIndex / 5d;
+            var text = valueFormatter?.Invoke(value) ?? value.ToString(valueFormat, System.Globalization.CultureInfo.InvariantCulture);
+            valueScaleLabels[labelIndex * 2].Text = text;
+            valueScaleLabels[labelIndex * 2 + 1].Text = text;
+        }
     }
 
     private void UpdateScaleOverlayPositions()

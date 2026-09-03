@@ -834,6 +834,20 @@ public sealed class FuelingPanel : Grid
 
     private void SmoothColumns(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || b - t < 2) { Info("Select at least 3 rows."); return; } PushUndo(); for (var col = l; col <= r; col++) for (var row = t + 1; row < b; row++) { var x = (map[t] - map[row]) / (map[t] - map[b]); x = Ease(x); ve[row, col] = ve[t, col] + (ve[b, col] - ve[t, col]) * x; } Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Smoothed selected fuel columns  •  selection cleared"; }
     private void SmoothRows(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || r - l < 2) { Info("Select at least 3 columns."); return; } PushUndo(); for (var row = t; row <= b; row++) for (var col = l + 1; col < r; col++) { var x = (rpm[col] - rpm[l]) / (rpm[r] - rpm[l]); x = Ease(x); ve[row, col] = ve[row, l] + (ve[row, r] - ve[row, l]) * x; } Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Smoothed selected fuel rows  •  selection cleared"; }
+    private double[,] CommitFuel3DSculpt(double[,] updated, IReadOnlyCollection<(int Row, int Col)> affected)
+    {
+        if (updated.GetLength(0) != ve.GetLength(0) || updated.GetLength(1) != ve.GetLength(1)) throw new ArgumentException("The sculpted VE surface does not match the fuel table.");
+        var candidate = (double[,])ve.Clone(); var changed = 0;
+        foreach (var (row, col) in affected)
+        {
+            if (row < 0 || row >= ve.GetLength(0) || col < 0 || col >= ve.GetLength(1)) throw new ArgumentException("A sculpted VE cell is outside the fuel table.");
+            candidate[row, col] = RoundEditableVe(updated[row, col]);
+            if (candidate[row, col] != ve[row, col]) changed++;
+        }
+        if (changed == 0) { status.Text = "Sculpt stroke rounded to the current VE values"; return (double[,])ve.Clone(); }
+        PushUndo(); ve = candidate; Save(); RefreshAll(); UpdateSelection(); status.Text = $"Committed a 3D sculpt stroke to {changed} VE cells";
+        return (double[,])ve.Clone();
+    }
     private void View3D(object? sender, RoutedEventArgs e)
     {
         ClearFuelSelection();
@@ -842,7 +856,7 @@ public sealed class FuelingPanel : Grid
             var displayed = DisplayValues();
             var window = new Surface3DWindow(displayed, rpm, map, mapUnit, false, Colors.Red, Colors.Magenta,
                 showFuelFlow ? (_, _, _, _) => displayed : (t, b, l, r) => { start = (t, l); end = (b, r); Smooth(t, b, l, r, 2, .65); return (double[,])ve.Clone(); },
-                showFuelFlow ? "3D Fuel Flow Map" : "3D Volumetric Efficiency Map", showFuelFlow ? "FUEL FLOW (lb/hr)" : "VOLUMETRIC EFFICIENCY (%)", showFuelFlow ? null : Handle3DSelectionAction, rpmFormat: "0.########", valueFormat: showFuelFlow ? "0.0" : "0", valueFormatter: showFuelFlow ? null : FormatVeDisplayValue) { Owner = Window.GetWindow(this) };
+                showFuelFlow ? "3D Fuel Flow Map" : "3D Volumetric Efficiency Map", showFuelFlow ? "FUEL FLOW (lb/hr)" : "VOLUMETRIC EFFICIENCY (%)", showFuelFlow ? null : Handle3DSelectionAction, rpmFormat: "0.########", valueFormat: showFuelFlow ? "0.0" : "0", valueFormatter: showFuelFlow ? null : FormatVeDisplayValue, sculptCommit: showFuelFlow ? null : CommitFuel3DSculpt) { Owner = Window.GetWindow(this) };
             window.Closed += (_, _) =>
             {
                 start = end = null; selecting = false;

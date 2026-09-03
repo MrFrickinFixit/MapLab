@@ -303,7 +303,7 @@ public sealed class SandboxPanel : Grid
         ClearCellSelection();
         ModelessWindowManager.ShowOrActivate("Sandbox.3D", () =>
         {
-            var window = new Surface3DWindow(values, rpm, map, mapUnit, false, Colors.Red, Colors.Magenta, (t, b, l, r) => { start = (t, l); end = (b, r); SmoothBasic(); return (double[,])values.Clone(); }, "3D Map Sandbox", "TABLE VALUE", Handle3D, "Y AXIS", XAxisTitle, "0.########", valueFormatter: FormatDisplayValue) { Owner = Window.GetWindow(this) };
+            var window = new Surface3DWindow(values, rpm, map, mapUnit, false, Colors.Red, Colors.Magenta, (t, b, l, r) => { start = (t, l); end = (b, r); SmoothBasic(); return (double[,])values.Clone(); }, "3D Map Sandbox", "TABLE VALUE", Handle3D, "Y AXIS", XAxisTitle, "0.########", valueFormatter: FormatDisplayValue, sculptCommit: Commit3DSculpt) { Owner = Window.GetWindow(this) };
             window.Closed += (_, _) => { ClearCellSelection(); status.Text = "3D sandbox closed  •  selection cleared"; }; return window;
         });
     }
@@ -326,6 +326,20 @@ public sealed class SandboxPanel : Grid
             case SurfaceSelectionAction.SmoothColumns: SmoothColumns(this, new RoutedEventArgs()); Refresh3D(); break;
             case SurfaceSelectionAction.Clear: Clear(this, new RoutedEventArgs()); Refresh3D(); break;
         }
+    }
+    private double[,] Commit3DSculpt(double[,] updated, IReadOnlyCollection<(int Row, int Col)> affected)
+    {
+        if (updated.GetLength(0) != values.GetLength(0) || updated.GetLength(1) != values.GetLength(1)) throw new ArgumentException("The sculpted surface does not match the sandbox table.");
+        var candidate = (double[,])values.Clone(); var changed = 0;
+        foreach (var (row, col) in affected)
+        {
+            if (row < 0 || row >= values.GetLength(0) || col < 0 || col >= values.GetLength(1)) throw new ArgumentException("A sculpted sandbox cell is outside the table.");
+            candidate[row, col] = Math.Round(updated[row, col], 3, MidpointRounding.AwayFromZero);
+            if (candidate[row, col] != values[row, col]) changed++;
+        }
+        if (changed == 0) { status.Text = "Sculpt stroke rounded to the current sandbox values"; return (double[,])values.Clone(); }
+        PushUndo(); values = candidate; Changed($"Committed a 3D sculpt stroke to {changed} sandbox cells");
+        return (double[,])values.Clone();
     }
     private void SmoothBasic() { var selected = Selected(); if (selected.Count == 0) return; PushUndo(); values = AdvancedSmoother.Apply(values, selected, new AdvancedSmoothingOptions(AdvancedSmoothingAlgorithm.StandardWeighted, .65, 2, false, true, .5)); Changed($"Smoothed {selected.Count} sandbox cells"); }
 

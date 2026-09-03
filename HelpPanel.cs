@@ -146,6 +146,10 @@ public sealed class HelpPanel : Grid
             "Hover over the surface for the live X/Y/value tooltip and crosshair.",
             "Choose Select surface cells, then click or drag. Hold Ctrl to add separated cells or areas.",
             "Right-click a 3D selection for the same editing and smoothing commands as the 2D table.",
+            "For direct surface editing, choose Raise, Lower, Smooth, or Flatten in the Sculpt toolbar, then drag on the surface. Radius follows actual X/Y breakpoint spacing; Strength controls blending and Amount controls the center-point change for Raise and Lower.",
+            "Soft and Medium falloff fade toward the brush edge; Hard applies full strength across the brush. Flatten samples its target value where the stroke begins. Smooth blends toward local neighboring cells.",
+            "Limit to selection becomes available after selecting surface cells and prevents the brush from writing outside that mask. Prevent overshoot keeps results inside the table's value range at the start of the stroke.",
+            "Sculpt changes preview while dragging and commit on mouse-up as one source-table Undo step. Press Escape before mouse-up to cancel the preview. Fuel sculpting is available in the editable VE view, not the calculated lb/hr view.",
             "Return to Rotation clears the 3D selection. Closing the viewer clears its corresponding 2D selection.",
             "3D Undo and Redo operate on that viewer's source table."));
         document.Blocks.Add(Illustration("Orbit in Rotation mode, zoom with the wheel, then switch to surface selection for editing.", ThreeDDiagram()));
