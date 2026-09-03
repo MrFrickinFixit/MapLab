@@ -15,6 +15,9 @@
  <TabItem Header="FUELING">
   <Grid Margin="18"><ContentControl x:Name="FuelingHost"/></Grid>
  </TabItem>
+ <TabItem Header="LEARN APPLY TABLE">
+  <Grid Margin="18"><ContentControl x:Name="LearnApplyHost"/></Grid>
+ </TabItem>
  <TabItem Header="IGNITION TIMING">
  <Grid Margin="24">
   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>

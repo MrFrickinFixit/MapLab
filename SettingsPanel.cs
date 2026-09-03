@@ -18,13 +18,13 @@ public sealed class SettingsPanel : Grid
 
         var content = new StackPanel { MaxWidth = 720, HorizontalAlignment = HorizontalAlignment.Left };
         content.Children.Add(new TextBlock { Text = "IMPORT & EXPORT", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) });
-        content.Children.Add(new TextBlock { Text = "A .map file contains the Timing, Fueling, and Sandbox tables together with their axes, units, boundaries, colors, number display, smoothing, and VE setup settings.", TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), FontSize = 13, LineHeight = 20, Margin = new Thickness(0, 0, 0, 16) });
+        content.Children.Add(new TextBlock { Text = "A .map file contains the Timing, Fueling, Learn Apply, and Sandbox tables together with their axes, units, boundaries, colors, number display, smoothing, and VE setup settings.", TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), FontSize = 13, LineHeight = 20, Margin = new Thickness(0, 0, 0, 16) });
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         buttons.Children.Add(MakeButton("⇩  Export .map", (_, _) => exportSettings(), true));
         buttons.Children.Add(MakeButton("⇧  Import .map", (_, _) => importSettings(), false)); content.Children.Add(buttons);
         content.Children.Add(new Border { Height = 1, Background = new SolidColorBrush(Color.FromRgb(225, 225, 225)), Margin = new Thickness(0, 18, 0, 14) });
         content.Children.Add(status);
-        content.Children.Add(new Border { Background = new SolidColorBrush(Color.FromRgb(255, 248, 225)), BorderBrush = new SolidColorBrush(Color.FromRgb(226, 190, 92)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Padding = new Thickness(12), Margin = new Thickness(0, 18, 0, 0), Child = new TextBlock { Text = "Import replaces all three current workspaces. Map Lab validates the complete file and asks for confirmation first.", TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(82, 62, 14)) } });
+        content.Children.Add(new Border { Background = new SolidColorBrush(Color.FromRgb(255, 248, 225)), BorderBrush = new SolidColorBrush(Color.FromRgb(226, 190, 92)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Padding = new Thickness(12), Margin = new Thickness(0, 18, 0, 0), Child = new TextBlock { Text = "Import replaces all current workspaces, including Learn Apply offsets. Map Lab validates the complete file and asks for confirmation first.", TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(82, 62, 14)) } });
         var card = new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(7), Padding = new Thickness(22), VerticalAlignment = VerticalAlignment.Top, Child = content }; Grid.SetRow(card, 1); Children.Add(card);
     }
 

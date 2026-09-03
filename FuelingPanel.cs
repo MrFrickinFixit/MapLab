@@ -12,6 +12,8 @@ namespace TimingTableCalculator;
 
 public sealed class FuelingPanel : Grid
 {
+    internal LearnApplyTable LearnApply { get; } = new();
+    private bool syncingLearnApply;
     private readonly Grid table = new() { Background = new SolidColorBrush(Color.FromRgb(8, 13, 20)) };
     private readonly TextBlock status = new() { Foreground = new SolidColorBrush(Color.FromRgb(118, 135, 156)), FontSize = 11 };
     private readonly TextBox matrixXBox, matrixYBox;
@@ -78,11 +80,13 @@ public sealed class FuelingPanel : Grid
     private readonly Dictionary<TextBox, string> editOriginals = [];
     private readonly HashSet<TextBox> groupCellEditsAwaitingEnter = [];
     private readonly Dictionary<TextBox, double> axisEditOriginalValues = [];
-    private static string SavePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimingTableCalculator", "fueling-autosave.json");
+    private readonly string? autosavePath;
+    private string SavePath => autosavePath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimingTableCalculator", "fueling-autosave.json");
     private string? lastSavedJson;
 
-    public FuelingPanel(Action<int, int> resizeMatrix, Action<bool, int[]> autoFillAxis, Action<bool, int?, int[]> pasteAxis, Action<int, int> setRegionBoundaries, Func<bool, int, double, double[]?> editAxis)
+    public FuelingPanel(Action<int, int> resizeMatrix, Action<bool, int[]> autoFillAxis, Action<bool, int?, int[]> pasteAxis, Action<int, int> setRegionBoundaries, Func<bool, int, double, double[]?> editAxis, string? autosavePath = null)
     {
+        this.autosavePath = autosavePath;
         this.resizeMatrix = resizeMatrix; this.autoFillAxis = autoFillAxis; this.pasteAxis = pasteAxis; this.setRegionBoundaries = setRegionBoundaries; this.editAxis = editAxis;
         PreviewMouseDown += FuelingPanel_PreviewMouseDown;
         matrixXBox = MatrixSizeBox("31"); matrixYBox = MatrixSizeBox("31");
@@ -119,6 +123,26 @@ public sealed class FuelingPanel : Grid
         Grid.SetRow(bottomCommandBar, 3); Children.Add(bottomCommandBar);
         PreviewKeyDown += FuelingPanel_PreviewKeyDown;
         table.PreviewMouseLeftButtonUp += (_, _) => { selecting = false; axisSelecting = false; };
+        LearnApply.Changed += () => { if (!syncingLearnApply) Save(); };
+    }
+
+    private void SyncLearnApply()
+    {
+        if (ve.Length == 0) return;
+        syncingLearnApply = true;
+        try { LearnApply.Synchronize(rpm, map, mapUnit, leadingDisplayDigits, trailingDisplayDecimals); }
+        finally { syncingLearnApply = false; }
+    }
+
+    internal int TransferLearnOffsets(bool smooth)
+    {
+        SyncLearnApply();
+        var count = LearnApply.ActiveCount;
+        if (count == 0) return 0;
+        var updated = LearnApplyMath.Apply(ve, LearnApply.SnapshotValues(), smooth, rpm, map);
+        PushUndo(); ve = updated; Save(); RefreshAll(); ClearFuelSelection();
+        status.Text = $"Transferred {count} learn offsets to VE{(smooth ? " and smoothed changed cells" : "")}";
+        return count;
     }
 
     public void UpdateAxes(double[] newRpm, double[] newMap, string newMapUnit, double idleRpm, double wotMap)
@@ -487,7 +511,7 @@ public sealed class FuelingPanel : Grid
         for (var col = 0; col < rpm.Length; col++) AddAxisEditor(rpm[col], map.Length, col + 2, false, col);
         var rpmTitle = new TextBlock { Text = "Engine RPM", Foreground = Brushes.White, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center };
         Grid.SetRow(rpmTitle, map.Length + 1); Grid.SetColumn(rpmTitle, 2); Grid.SetColumnSpan(rpmTitle, rpm.Length); table.Children.Add(rpmTitle);
-        loading = false; RefreshAll(); ApplyBoundaries(); RenderRegionOfInterest();
+        loading = false; RefreshAll(); ApplyBoundaries(); RenderRegionOfInterest(); SyncLearnApply();
     }
 
     private void CellDown(object sender, MouseButtonEventArgs e)
@@ -1131,6 +1155,7 @@ public sealed class FuelingPanel : Grid
     private void Save()
     {
         if (loading || ve.Length == 0) return;
+        SyncLearnApply();
         try
         {
             var rows = new double[ve.GetLength(0)][];
@@ -1141,7 +1166,7 @@ public sealed class FuelingPanel : Grid
             }
             var state = new FuelState
             {
-                Values = rows, MapAxis = map.ToArray(), MapUnit = mapUnit,
+                Values = rows, MapAxis = map.ToArray(), MapUnit = mapUnit, LearnApply = LearnApply.Capture(),
                 DirectionalOuterToInner = directionalOuterToInner, DirectionalStrength = directionalStrength, DirectionalPasses = directionalPasses,
                 RefinementStrength = refinementStrength, RefinementPasses = refinementPasses, AdvancedOptions = advancedSmoothingOptions,
                 SelectionOffsetAmount = selectionOffsetAmount, SelectionOffsetIsPercentage = selectionOffsetIsPercentage,
@@ -1163,6 +1188,7 @@ public sealed class FuelingPanel : Grid
             var savedJson = File.ReadAllText(SavePath);
             var state = JsonSerializer.Deserialize<FuelState>(savedJson);
             if (state?.Values is null || state.Values.Length == 0 || state.Values.Any(row => row.Length != state.Values[0].Length)) return false;
+            if (!LearnApplyTable.IsValid(state.LearnApply)) return false;
             if (state.MapAxis is { Length: > 1 })
             {
                 mapUnit = state.MapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? "PSI gauge" : "kPa absolute";
@@ -1181,6 +1207,9 @@ public sealed class FuelingPanel : Grid
             syncingDisplayPrecision = true; leadingPrecisionBox.SelectedIndex = leadingDisplayDigits - 1; trailingPrecisionBox.SelectedIndex = trailingDisplayDecimals; syncingDisplayPrecision = false;
             syncingConversion = true; conversionViewBox.IsChecked = showFuelFlow; syncingConversion = false;
             fuelTableTitle.Text = showFuelFlow ? "Fuel Table — Estimated Fuel Flow (lb/hr)" : "Fuel Table — VE (%)";
+            syncingLearnApply = true;
+            try { LearnApply.Restore(state.LearnApply); LearnApply.Synchronize(rpm, map, mapUnit, leadingDisplayDigits, trailingDisplayDecimals); }
+            finally { syncingLearnApply = false; }
             lastSavedJson = savedJson;
             return true;
         }
@@ -1189,7 +1218,7 @@ public sealed class FuelingPanel : Grid
     internal string ExportSettingsJson() { Save(); return !string.IsNullOrWhiteSpace(lastSavedJson) ? lastSavedJson : File.ReadAllText(SavePath); }
     internal bool CanImportSettingsJson(string json)
     {
-        try { var state = JsonSerializer.Deserialize<FuelState>(json); return state?.Values is { Length: >= 8 and <= 64 } && state.Values[0].Length is >= 8 and <= 64 && state.Values.All(row => row.Length == state.Values[0].Length); }
+        try { var state = JsonSerializer.Deserialize<FuelState>(json); return state?.Values is { Length: >= 8 and <= 64 } && state.Values[0].Length is >= 8 and <= 64 && state.Values.All(row => row.Length == state.Values[0].Length) && LearnApplyTable.IsValid(state.LearnApply); }
         catch { return false; }
     }
     internal bool ImportSettingsJson(string json)
@@ -1202,6 +1231,7 @@ public sealed class FuelingPanel : Grid
     private static void Info(string text) => MessageBox.Show(text, "Fueling selection", MessageBoxButton.OK, MessageBoxImage.Information);
     private sealed class FuelState
     {
+        public LearnApplyState? LearnApply { get; set; }
         public double[][] Values { get; set; } = [];
         public double[] MapAxis { get; set; } = [];
         public string MapUnit { get; set; } = "kPa absolute";

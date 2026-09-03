@@ -119,6 +119,17 @@ public sealed class HelpPanel : Grid
             "The wizard operates on the Fueling MAP axis only and cannot change the Ignition Timing MAP scale.",
             "Always review generated values before applying them to an ECU."));
 
+        Section(document, "Learn Apply Table", Bullets(
+            "The Learn Apply Table beside Fueling holds signed percentage corrections, not absolute VE values. Its matrix size, RPM/MAP breakpoints, MAP units, and display precision follow Fueling; edit the axes and precision in Fueling.",
+            "Paste a complete table or select the upper-left destination cell for a partial block. Paste cell values without axis headings; positive and negative numbers may include a percent sign. Blank pasted fields leave existing offsets unchanged; zero means no correction. Copy and paste clear the selection afterward.",
+            "Offsets retain up to three decimal places. Values below -100%, non-numeric values, and blocks that do not fit are rejected without partially changing the table.",
+            "Transfer to Fueling applies all nonzero offsets matching the current axes, not just the selected cells. New VE = current VE x (1 + offset / 100): 80 VE with +10% becomes 88 VE; with -10% it becomes 72 VE. This always edits underlying VE even when Fueling displays lb/hr, and the fuel-flow display is recalculated.",
+            "Choose Transfer only for the exact corrections, or Transfer and smooth changed cells to apply Smooth to Surroundings afterward: both directions, reach 2, strength 65%, and 2 passes. Only nonzero-offset cells are smoothed; the rest of the fuel map stays fixed. Cancel transfers nothing.",
+            "After transfer, choose whether to clear the Learn Apply Table or keep its values. Keeping them and transferring again compounds the correction on the updated VE. Clear removes all learn offsets, including retained off-axis entries.",
+            "A transfer, including optional smoothing, is one Fueling Undo step. Learn edits and clearing have their own Undo/Redo in the Learn Apply tab; Fueling Undo does not restore cleared learn values.",
+            "Offsets are attached to RPM/MAP coordinates. Axis changes retain unmatched or ambiguous offsets without transferring them; their count appears below the learn table. Matching offsets return when their coordinates are available again. Axis changes reset learn Undo/Redo history.",
+            "Learn offsets autosave with Fueling and are included in .map exports. Importing an older file without Learn Apply data starts this table empty."));
+
         Section(document, "Map Sandbox", Bullets(
             "Use Sandbox for custom numeric tables that do not need operating-region boundaries.",
             "Set independent dimensions, breakpoints, and X/Y units. Choose Custom… to add or remove unit names.",
@@ -143,9 +154,9 @@ public sealed class HelpPanel : Grid
             "Copied cells use tab-separated rows and can be moved between Map Lab tables and compatible tuning software.",
             "Select an axis starting point before pasting a copied row or column of breakpoints.",
             "CSV and Excel put the X scale at the bottom. Excel includes matching heat-map formatting without header filters.",
-            "Settings → Export .map saves all Timing, Fueling, and Sandbox tables, axes, units, boundaries, colors, display preferences, smoothing choices, and VE setup options in one portable file.",
-            "Settings → Import .map validates the complete file before replacing the three workspaces, then autosaves the imported settings.",
-            "Timing, Fueling, and Sandbox autosave separately. Dialog settings are retained until changed.",
+            "Settings → Export .map saves Timing, Fueling, Learn Apply, and Sandbox tables, axes, units, boundaries, colors, display preferences, smoothing choices, and VE setup options in one portable file.",
+            "Settings → Import .map validates the complete file before replacing the workspaces, then autosaves the imported settings.",
+            "Timing, Fueling, and Sandbox autosave separately; Learn Apply data is saved with Fueling. Dialog settings are retained until changed.",
             "Only one instance of each tool dialog is opened. Selecting its command again restores and activates the existing dialog.",
             "A Working… progress window is shown for longer map changes and extensive Undo or Redo operations.",
             "Use Undo immediately after an unwanted edit, paste, offset, smoothing operation, resize, or axis change."));

@@ -14,6 +14,7 @@ namespace TimingTableCalculator;
 public partial class MainWindow : Window
 {
     private readonly FuelingPanel fuelingPanel;
+    private readonly LearnApplyPanel learnApplyPanel;
     private readonly SandboxPanel sandboxPanel;
     private int RowCount = 31, ColumnCount = 31;
     private static readonly double[] DefaultRpmAxis =
@@ -87,6 +88,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         fuelingPanel = new FuelingPanel(ResizeMatrixFromFuel, AutoFillAxisFromFuel, PasteAxisFromFuel, SetRegionBoundariesFromFuel, EditAxisFromFuel); FuelingHost.Content = fuelingPanel;
+        learnApplyPanel = new LearnApplyPanel(fuelingPanel.LearnApply, fuelingPanel.TransferLearnOffsets); LearnApplyHost.Content = learnApplyPanel;
         sandboxPanel = new SandboxPanel(); SandboxHost.Content = sandboxPanel;
         SettingsHost.Content = new SettingsPanel(ExportMapSettings, ImportMapSettings);
         HelpHost.Content = new HelpPanel();
@@ -154,7 +156,7 @@ public partial class MainWindow : Window
             var sandboxJson = package.Sandbox.GetRawText();
             if (!CanImportTimingSettings(timingJson) || !fuelingPanel.CanImportSettingsJson(fuelingJson) || !sandboxPanel.CanImportSettingsJson(sandboxJson))
                 throw new InvalidDataException("The file contains missing, damaged, or unsupported table settings.");
-            if (MessageBox.Show(this, "Importing replaces the current Timing, Fueling, and Sandbox settings and tables. Continue?", "Import Map Lab settings", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+            if (MessageBox.Show(this, "Importing replaces the current Timing, Fueling, Learn Apply, and Sandbox settings and tables. Continue?", "Import Map Lab settings", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
             if (!ImportTimingSettingsJson(timingJson) || !fuelingPanel.ImportSettingsJson(fuelingJson) || !sandboxPanel.ImportSettingsJson(sandboxJson))
                 throw new InvalidDataException("Map Lab could not apply all settings from this file.");
             StatusText.Text = "Settings imported";
@@ -814,6 +816,11 @@ public partial class MainWindow : Window
         {
             regionPointPick = RegionPointPick.None; TableGrid.Cursor = Cursors.Arrow; SetRegionBoundariesButton.Content = "⌖  Set region boundaries";
             ApplyRegionVisualization(); StatusText.Text = "Boundary selection cancelled"; e.Handled = true; return;
+        }
+        if (learnApplyPanel.IsVisible)
+        {
+            if (!learnApplyPanel.IsKeyboardFocusWithin) learnApplyPanel.HandleKeys(learnApplyPanel, e);
+            return;
         }
         if (fuelingPanel.IsKeyboardFocusWithin || sandboxPanel.IsKeyboardFocusWithin) return;
         if (Keyboard.Modifiers != ModifierKeys.Control) return;

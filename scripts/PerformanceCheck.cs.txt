@@ -1,0 +1,191 @@
+// Compiled explicitly by PerformanceCheck.csproj, not by the main app's *.cs glob.
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Text.Json;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Threading;
+using TimingTableCalculator;
+
+public static class MapLabPerformanceCheck
+{
+    private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
+    private static readonly List<object> results = new();
+    private static readonly List<object> memory = new();
+    private static object Field(object target, string name) => target.GetType().GetField(name, Private)!.GetValue(target)!;
+    private static void Set(object target, string name, object value) => target.GetType().GetField(name, Private)!.SetValue(target, value);
+    private static object Call(object target, string name, params object[] args) => target.GetType().GetMethod(name, Private)!.Invoke(target, args)!;
+    private static double Mb(long bytes) => Math.Round(bytes / 1048576d, 3);
+    private static void Collect() { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); }
+    private static void Drain(Window window)
+    {
+        window.UpdateLayout();
+        window.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+    }
+    private static Window Host(object content) => new Window {
+        Content = content, Width = 1440, Height = 900, Left = -10000, Top = -10000,
+        WindowStartupLocation = WindowStartupLocation.Manual, ShowActivated = false, ShowInTaskbar = false
+    };
+    private static void Measure(int size, string name, Action operation, int iterations = 15)
+    {
+        operation(); operation();
+        Collect();
+        var times = new double[iterations];
+        var allocations = new long[iterations];
+        for (var i = 0; i < iterations; i++) {
+            var bytes = GC.GetAllocatedBytesForCurrentThread();
+            var start = Stopwatch.GetTimestamp();
+            operation();
+            times[i] = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            allocations[i] = GC.GetAllocatedBytesForCurrentThread() - bytes;
+        }
+        Array.Sort(times); Array.Sort(allocations);
+        var median = times[iterations / 2];
+        var p95 = times[Math.Min(iterations - 1, (int)Math.Ceiling(iterations * .95) - 1)];
+        results.Add(new { Size = size, Operation = name, Iterations = iterations,
+            MedianMs = Math.Round(median, 3), P95Ms = Math.Round(p95, 3),
+            MedianAllocatedKb = Math.Round(allocations[iterations / 2] / 1024d, 1) });
+        Console.WriteLine($"{size}x{size} {name}: median {median:F2} ms, p95 {p95:F2} ms");
+    }
+    private static double[] Rpm(int size) => Enumerable.Range(0, size).Select(i => 500d + 200 * i).ToArray();
+    private static double[] Map(int size) => Enumerable.Range(0, size).Select(i => 100d - 80d * i / (size - 1)).ToArray();
+    private static double[,] Values(int size, bool offsets = false)
+    {
+        var values = new double[size, size];
+        for (var r = 0; r < size; r++) for (var c = 0; c < size; c++)
+            values[r, c] = offsets ? ((r + c) % 3 == 0 ? -2.5 : 3.5) : 70 + 12 * Math.Sin(c * .2) + r * .2;
+        return values;
+    }
+    private static void RunSize(int size, string directory)
+    {
+        var rpm = Rpm(size); var map = Map(size); var source = Values(size); var offsets = Values(size, true);
+        var all = Enumerable.Range(0, size).SelectMany(r => Enumerable.Range(0, size).Select(c => (Row:r, Col:c))).ToArray();
+        var strip = all.Where(p => p.Col == size / 2 || p.Col == size / 2 + 1).ToArray();
+        foreach (var algorithm in Enum.GetValues<AdvancedSmoothingAlgorithm>()) {
+            var options = new AdvancedSmoothingOptions(algorithm, .65, 2, false, true, .5);
+            Measure(size, $"Math: {algorithm}, all cells, 2 passes", () => AdvancedSmoother.Apply(source, all, options, rpm, map), 7);
+        }
+        var shapeStress = new AdvancedSmoothingOptions(AdvancedSmoothingAlgorithm.ShapePreserving, .65, 20, false, true, .5);
+        Measure(size, "Math: shape preserving, all cells, maximum 20 passes", () => AdvancedSmoother.Apply(source, all, shapeStress, rpm, map), 3);
+        var maxOptions = new AdvancedSmoothingOptions(AdvancedSmoothingAlgorithm.Surroundings, .65, 2, false, true, .5) { NeighborReach = 10 };
+        Measure(size, "Math: surroundings, 2-column strip, reach 10", () => AdvancedSmoother.Apply(source, strip, maxOptions, rpm, map), 7);
+        Measure(size, "Math: learn transfer", () => LearnApplyMath.Apply(source, offsets, false, rpm, map), 30);
+        Measure(size, "Math: learn transfer with smoothing", () => LearnApplyMath.Apply(source, offsets, true, rpm, map), 15);
+
+        Collect(); var beforePanels = GC.GetTotalMemory(true);
+        var path = Path.Combine(directory, $"performance-{Guid.NewGuid():N}.json");
+        FuelingPanel fuel = null!; LearnApplyPanel learn = null!; Window host = null!;
+        try {
+            var start = Stopwatch.GetTimestamp();
+            fuel = new FuelingPanel((_, _) => { }, (_, _) => { }, (_, _, _) => { }, (_, _) => { }, (_, _, _) => null!, path);
+            fuel.UpdateAxes(rpm, map, "kPa absolute", 1500, 80);
+            Set(fuel, "ve", (double[,])source.Clone()); Call(fuel, "RefreshAll");
+            var model = (LearnApplyTable)fuel.GetType().GetProperty("LearnApply", Private)!.GetValue(fuel)!;
+            model.SetCells(all.Select(p => (p.Row, p.Col, offsets[p.Row, p.Col])));
+            learn = new LearnApplyPanel(model, smooth => (int)Call(fuel, "TransferLearnOffsets", smooth));
+            var buildMs = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            host = Host(fuel); host.Show(); Drain(host);
+            memory.Add(new { Size = size, Stage = "Fuel and Learn constructed; Fuel laid out", ManagedMb = Mb(GC.GetTotalMemory(true) - beforePanels), BuildMs = Math.Round(buildMs, 2) });
+            Measure(size, "Fuel: VE refresh and layout", () => { Call(fuel, "RefreshAll"); Drain(host); });
+            Call(fuel, "SetFuelFlowView", true);
+            Measure(size, "Math: VE to lb/hr", () => Call(fuel, "DisplayValues"), 30);
+            Measure(size, "Fuel: lb/hr refresh and layout", () => { Call(fuel, "RefreshAll"); Drain(host); });
+            var selected = (HashSet<(int, int)>)Field(fuel, "pinnedFuelSelection");
+            var toggle = false;
+            Measure(size, "Fuel: changing full selection and layout", () => {
+                toggle = !toggle; selected.Clear(); selected.UnionWith(toggle ? all : strip);
+                Call(fuel, "UpdateSelection"); Drain(host);
+            });
+            var dragNarrow = all.Where(p => p.Row < size / 2 && p.Col < size / 2).ToArray();
+            var dragWide = all.Where(p => p.Row < size / 2 && p.Col <= size / 2).ToArray();
+            Measure(size, "Fuel: selection drag by one column and layout", () => {
+                toggle = !toggle; selected.Clear(); selected.UnionWith(toggle ? dragNarrow : dragWide);
+                Call(fuel, "UpdateSelection"); Drain(host);
+            });
+            Measure(size, "Fuel: unchanged autosave check", () => Call(fuel, "Save"));
+            Measure(size, "Fuel: changed autosave to disk", () => {
+                var ve = (double[,])Field(fuel, "ve"); ve[0, 0] += .001; Call(fuel, "Save");
+            });
+            Measure(size, "Fuel: learn transfer, save, refresh, layout", () => { Call(fuel, "TransferLearnOffsets", false); Drain(host); });
+            Measure(size, "Fuel: smoothed learn transfer, save, refresh, layout", () => { Call(fuel, "TransferLearnOffsets", true); Drain(host); });
+
+            host.Content = learn; Drain(host);
+            Measure(size, "Learn: full refresh and layout", () => { Call(learn, "Refresh"); Drain(host); });
+            var rowA = string.Join('\t', Enumerable.Repeat("2.125", size));
+            var rowB = string.Join('\t', Enumerable.Repeat("-1.125", size));
+            var pasteA = string.Join('\n', Enumerable.Repeat(rowA, size));
+            var pasteB = string.Join('\n', Enumerable.Repeat(rowB, size));
+            Measure(size, "Learn: full paste, save, refresh, layout", () => { toggle = !toggle; Call(learn, "PasteText", toggle ? pasteA : pasteB); Drain(host); });
+            Measure(size, "Learn: single-cell edit, save, refresh, layout", () => {
+                toggle = !toggle; model.SetCells(new[] { (size / 2, size / 2, toggle ? 1.5 : -1.5) }); Drain(host);
+            });
+            Collect(); Drain(host);
+            using var process = Process.GetCurrentProcess();
+            var cpu = process.TotalProcessorTime; var wall = Stopwatch.StartNew();
+            var frame = new DispatcherFrame();
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
+            timer.Start(); Dispatcher.PushFrame(frame); wall.Stop(); process.Refresh();
+            var cpuMs = (process.TotalProcessorTime - cpu).TotalMilliseconds;
+            memory.Add(new { Size = size, Stage = "Idle Learn view (3 seconds); isolated benchmark process",
+                CpuMs = Math.Round(cpuMs, 2), IdleOneCorePercent = Math.Round(cpuMs / wall.Elapsed.TotalMilliseconds * 100, 2),
+                IdleMachinePercent = Math.Round(cpuMs / wall.Elapsed.TotalMilliseconds * 100 / Environment.ProcessorCount, 2),
+                WorkingSetMb = Mb(process.WorkingSet64), PrivateMb = Mb(process.PrivateMemorySize64) });
+        }
+        finally { if (host != null) { host.Content = null; host.Close(); } if (File.Exists(path)) File.Delete(path); }
+
+        var surface = new Surface3DWindow(source, rpm, map, "kPa absolute", false, Colors.Blue, Colors.Red, (_, _, _, _) => source);
+        surface.WindowStartupLocation = WindowStartupLocation.Manual; surface.Left = -10000; surface.Top = -10000;
+        surface.ShowActivated = false; surface.ShowInTaskbar = false;
+        try {
+            surface.Show(); Drain(surface);
+            var createSurface = typeof(Surface3DWindow).GetMethod("CreateSurface", BindingFlags.Static | BindingFlags.NonPublic)!;
+            var createGrid = typeof(Surface3DWindow).GetMethod("CreateContourGrid", BindingFlags.Static | BindingFlags.NonPublic)!;
+            Measure(size, "3D: rebuild surface and contour geometry (CPU only)", () => {
+                createSurface.Invoke(null, new object[] { source, false, Colors.Blue, Colors.Red });
+                createGrid.Invoke(null, new object[] { source });
+            });
+            var yaw = (System.Windows.Media.Media3D.AxisAngleRotation3D)Field(surface, "yaw");
+            Measure(size, "3D: rotation and label update (not GPU frame time)", () => { yaw.Angle += 3; Call(surface, "UpdateScaleOverlayPositions"); Drain(surface); });
+        } finally { surface.Close(); }
+    }
+    private static void MeasureHistory(int size)
+    {
+        var model = new LearnApplyTable(); model.Synchronize(Rpm(size), Map(size), "kPa absolute", 3, 2);
+        model.SetCells(Enumerable.Range(0, size).SelectMany(r => Enumerable.Range(0, size).Select(c => (r, c, 1d))));
+        Collect(); var before = GC.GetTotalMemory(true);
+        for (var i = 1; i <= 500; i++) {
+            model.SetCells(new[] { (0, 0, i % 2 == 0 ? 1d : 2d) });
+            if (i == 50 || i == 200 || i == 500) {
+                var count = (int)Field(model, "undo").GetType().GetProperty("Count")!.GetValue(Field(model, "undo"))!;
+                memory.Add(new { Size = size, Stage = "Learn history; full correction table, one-cell edits", Edits = i,
+                    UndoSnapshots = count, RetainedManagedMb = Mb(GC.GetTotalMemory(true) - before) });
+            }
+        }
+        GC.KeepAlive(model);
+    }
+    public static string Run(int[] sizes, string directory)
+    {
+        foreach (var size in sizes) { RunSize(size, directory); MeasureHistory(size); }
+        return JsonSerializer.Serialize(new { Timestamp = DateTimeOffset.Now,
+            Assembly = typeof(FuelingPanel).Assembly.GetName().Name, Runtime = Environment.Version.ToString(),
+            LogicalProcessors = Environment.ProcessorCount, RenderTier = RenderCapability.Tier >> 16,
+            Notes = "Release assembly in isolated offscreen WPF windows on the application's .NET target. Medians after two warmups; allocations are calling-thread only. No live user maps loaded. Process memory/CPU include the harness. Not whole-application cold startup, GPU FPS, or a long-running leak test.",
+            Results = results, Memory = memory }, new JsonSerializerOptions { WriteIndented = true });
+    }
+    [STAThread]
+    public static void Main(string[] args)
+    {
+        var path = Path.GetFullPath(args[0]);
+        var sizes = args.Skip(1).Select(int.Parse).ToArray();
+        if (sizes.Length == 0 || sizes.Any(size => size < 8 || size > 64)) throw new ArgumentException("Sizes must be between 8 and 64.");
+        File.WriteAllText(path, Run(sizes, Path.GetDirectoryName(path)!));
+        Console.WriteLine($"Results saved to {path}");
+    }
+}
