@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     private int timingLeadingDisplayDigits = 3, timingTrailingDisplayDecimals = 1;
     private bool syncingTimingDisplayPrecision;
     private readonly Dictionary<TextBox, string> cellEditOriginalValues = [];
+    private readonly HashSet<TextBox> groupCellEditsAwaitingEnter = [];
     private readonly Dictionary<TextBox, double> axisEditOriginalValues = [];
     private TextBox[] rpmAxisCells = new TextBox[31];
     private TextBox[] mapAxisCells = new TextBox[31];
@@ -62,6 +63,8 @@ public partial class MainWindow : Window
     private (int Row, int Col)? selectionStart;
     private (int Row, int Col)? selectionEnd;
     private readonly HashSet<(int Row, int Col)> pinnedTimingSelection = [];
+    private (int Top, int Bottom, int Left, int Right)? timingRegionOfInterest;
+    private Border? timingRegionOfInterestOverlay;
     private bool selecting;
     private bool axisSelecting, axisDragIsMap;
     private int axisDragStart;
@@ -89,6 +92,7 @@ public partial class MainWindow : Window
         HelpHost.Content = new HelpPanel();
         AboutHost.Content = new AboutPanel();
         PreviewKeyDown += MainWindow_PreviewKeyDown;
+        PreviewMouseDown += MainWindow_PreviewMouseDown;
         Loaded += (_, _) =>
         {
             TableGrid.PreviewMouseLeftButtonUp += (_, _) => { selecting = false; axisSelecting = false; };
@@ -97,6 +101,12 @@ public partial class MainWindow : Window
             autosaveTimer.Tick += (_, _) => SaveState(); autosaveTimer.Start();
         };
         Closing += (_, _) => { autosaveTimer.Stop(); SaveState(); };
+    }
+    private void MainWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is not DependencyObject source || ReferenceEquals(source, TableGrid) || TableGrid.IsAncestorOf(source) || UiInteraction.IsInsideButton(source)) return;
+        if (Keyboard.FocusedElement is TextBox { Tag: ValueTuple<int, int> } focusedCell && TableGrid.IsAncestorOf(focusedCell)) CompleteCellEdit(focusedCell);
+        ClearTimingSelection();
     }
     private void RecalculateTiming_Click(object sender, RoutedEventArgs e) => RecalculateTimingValues();
 
@@ -379,6 +389,7 @@ public partial class MainWindow : Window
         AddAxisTitle(mapUnitIndex == 0 ? "MAP (kPa)" : "MAP (PSIG)", true);
         for (var col = 0; col < ColumnCount; col++) AddAxisEditor(rpmAxis[col], RowCount, col + 2, false, col);
         AddAxisTitle("Engine RPM", false);
+        RenderTimingRegionOfInterest();
         SyncFuelingAxes();
     }
 
@@ -391,9 +402,10 @@ public partial class MainWindow : Window
     {
         timingValues[row, col] = RoundEditableTiming(value);
         var cell = new TextBox { Tag = (row, col), Text = FormatTimingDisplayValue(timingValues[row, col]), Foreground = Brushes.Black, Background = TimingBrush(value), BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 11, FontWeight = FontWeights.SemiBold, Padding = new Thickness(2) };
-        cell.GotKeyboardFocus += (_, _) => { var point = ((int Row, int Col))cell.Tag; cell.Text = FormatEditableTiming(timingValues[point.Row, point.Col]); cellEditOriginalValues[cell] = cell.Text; cell.SelectAll(); }; cell.PreviewMouseLeftButtonDown += Cell_MouseDown; cell.MouseEnter += Cell_MouseEnter;
+        cell.ToolTipOpening += (_, _) => { var point = ((int Row, int Col))cell.Tag; UpdateTimingCellToolTip(point.Row, point.Col); };
+        cell.GotKeyboardFocus += (_, _) => { var point = ((int Row, int Col))cell.Tag; cell.Text = FormatEditableTiming(timingValues[point.Row, point.Col]); cellEditOriginalValues[cell] = cell.Text; if (IsInsideTimingSelection(point.Row, point.Col) && SelectedTimingCells().Count > 1) groupCellEditsAwaitingEnter.Add(cell); else groupCellEditsAwaitingEnter.Remove(cell); cell.Background = Brushes.White; cell.SelectAll(); }; cell.PreviewMouseLeftButtonDown += Cell_MouseDown; cell.MouseEnter += Cell_MouseEnter;
         cell.PreviewMouseRightButtonDown += TimingCell_RightClick; cell.ContextMenu = CreateTimingContextMenu();
-        cell.LostFocus += (_, _) => CompleteCellEdit(cell); cell.KeyDown += (_, e) => { if (e.Key == Key.Enter) Keyboard.ClearFocus(); }; return cell;
+        cell.LostFocus += (_, _) => CompleteCellEdit(cell); cell.KeyDown += (_, e) => { if (e.Key == Key.Enter) { CompleteCellEdit(cell, true); ClearTimingSelection(); Keyboard.ClearFocus(); e.Handled = true; } }; return cell;
     }
 
     private ContextMenu CreateTimingContextMenu()
@@ -401,12 +413,53 @@ public partial class MainWindow : Window
         var menu = new ContextMenu();
         menu.Items.Add(ContextItem("Copy selected", (_, _) => CopySelection())); menu.Items.Add(ContextItem("Paste", (_, _) => PasteSelection()));
         menu.Items.Add(ContextItem("Offset selection…", OffsetSelection_Click));
+        menu.Items.Add(ContextItem("Select transition ring…", SelectTimingTransitionRing));
+        menu.Items.Add(ContextItem("Highlight region of interest", HighlightTimingRegionOfInterest));
+        menu.Items.Add(ContextItem("Clear region of interest", ClearTimingRegionOfInterest));
         menu.Items.Add(new Separator()); menu.Items.Add(ContextItem("Smooth selected…", AdvancedSmooth_Click));
         menu.Items.Add(ContextItem("Smooth rows", SmoothRows_Click)); menu.Items.Add(ContextItem("Smooth columns", SmoothColumns_Click));
         menu.Items.Add(new Separator()); menu.Items.Add(ContextItem("Clear selected", ClearSelectedTiming)); return menu;
     }
 
     private static MenuItem ContextItem(string header, RoutedEventHandler click) { var item = new MenuItem { Header = header }; item.Click += click; return item; }
+
+    private void HighlightTimingRegionOfInterest(object sender, RoutedEventArgs e)
+    {
+        var selected = SelectedTimingCells(); if (selected.Count == 0) return;
+        timingRegionOfInterest = (selected.Min(cell => cell.Row), selected.Max(cell => cell.Row), selected.Min(cell => cell.Col), selected.Max(cell => cell.Col));
+        RenderTimingRegionOfInterest(); StatusText.Text = $"Timing region of interest highlighted  •  {timingRegionOfInterest.Value.Right - timingRegionOfInterest.Value.Left + 1} × {timingRegionOfInterest.Value.Bottom - timingRegionOfInterest.Value.Top + 1} cells";
+    }
+
+    private void ClearTimingRegionOfInterest(object sender, RoutedEventArgs e)
+    {
+        timingRegionOfInterest = null; RenderTimingRegionOfInterest(); StatusText.Text = "Timing region of interest cleared";
+    }
+
+    private void RenderTimingRegionOfInterest()
+    {
+        if (timingRegionOfInterestOverlay is not null) TableGrid.Children.Remove(timingRegionOfInterestOverlay);
+        timingRegionOfInterestOverlay = null; if (timingRegionOfInterest is not { } roi || RowCount == 0 || ColumnCount == 0) return;
+        var top = Math.Clamp(roi.Top, 0, RowCount - 1); var bottom = Math.Clamp(roi.Bottom, top, RowCount - 1); var left = Math.Clamp(roi.Left, 0, ColumnCount - 1); var right = Math.Clamp(roi.Right, left, ColumnCount - 1);
+        timingRegionOfInterest = (top, bottom, left, right);
+        var overlay = new Border { BorderBrush = new SolidColorBrush(Color.FromRgb(232, 17, 35)), BorderThickness = new Thickness(3), CornerRadius = new CornerRadius(2), Background = Brushes.Transparent, IsHitTestVisible = false, Margin = new Thickness(1) };
+        Grid.SetRow(overlay, top); Grid.SetRowSpan(overlay, bottom - top + 1); Grid.SetColumn(overlay, left + 2); Grid.SetColumnSpan(overlay, right - left + 1); Panel.SetZIndex(overlay, 1000); TableGrid.Children.Add(overlay); timingRegionOfInterestOverlay = overlay;
+    }
+
+    private int timingTransitionRingThickness = 1;
+    private void SelectTimingTransitionRing(object sender, RoutedEventArgs e)
+    {
+        var selected = SelectedTimingCells();
+        if (!TransitionRingSelection.TryGetRectangle(selected, out var top, out var bottom, out var left, out var right)) { MessageBox.Show(this, "Select one solid rectangular timing area first.", "Transition ring", MessageBoxButton.OK, MessageBoxImage.Information); return; }
+        var maximum = TransitionRingSelection.MaximumThickness(top, bottom, left, right);
+        if (maximum < 1) { MessageBox.Show(this, "Select at least a 3 × 3 area so the ring has an unselected center.", "Transition ring", MessageBoxButton.OK, MessageBoxImage.Information); return; }
+        void Apply(int width)
+        {
+            timingTransitionRingThickness = width; pinnedTimingSelection.Clear(); foreach (var cell in TransitionRingSelection.Create(top, bottom, left, right, width)) pinnedTimingSelection.Add(cell);
+            selectionStart = selectionEnd = null; UpdateSelection(); StatusText.Text = $"Selected {pinnedTimingSelection.Count} timing transition-ring cells";
+        }
+        var dialog = ModelessWindowManager.ShowOrActivate("Timing.TransitionRing", () => new TransitionRingWindow(maximum, timingTransitionRingThickness, Apply) { Owner = this });
+        dialog.Configure(maximum, timingTransitionRingThickness, Apply);
+    }
 
     private void TimingCell_RightClick(object sender, MouseButtonEventArgs e)
     {
@@ -478,8 +531,10 @@ public partial class MainWindow : Window
         return selected;
     }
 
-    private void CompleteCellEdit(TextBox cell)
+    private void CompleteCellEdit(TextBox cell, bool enterPressed = false)
     {
+        if (!enterPressed && groupCellEditsAwaitingEnter.Remove(cell)) { cellEditOriginalValues.Remove(cell); RefreshCellColor(cell); return; }
+        groupCellEditsAwaitingEnter.Remove(cell);
         var changed = cellEditOriginalValues.Remove(cell, out var original) && !string.Equals(original, cell.Text, StringComparison.Ordinal);
         if (cell.Tag is not ValueTuple<int, int> point) return;
         if (!double.TryParse(cell.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || !double.IsFinite(value)) { RefreshCellColor(cell); return; }
@@ -627,6 +682,7 @@ public partial class MainWindow : Window
     {
         if (action == SurfaceSelectionAction.Undo) { Undo(); refresh(ReadTimingValues()); return; }
         if (action == SurfaceSelectionAction.Redo) { Redo(); refresh(ReadTimingValues()); return; }
+        if (action == SurfaceSelectionAction.SelectRing) { pinnedTimingSelection.Clear(); foreach (var cell in selectedCells) pinnedTimingSelection.Add(cell); selectionStart = selectionEnd = null; UpdateSelection(); StatusText.Text = $"Selected {selectedCells.Count} timing transition-ring cells in 3D"; return; }
         pinnedTimingSelection.Clear(); foreach (var cell in selectedCells) pinnedTimingSelection.Add(cell);
         selectionStart = (top, left); selectionEnd = (bottom, right); selecting = false;
         selectedMapAxis.Clear(); selectedRpmAxis.Clear(); activeAxisIsMap = null; UpdateSelection();
@@ -727,7 +783,7 @@ public partial class MainWindow : Window
             fraction = SmoothStep(fraction);
             SetCellValue(row, col, source[top, col] + (source[bottom, col] - source[top, col]) * fraction);
         }
-        UpdateSelection(); StatusText.Text = "Columns blended vertically between preserved top and bottom values";
+        SaveState(); ClearTimingSelection(); StatusText.Text = "Columns blended vertically between preserved top and bottom values  •  selection cleared";
     }
 
     private void SmoothRows_Click(object sender, RoutedEventArgs e)
@@ -744,7 +800,7 @@ public partial class MainWindow : Window
             fraction = SmoothStep(fraction);
             SetCellValue(row, col, source[row, left] + (source[row, right] - source[row, left]) * fraction);
         }
-        UpdateSelection(); StatusText.Text = "Rows blended horizontally between preserved left and right values";
+        SaveState(); ClearTimingSelection(); StatusText.Text = "Rows blended horizontally between preserved left and right values  •  selection cleared";
     }
 
     private double[,] ReadTimingValues()
@@ -1000,10 +1056,8 @@ public partial class MainWindow : Window
     {
         for (var row = 0; row < RowCount; row++) for (var col = 0; col < ColumnCount; col++)
         {
-            var region = RegionDisplayName(RegionNameAtMarkers(row, col));
             var idlePoint = col == idleMarkerCol; var wotPoint = row == wotMarkerRow;
-            var marker = idlePoint && wotPoint ? "  •  Boundary intersection" : idlePoint ? "  •  Idle vertical boundary" : wotPoint ? "  •  Low / High MAP horizontal boundary" : "";
-            valueCells[row, col].ToolTip = $"{region}  •  {rpmAxis[col]:0} RPM  •  {FormatMap(mapAxis[row])} {MapUnit}{marker}";
+            UpdateTimingCellToolTip(row, col);
             valueCells[row, col].BorderBrush = idlePoint || wotPoint ? Brushes.Black : RegionBrush(row, col);
             valueCells[row, col].BorderThickness = new Thickness(idlePoint || wotPoint ? 3 : .7);
         }
@@ -1050,6 +1104,7 @@ public partial class MainWindow : Window
 
     private void View3D_Click(object sender, RoutedEventArgs e)
     {
+        ClearTimingSelection();
         var values = ReadTimingValues();
         ModelessWindowManager.ShowOrActivate("Timing.3D", () =>
         {
@@ -1283,8 +1338,17 @@ public partial class MainWindow : Window
         {
             var value = timingValues[point.Item1, point.Item2];
             cell.Text = FormatTimingDisplayValue(value); cell.Background = TimingBrush(value);
+            UpdateTimingCellToolTip(point.Item1, point.Item2);
         }
         else cell.Background = new SolidColorBrush(Color.FromRgb(100, 30, 38));
+    }
+    private void UpdateTimingCellToolTip(int row, int col)
+    {
+        if (row < 0 || row >= RowCount || col < 0 || col >= ColumnCount || row >= mapAxis.Length || col >= rpmAxis.Length || row >= valueCells.GetLength(0) || col >= valueCells.GetLength(1) || valueCells[row, col] is null) return;
+        var region = RegionDisplayName(RegionNameAtMarkers(row, col));
+        var idlePoint = col == idleMarkerCol; var wotPoint = row == wotMarkerRow;
+        var marker = idlePoint && wotPoint ? "  •  Boundary intersection" : idlePoint ? "  •  Idle vertical boundary" : wotPoint ? "  •  Low / High MAP horizontal boundary" : "";
+        valueCells[row, col].ToolTip = $"{region}  •  {rpmAxis[col]:0} RPM  •  {FormatMap(mapAxis[row])} {MapUnit}  •  {FormatTimingDisplayValue(timingValues[row, col])}° timing{marker}";
     }
     private void AddLabel(string text, int row, int column, bool mapLabel)
     {
@@ -1670,89 +1734,6 @@ public partial class MainWindow : Window
         StatusText.Text = $"Saved {Path.GetFileName(dialog.FileName)} with heat-map formatting";
     }
 
-    private void ExportMapSettings_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new SaveFileDialog { Filter = "Map Lab settings (*.map)|*.map", DefaultExt = ".map", AddExtension = true, FileName = "map-lab-settings.map" };
-        if (dialog.ShowDialog() != true) return;
-        try
-        {
-            var project = new MapLabSettingsFile
-            {
-                ExportedUtc = DateTimeOffset.UtcNow,
-                Timing = ParseJsonElement(ExportTimingProjectState()),
-                Fueling = ParseJsonElement(fuelingPanel.ExportProjectState()),
-                Sandbox = ParseJsonElement(sandboxPanel.ExportProjectState())
-            };
-            File.WriteAllText(dialog.FileName, JsonSerializer.Serialize(project, new JsonSerializerOptions { WriteIndented = true }));
-            SettingsStatusText.Text = $"Exported {Path.GetFileName(dialog.FileName)}";
-            StatusText.Text = "Complete Map Lab settings exported";
-        }
-        catch (Exception exception)
-        {
-            MessageBox.Show(this, exception.Message, "Settings export failed", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private void ImportMapSettings_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new OpenFileDialog { Filter = "Map Lab settings (*.map)|*.map", DefaultExt = ".map", CheckFileExists = true, Multiselect = false };
-        if (dialog.ShowDialog() != true) return;
-        try
-        {
-            if (new FileInfo(dialog.FileName).Length > 25 * 1024 * 1024) throw new InvalidDataException("The selected .map file is too large to be a Map Lab settings file.");
-            var project = JsonSerializer.Deserialize<MapLabSettingsFile>(File.ReadAllText(dialog.FileName)) ?? throw new InvalidDataException("The selected file is empty or invalid.");
-            if (project.Format != MapLabSettingsFile.ExpectedFormat || project.Version != MapLabSettingsFile.CurrentVersion) throw new InvalidDataException("This file is not a supported Map Lab settings file.");
-            if (project.Timing.ValueKind != JsonValueKind.Object || project.Fueling.ValueKind != JsonValueKind.Object || project.Sandbox.ValueKind != JsonValueKind.Object) throw new InvalidDataException("The settings file is missing one or more table sections.");
-            var timingJson = project.Timing.GetRawText(); var fuelingJson = project.Fueling.GetRawText(); var sandboxJson = project.Sandbox.GetRawText();
-            if (!ValidateTimingProjectState(timingJson) || !FuelingPanel.ValidateProjectState(fuelingJson) || !SandboxPanel.ValidateProjectState(sandboxJson)) throw new InvalidDataException("One or more table sections contain invalid dimensions or values.");
-            if (MessageBox.Show(this, "Importing replaces the current Ignition Timing, Fueling, and Map Sandbox settings. Continue?", "Import Map Lab settings", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-
-            var timingBackup = ExportTimingProjectState(); var fuelingBackup = fuelingPanel.ExportProjectState(); var sandboxBackup = sandboxPanel.ExportProjectState();
-            var success = false; string? failure = null;
-            WorkingRunner.Run(this, () =>
-            {
-                try
-                {
-                    ImportTimingProjectState(timingJson); fuelingPanel.ImportProjectState(fuelingJson); sandboxPanel.ImportProjectState(sandboxJson);
-                    undoHistory.Clear(); redoHistory.Clear(); success = true;
-                }
-                catch (Exception exception)
-                {
-                    failure = exception.Message;
-                    try { ImportTimingProjectState(timingBackup); fuelingPanel.ImportProjectState(fuelingBackup); sandboxPanel.ImportProjectState(sandboxBackup); }
-                    catch { failure += " The previous workspace could not be fully restored."; }
-                }
-            }, "Importing Map Lab settings....");
-            if (!success) throw new InvalidDataException(failure ?? "The settings file could not be imported.");
-            SettingsStatusText.Text = $"Imported {Path.GetFileName(dialog.FileName)}"; StatusText.Text = "Complete Map Lab settings imported";
-        }
-        catch (Exception exception)
-        {
-            MessageBox.Show(this, exception.Message, "Settings import failed", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
-
-    private static JsonElement ParseJsonElement(string json) { using var document = JsonDocument.Parse(json); return document.RootElement.Clone(); }
-    private string ExportTimingProjectState() { SaveState(); return File.ReadAllText(AutosavePath); }
-    private static bool ValidateTimingProjectState(string json)
-    {
-        try
-        {
-            var state = JsonSerializer.Deserialize<AutosaveState>(json);
-            return state is not null && state.RpmAxis.Length is >= 8 and <= 64 && state.MapAxis.Length is >= 8 and <= 64
-                && state.Timing.Length == state.MapAxis.Length && state.Timing.All(row => row.Length == state.RpmAxis.Length)
-                && state.RpmAxis.All(double.IsFinite) && state.MapAxis.All(double.IsFinite) && state.Timing.SelectMany(row => row).All(double.IsFinite);
-        }
-        catch { return false; }
-    }
-    private void ImportTimingProjectState(string json)
-    {
-        if (!ValidateTimingProjectState(json)) throw new InvalidDataException("The Ignition Timing section is invalid.");
-        Directory.CreateDirectory(Path.GetDirectoryName(AutosavePath)!); File.WriteAllText(AutosavePath, json);
-        if (!LoadState()) throw new InvalidDataException("The Ignition Timing section could not be loaded.");
-        undoHistory.Clear(); redoHistory.Clear(); SaveState();
-    }
-
     private void Undo_Click(object sender, RoutedEventArgs e) => Undo();
     private void Redo_Click(object sender, RoutedEventArgs e) => Redo();
 
@@ -1949,18 +1930,6 @@ public partial class MainWindow : Window
         public int HorizontalRegionSmoothCells { get; set; } = 3;
         public int TimingLeadingDisplayDigits { get; set; } = 3;
         public int TimingTrailingDisplayDecimals { get; set; } = 1;
-    }
-
-    private sealed class MapLabSettingsFile
-    {
-        public const string ExpectedFormat = "MapLab.Settings";
-        public const int CurrentVersion = 1;
-        public string Format { get; set; } = ExpectedFormat;
-        public int Version { get; set; } = CurrentVersion;
-        public DateTimeOffset ExportedUtc { get; set; }
-        public JsonElement Timing { get; set; }
-        public JsonElement Fueling { get; set; }
-        public JsonElement Sandbox { get; set; }
     }
 
     private enum RegionPointPick { None, IdleToCruise, CruiseToWot, Both }

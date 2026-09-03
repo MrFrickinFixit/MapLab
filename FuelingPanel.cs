@@ -33,6 +33,7 @@ public sealed class FuelingPanel : Grid
     private int axisDragStart;
     private TextBox[,] cells = new TextBox[0, 0];
     private double[,] ve = new double[0, 0];
+    private double[,] displayedValues = new double[0, 0];
     private double[] rpm = [], map = [];
     private string mapUnit = "kPa absolute";
     private string MapFormat => mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? "0.0" : "0";
@@ -60,6 +61,8 @@ public sealed class FuelingPanel : Grid
     private int idleBoundaryCol, wotBoundaryRow;
     private (int Row, int Col)? start, end;
     private readonly HashSet<(int Row, int Col)> pinnedFuelSelection = [];
+    private (int Top, int Bottom, int Left, int Right)? regionOfInterest;
+    private Border? regionOfInterestOverlay;
     private bool selecting, loading;
     private bool directionalOuterToInner = true;
     private double directionalStrength = .65;
@@ -73,6 +76,7 @@ public sealed class FuelingPanel : Grid
     private readonly Stack<double[,]> undoHistory = [];
     private readonly Stack<double[,]> redoHistory = [];
     private readonly Dictionary<TextBox, string> editOriginals = [];
+    private readonly HashSet<TextBox> groupCellEditsAwaitingEnter = [];
     private readonly Dictionary<TextBox, double> axisEditOriginalValues = [];
     private static string SavePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimingTableCalculator", "fueling-autosave.json");
     private string? lastSavedJson;
@@ -80,6 +84,7 @@ public sealed class FuelingPanel : Grid
     public FuelingPanel(Action<int, int> resizeMatrix, Action<bool, int[]> autoFillAxis, Action<bool, int?, int[]> pasteAxis, Action<int, int> setRegionBoundaries, Func<bool, int, double, double[]?> editAxis)
     {
         this.resizeMatrix = resizeMatrix; this.autoFillAxis = autoFillAxis; this.pasteAxis = pasteAxis; this.setRegionBoundaries = setRegionBoundaries; this.editAxis = editAxis;
+        PreviewMouseDown += FuelingPanel_PreviewMouseDown;
         matrixXBox = MatrixSizeBox("31"); matrixYBox = MatrixSizeBox("31");
         leadingPrecisionBox = PrecisionBox(1, 4, leadingDisplayDigits); trailingPrecisionBox = PrecisionBox(0, 3, trailingDisplayDecimals);
         leadingPrecisionBox.SelectionChanged += (_, _) => ApplyDisplayPrecision(); trailingPrecisionBox.SelectionChanged += (_, _) => ApplyDisplayPrecision();
@@ -460,26 +465,29 @@ public sealed class FuelingPanel : Grid
             for (var col = 0; col < rpm.Length; col++)
             {
                 var cell = new TextBox { Tag = (row, col), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = Brushes.Black, BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), Padding = new Thickness(1) };
+                cell.ToolTipOpening += (_, _) => { var point = ((int Row, int Col))cell.Tag; UpdateFuelCellToolTip(point.Row, point.Col); };
                 cell.PreviewMouseLeftButtonDown += CellDown; cell.MouseEnter += CellEnter; cell.PreviewMouseRightButtonDown += CellRightClick; cell.ContextMenu = CreateContextMenu();
                 cell.GotKeyboardFocus += (_, _) =>
                 {
+                    var point = (ValueTuple<int, int>)cell.Tag;
+                    if (IsFuelCellSelected(point.Item1, point.Item2) && SelectedFuelCells().Count > 1) groupCellEditsAwaitingEnter.Add(cell); else groupCellEditsAwaitingEnter.Remove(cell);
+                    cell.Background = Brushes.White;
                     if (!showFuelFlow)
                     {
-                        var point = (ValueTuple<int, int>)cell.Tag;
                         var editable = FormatEditableVe(ve[point.Item1, point.Item2]);
                         editOriginals[cell] = editable;
                         cell.Text = editable;
                     }
                     cell.SelectAll();
                 };
-                cell.LostFocus += CellEdited; cell.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Keyboard.ClearFocus(); e.Handled = true; } }; cells[row, col] = cell;
+                cell.LostFocus += CellEdited; cell.KeyDown += (_, e) => { if (e.Key == Key.Enter) { CompleteFuelCellEdit(cell, true); ClearFuelSelection(); Keyboard.ClearFocus(); e.Handled = true; } }; cells[row, col] = cell;
                 Grid.SetRow(cell, row); Grid.SetColumn(cell, col + 2); table.Children.Add(cell);
             }
         }
         for (var col = 0; col < rpm.Length; col++) AddAxisEditor(rpm[col], map.Length, col + 2, false, col);
         var rpmTitle = new TextBlock { Text = "Engine RPM", Foreground = Brushes.White, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center };
         Grid.SetRow(rpmTitle, map.Length + 1); Grid.SetColumn(rpmTitle, 2); Grid.SetColumnSpan(rpmTitle, rpm.Length); table.Children.Add(rpmTitle);
-        loading = false; RefreshAll(); ApplyBoundaries();
+        loading = false; RefreshAll(); ApplyBoundaries(); RenderRegionOfInterest();
     }
 
     private void CellDown(object sender, MouseButtonEventArgs e)
@@ -509,11 +517,48 @@ public sealed class FuelingPanel : Grid
     private void CellRightClick(object sender, MouseButtonEventArgs e) { if (sender is not TextBox { Tag: ValueTuple<int, int> p }) return; if (!IsFuelCellSelected(p.Item1, p.Item2)) { pinnedFuelSelection.Clear(); start = end = p; selecting = false; UpdateSelection(); } }
     private ContextMenu CreateContextMenu()
     {
-        var menu = new ContextMenu(); menu.Items.Add(Item("Copy selected", (_, _) => CopySelection())); menu.Items.Add(Item("Paste", (_, _) => PasteSelection())); menu.Items.Add(Item("Offset selection…", OffsetSelection)); menu.Items.Add(new Separator());
+        var menu = new ContextMenu(); menu.Items.Add(Item("Copy selected", (_, _) => CopySelection())); menu.Items.Add(Item("Paste", (_, _) => PasteSelection())); menu.Items.Add(Item("Offset selection…", OffsetSelection)); menu.Items.Add(Item("Select transition ring…", SelectTransitionRing)); menu.Items.Add(Item("Highlight region of interest", HighlightRegionOfInterest)); menu.Items.Add(Item("Clear region of interest", ClearRegionOfInterest)); menu.Items.Add(new Separator());
         menu.Items.Add(Item("Smooth selected…", AdvancedSmooth)); menu.Items.Add(Item("Smooth rows", SmoothRows)); menu.Items.Add(Item("Smooth columns", SmoothColumns));
         menu.Items.Add(new Separator()); menu.Items.Add(Item("Clear selected", ClearSelected)); return menu;
     }
     private static MenuItem Item(string header, RoutedEventHandler click) { var item = new MenuItem { Header = header }; item.Click += click; return item; }
+    private void HighlightRegionOfInterest(object? sender, RoutedEventArgs e)
+    {
+        var selected = SelectedFuelCells(); if (selected.Count == 0) return;
+        regionOfInterest = (selected.Min(cell => cell.Row), selected.Max(cell => cell.Row), selected.Min(cell => cell.Col), selected.Max(cell => cell.Col));
+        RenderRegionOfInterest(); status.Text = $"Fuel region of interest highlighted  •  {regionOfInterest.Value.Right - regionOfInterest.Value.Left + 1} × {regionOfInterest.Value.Bottom - regionOfInterest.Value.Top + 1} cells";
+    }
+    private void ClearRegionOfInterest(object? sender, RoutedEventArgs e) { regionOfInterest = null; RenderRegionOfInterest(); status.Text = "Fuel region of interest cleared"; }
+    private void RenderRegionOfInterest()
+    {
+        if (regionOfInterestOverlay is not null) table.Children.Remove(regionOfInterestOverlay);
+        regionOfInterestOverlay = null; if (regionOfInterest is not { } roi || map.Length == 0 || rpm.Length == 0) return;
+        var top = Math.Clamp(roi.Top, 0, map.Length - 1); var bottom = Math.Clamp(roi.Bottom, top, map.Length - 1); var left = Math.Clamp(roi.Left, 0, rpm.Length - 1); var right = Math.Clamp(roi.Right, left, rpm.Length - 1);
+        regionOfInterest = (top, bottom, left, right);
+        var overlay = new Border { BorderBrush = new SolidColorBrush(Color.FromRgb(232, 17, 35)), BorderThickness = new Thickness(3), CornerRadius = new CornerRadius(2), Background = Brushes.Transparent, IsHitTestVisible = false, Margin = new Thickness(1) };
+        Grid.SetRow(overlay, top); Grid.SetRowSpan(overlay, bottom - top + 1); Grid.SetColumn(overlay, left + 2); Grid.SetColumnSpan(overlay, right - left + 1); Panel.SetZIndex(overlay, 1000); table.Children.Add(overlay); regionOfInterestOverlay = overlay;
+    }
+    private int transitionRingThickness = 1;
+    private void SelectTransitionRing(object? sender, RoutedEventArgs e)
+    {
+        var selected = SelectedFuelCells();
+        if (!TransitionRingSelection.TryGetRectangle(selected, out var top, out var bottom, out var left, out var right)) { Info("Select one solid rectangular fuel area first."); return; }
+        var maximum = TransitionRingSelection.MaximumThickness(top, bottom, left, right); if (maximum < 1) { Info("Select at least a 3 × 3 area so the ring has an unselected center."); return; }
+        void Apply(int width)
+        {
+            transitionRingThickness = width; pinnedFuelSelection.Clear(); foreach (var cell in TransitionRingSelection.Create(top, bottom, left, right, width)) pinnedFuelSelection.Add(cell);
+            start = end = null; UpdateSelection(); status.Text = $"Selected {pinnedFuelSelection.Count} fuel transition-ring cells";
+        }
+        var dialog = ModelessWindowManager.ShowOrActivate("Fuel.TransitionRing", () => new TransitionRingWindow(maximum, transitionRingThickness, Apply) { Owner = Window.GetWindow(this) });
+        dialog.Configure(maximum, transitionRingThickness, Apply);
+    }
+
+    private void FuelingPanel_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is not DependencyObject source || ReferenceEquals(source, table) || table.IsAncestorOf(source) || UiInteraction.IsInsideButton(source)) return;
+        if (Keyboard.FocusedElement is TextBox { Tag: ValueTuple<int, int> } focusedCell && table.IsAncestorOf(focusedCell)) CellEdited(focusedCell, new RoutedEventArgs());
+        ClearFuelSelection();
+    }
     private void ClearSelected(object? sender, RoutedEventArgs e) { var selected = SelectedFuelCells(); if (selected.Count == 0) return; PushUndo(); foreach (var cell in selected) ve[cell.Row, cell.Col] = 0; Save(); RefreshAll(); UpdateSelection(); status.Text = $"Cleared {selected.Count} selected fuel cells"; }
     private void OffsetSelection(object? sender, RoutedEventArgs e)
     {
@@ -529,10 +574,13 @@ public sealed class FuelingPanel : Grid
         foreach (var cell in selected) ve[cell.Row, cell.Col] = percentage ? ve[cell.Row, cell.Col] * (1 + direction * amount / 100) : ve[cell.Row, cell.Col] + direction * amount;
         Save(); RefreshAll(); UpdateSelection(); status.Text = $"{selected.Count} fuel cells {(direction > 0 ? "increased" : "decreased")} by {amount:0.###}{(percentage ? "%" : "")}";
     }
-    private void CellEdited(object sender, RoutedEventArgs e)
+    private void CellEdited(object sender, RoutedEventArgs e) { if (sender is TextBox cell) CompleteFuelCellEdit(cell); }
+    private void CompleteFuelCellEdit(TextBox cell, bool enterPressed = false)
     {
+        if (!enterPressed && groupCellEditsAwaitingEnter.Remove(cell)) { editOriginals.Remove(cell); RefreshAll(); return; }
+        groupCellEditsAwaitingEnter.Remove(cell);
         if (showFuelFlow) { RefreshAll(); return; }
-        if (loading || sender is not TextBox { Tag: ValueTuple<int, int> p } cell || !double.TryParse(cell.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) { RefreshAll(); return; }
+        if (loading || cell.Tag is not ValueTuple<int, int> p || !double.TryParse(cell.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) { RefreshAll(); return; }
         var changed = editOriginals.Remove(cell, out var original) && !string.Equals(original, cell.Text, StringComparison.Ordinal);
         if (!changed) { RefreshAll(); UpdateSelection(); return; }
         value = RoundEditableVe(value);
@@ -760,10 +808,11 @@ public sealed class FuelingPanel : Grid
         ve = work; Save(); RefreshAll(); UpdateSelection(); status.Text = $"Smoothed {right - left + 1} × {bottom - top + 1} fuel cells";
     }
 
-    private void SmoothColumns(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || b - t < 2) { Info("Select at least 3 rows."); return; } PushUndo(); for (var col = l; col <= r; col++) for (var row = t + 1; row < b; row++) { var x = (map[t] - map[row]) / (map[t] - map[b]); x = Ease(x); ve[row, col] = ve[t, col] + (ve[b, col] - ve[t, col]) * x; } Save(); RefreshAll(); UpdateSelection(); }
-    private void SmoothRows(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || r - l < 2) { Info("Select at least 3 columns."); return; } PushUndo(); for (var row = t; row <= b; row++) for (var col = l + 1; col < r; col++) { var x = (rpm[col] - rpm[l]) / (rpm[r] - rpm[l]); x = Ease(x); ve[row, col] = ve[row, l] + (ve[row, r] - ve[row, l]) * x; } Save(); RefreshAll(); UpdateSelection(); }
+    private void SmoothColumns(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || b - t < 2) { Info("Select at least 3 rows."); return; } PushUndo(); for (var col = l; col <= r; col++) for (var row = t + 1; row < b; row++) { var x = (map[t] - map[row]) / (map[t] - map[b]); x = Ease(x); ve[row, col] = ve[t, col] + (ve[b, col] - ve[t, col]) * x; } Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Smoothed selected fuel columns  •  selection cleared"; }
+    private void SmoothRows(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || r - l < 2) { Info("Select at least 3 columns."); return; } PushUndo(); for (var row = t; row <= b; row++) for (var col = l + 1; col < r; col++) { var x = (rpm[col] - rpm[l]) / (rpm[r] - rpm[l]); x = Ease(x); ve[row, col] = ve[row, l] + (ve[row, r] - ve[row, l]) * x; } Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Smoothed selected fuel rows  •  selection cleared"; }
     private void View3D(object? sender, RoutedEventArgs e)
     {
+        ClearFuelSelection();
         ModelessWindowManager.ShowOrActivate("Fuel.3D", () =>
         {
             var displayed = DisplayValues();
@@ -806,6 +855,7 @@ public sealed class FuelingPanel : Grid
     {
         if (action == SurfaceSelectionAction.Undo) { Undo(); refresh((double[,])ve.Clone()); return; }
         if (action == SurfaceSelectionAction.Redo) { Redo(); refresh((double[,])ve.Clone()); return; }
+        if (action == SurfaceSelectionAction.SelectRing) { pinnedFuelSelection.Clear(); foreach (var cell in selectedCells) pinnedFuelSelection.Add(cell); start = end = null; UpdateSelection(); status.Text = $"Selected {selectedCells.Count} fuel transition-ring cells in 3D"; return; }
         pinnedFuelSelection.Clear(); foreach (var cell in selectedCells) pinnedFuelSelection.Add(cell);
         start = (top, left); end = (bottom, right); selecting = false; UpdateSelection();
         void Refresh() => refresh((double[,])ve.Clone());
@@ -855,11 +905,12 @@ public sealed class FuelingPanel : Grid
     private void RefreshAll()
     {
         if (cells.Length == 0) return;
-        loading = true; var displayed = showFuelFlow ? DisplayValues() : ve; var (min, max) = ValueRange(displayed); var span = Math.Max(.1, max - min);
+        loading = true; var displayed = showFuelFlow ? DisplayValues() : ve; displayedValues = displayed; var (min, max) = ValueRange(displayed); var span = Math.Max(.1, max - min);
         for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++)
         {
             var value = displayed[row, col]; cells[row, col].Text = showFuelFlow ? value.ToString("0.0", CultureInfo.InvariantCulture) : FormatVeDisplayValue(value);
             cells[row, col].IsReadOnly = showFuelFlow; cells[row, col].Background = UiBrushCache.SpectrumAt((value - min) / span);
+            UpdateFuelCellToolTip(row, col);
         }
         loading = false;
     }
@@ -875,17 +926,23 @@ public sealed class FuelingPanel : Grid
     }
     private void RenderBoundaries()
     {
-        var displayed = showFuelFlow ? DisplayValues() : ve; var suffix = showFuelFlow ? " lb/hr" : "% VE";
+        var displayed = showFuelFlow ? DisplayValues() : ve; displayedValues = displayed;
         for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++)
         {
             var boundary = IsBoundary(row, col); cells[row, col].BorderBrush = boundary ? Brushes.Black : UiBrushCache.GridLine; cells[row, col].BorderThickness = new Thickness(boundary ? 3 : .5);
-            var region = col <= idleBoundaryCol
-                ? row <= wotBoundaryRow ? "Idle High MAP" : "Idle Low MAP"
-                : row <= wotBoundaryRow ? "Part Throttle to WOT" : "Cruise to Part Throttle";
-            var displayedValue = showFuelFlow ? displayed[row, col].ToString("0.0", CultureInfo.InvariantCulture) : FormatVeDisplayValue(displayed[row, col]);
-            cells[row, col].ToolTip = $"{region}  •  {rpm[col]:0} RPM  •  {FormatMap(map[row])} {mapUnit}  •  {displayedValue}{suffix}";
+            UpdateFuelCellToolTip(row, col);
         }
         if (start is not null) UpdateSelection();
+    }
+    private void UpdateFuelCellToolTip(int row, int col)
+    {
+        if (row < 0 || row >= map.Length || col < 0 || col >= rpm.Length || row >= cells.GetLength(0) || col >= cells.GetLength(1) || cells[row, col] is null) return;
+        var region = col <= idleBoundaryCol
+            ? row <= wotBoundaryRow ? "Idle High MAP" : "Idle Low MAP"
+            : row <= wotBoundaryRow ? "Part Throttle to WOT" : "Cruise to Part Throttle";
+        var value = displayedValues.GetLength(0) == map.Length && displayedValues.GetLength(1) == rpm.Length ? displayedValues[row, col] : ve[row, col];
+        var displayedValue = showFuelFlow ? value.ToString("0.0", CultureInfo.InvariantCulture) : FormatVeDisplayValue(value);
+        cells[row, col].ToolTip = $"{region}  •  {rpm[col]:0} RPM  •  {FormatMap(map[row])} {mapUnit}  •  {displayedValue}{(showFuelFlow ? " lb/hr" : "% VE")}";
     }
     private bool IsBoundary(int row, int col) => col == idleBoundaryCol || row == wotBoundaryRow;
     private static int Closest(double[] axis, double value) { var best = 0; var distance = double.MaxValue; for (var i = 0; i < axis.Length; i++) { var current = Math.Abs(axis[i] - value); if (current < distance) { best = i; distance = current; } } return best; }

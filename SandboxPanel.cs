@@ -27,8 +27,11 @@ public sealed class SandboxPanel : Grid
     private int axisDragStart;
     private (int Row, int Col)? start, end;
     private readonly HashSet<(int Row, int Col)> pinned = [];
+    private (int Top, int Bottom, int Left, int Right)? regionOfInterest;
+    private Border? regionOfInterestOverlay;
     private readonly HashSet<int> selectedMap = [], selectedRpm = [];
     private readonly Dictionary<TextBox, string> editOriginals = [];
+    private readonly HashSet<TextBox> groupCellEditsAwaitingEnter = [];
     private readonly Dictionary<TextBox, double> axisEditOriginalValues = [];
     private readonly Stack<SandboxSnapshot> undo = [], redo = [];
     private readonly List<string> customUnits = [], customXUnits = [];
@@ -53,6 +56,7 @@ public sealed class SandboxPanel : Grid
 
     public SandboxPanel()
     {
+        PreviewMouseDown += SandboxPanel_PreviewMouseDown;
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition());
@@ -131,16 +135,17 @@ public sealed class SandboxPanel : Grid
             for (var c = 0; c < rpm.Length; c++)
             {
                 var cell = new TextBox { Tag = (r, c), Text = FormatDisplayValue(values[r, c]), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = Brushes.Black, BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), Padding = new Thickness(1) };
+                cell.ToolTipOpening += (_, _) => { var point = ((int Row, int Col))cell.Tag; UpdateCellToolTip(point.Row, point.Col); };
                 cell.PreviewMouseLeftButtonDown += CellDown; cell.MouseEnter += CellEnter; cell.PreviewMouseRightButtonDown += CellRight;
-                cell.GotKeyboardFocus += (_, _) => { var point = ((int Row, int Col))cell.Tag; cell.Text = FormatEditableValue(values[point.Row, point.Col]); editOriginals[cell] = cell.Text; cell.SelectAll(); };
-                cell.LostKeyboardFocus += (_, _) => CommitCell(cell); cell.KeyDown += (_, e) => { if (e.Key == Key.Enter) { CommitCell(cell); Keyboard.ClearFocus(); e.Handled = true; } };
+                cell.GotKeyboardFocus += (_, _) => { var point = ((int Row, int Col))cell.Tag; cell.Text = FormatEditableValue(values[point.Row, point.Col]); editOriginals[cell] = cell.Text; if (IsSelected(point.Row, point.Col) && Selected().Count > 1) groupCellEditsAwaitingEnter.Add(cell); else groupCellEditsAwaitingEnter.Remove(cell); cell.Background = Brushes.White; cell.SelectAll(); };
+                cell.LostKeyboardFocus += (_, _) => { CommitCell(cell); Refresh(); UpdateSelection(); }; cell.KeyDown += (_, e) => { if (e.Key == Key.Enter) { CommitCell(cell, true); ClearCellSelection(); Keyboard.ClearFocus(); e.Handled = true; } };
                 cell.ContextMenu = CellMenu(); cells[r, c] = cell; Grid.SetRow(cell, r); Grid.SetColumn(cell, c + 2); table.Children.Add(cell);
             }
         }
         for (var c = 0; c < rpm.Length; c++) AddAxis(rpm[c], map.Length, c + 2, false, c);
         var rpmTitle = new TextBlock { Text = XAxisTitle, Foreground = Brushes.White, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center };
         Grid.SetRow(rpmTitle, map.Length + 1); Grid.SetColumn(rpmTitle, 2); Grid.SetColumnSpan(rpmTitle, rpm.Length); table.Children.Add(rpmTitle);
-        loading = false; Refresh(); UpdateSelection();
+        loading = false; Refresh(); UpdateSelection(); RenderRegionOfInterest();
     }
 
     private void AddAxis(double value, int row, int column, bool isMap, int index)
@@ -163,10 +168,51 @@ public sealed class SandboxPanel : Grid
     }
     private void CellEnter(object sender, MouseEventArgs e) { if (selecting && e.LeftButton == MouseButtonState.Pressed && sender is TextBox { Tag: ValueTuple<int, int> p }) { end = p; UpdateSelection(); } }
     private void CellRight(object sender, MouseButtonEventArgs e) { if (sender is TextBox { Tag: ValueTuple<int, int> p } && !IsSelected(p.Item1, p.Item2)) { pinned.Clear(); start = end = p; UpdateSelection(); } }
-    private ContextMenu CellMenu() { var menu = new ContextMenu(); menu.Items.Add(Item("Copy selected", (_, _) => Copy())); menu.Items.Add(Item("Paste", (_, _) => Paste())); menu.Items.Add(Item("Offset selection…", Offset)); menu.Items.Add(new Separator()); menu.Items.Add(Item("Smooth selected…", AdvancedSmooth)); menu.Items.Add(Item("Smooth rows", SmoothRows)); menu.Items.Add(Item("Smooth columns", SmoothColumns)); menu.Items.Add(new Separator()); menu.Items.Add(Item("Clear selected", Clear)); return menu; }
+    private ContextMenu CellMenu() { var menu = new ContextMenu(); menu.Items.Add(Item("Copy selected", (_, _) => Copy())); menu.Items.Add(Item("Paste", (_, _) => Paste())); menu.Items.Add(Item("Offset selection…", Offset)); menu.Items.Add(Item("Select transition ring…", SelectTransitionRing)); menu.Items.Add(Item("Highlight region of interest", HighlightRegionOfInterest)); menu.Items.Add(Item("Clear region of interest", ClearRegionOfInterest)); menu.Items.Add(new Separator()); menu.Items.Add(Item("Smooth selected…", AdvancedSmooth)); menu.Items.Add(Item("Smooth rows", SmoothRows)); menu.Items.Add(Item("Smooth columns", SmoothColumns)); menu.Items.Add(new Separator()); menu.Items.Add(Item("Clear selected", Clear)); return menu; }
 
-    private void CommitCell(TextBox cell)
+    private void HighlightRegionOfInterest(object? sender, RoutedEventArgs e)
     {
+        var selected = Selected(); if (selected.Count == 0) return;
+        regionOfInterest = (selected.Min(cell => cell.Row), selected.Max(cell => cell.Row), selected.Min(cell => cell.Col), selected.Max(cell => cell.Col));
+        RenderRegionOfInterest(); status.Text = $"Sandbox region of interest highlighted  •  {regionOfInterest.Value.Right - regionOfInterest.Value.Left + 1} × {regionOfInterest.Value.Bottom - regionOfInterest.Value.Top + 1} cells";
+    }
+    private void ClearRegionOfInterest(object? sender, RoutedEventArgs e) { regionOfInterest = null; RenderRegionOfInterest(); status.Text = "Sandbox region of interest cleared"; }
+    private void RenderRegionOfInterest()
+    {
+        if (regionOfInterestOverlay is not null) table.Children.Remove(regionOfInterestOverlay);
+        regionOfInterestOverlay = null; if (regionOfInterest is not { } roi || map.Length == 0 || rpm.Length == 0) return;
+        var top = Math.Clamp(roi.Top, 0, map.Length - 1); var bottom = Math.Clamp(roi.Bottom, top, map.Length - 1); var left = Math.Clamp(roi.Left, 0, rpm.Length - 1); var right = Math.Clamp(roi.Right, left, rpm.Length - 1);
+        regionOfInterest = (top, bottom, left, right);
+        var overlay = new Border { BorderBrush = new SolidColorBrush(Color.FromRgb(232, 17, 35)), BorderThickness = new Thickness(3), CornerRadius = new CornerRadius(2), Background = Brushes.Transparent, IsHitTestVisible = false, Margin = new Thickness(1) };
+        Grid.SetRow(overlay, top); Grid.SetRowSpan(overlay, bottom - top + 1); Grid.SetColumn(overlay, left + 2); Grid.SetColumnSpan(overlay, right - left + 1); Panel.SetZIndex(overlay, 1000); table.Children.Add(overlay); regionOfInterestOverlay = overlay;
+    }
+
+    private int transitionRingThickness = 1;
+    private void SelectTransitionRing(object? sender, RoutedEventArgs e)
+    {
+        var selected = Selected();
+        if (!TransitionRingSelection.TryGetRectangle(selected, out var top, out var bottom, out var left, out var right)) { Info("Select one solid rectangular sandbox area first."); return; }
+        var maximum = TransitionRingSelection.MaximumThickness(top, bottom, left, right); if (maximum < 1) { Info("Select at least a 3 × 3 area so the ring has an unselected center."); return; }
+        void Apply(int width)
+        {
+            transitionRingThickness = width; pinned.Clear(); foreach (var cell in TransitionRingSelection.Create(top, bottom, left, right, width)) pinned.Add(cell);
+            start = end = null; UpdateSelection(); status.Text = $"Selected {pinned.Count} sandbox transition-ring cells";
+        }
+        var dialog = ModelessWindowManager.ShowOrActivate("Sandbox.TransitionRing", () => new TransitionRingWindow(maximum, transitionRingThickness, Apply) { Owner = Window.GetWindow(this) });
+        dialog.Configure(maximum, transitionRingThickness, Apply);
+    }
+
+    private void SandboxPanel_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is not DependencyObject source || ReferenceEquals(source, table) || table.IsAncestorOf(source) || UiInteraction.IsInsideButton(source)) return;
+        if (Keyboard.FocusedElement is TextBox { Tag: ValueTuple<int, int> } focusedCell && table.IsAncestorOf(focusedCell)) CommitCell(focusedCell);
+        ClearCellSelection();
+    }
+
+    private void CommitCell(TextBox cell, bool enterPressed = false)
+    {
+        if (!enterPressed && groupCellEditsAwaitingEnter.Remove(cell)) { editOriginals.Remove(cell); Refresh(); return; }
+        groupCellEditsAwaitingEnter.Remove(cell);
         if (loading || cell.Tag is not ValueTuple<int, int> p || !double.TryParse(cell.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || !double.IsFinite(value)) { Refresh(); return; }
         var changed = editOriginals.Remove(cell, out var original) && original != cell.Text; if (!changed) return;
         value = Math.Round(value, 3);
@@ -247,13 +293,14 @@ public sealed class SandboxPanel : Grid
     }
 
     private void AdvancedSmooth(object? sender, RoutedEventArgs e) { var selected = Selected(); if (selected.Count == 0) { Info("Select cells to smooth."); return; } ModelessWindowManager.ShowOrActivate("Sandbox.AdvancedSmoothing", () => new AdvancedSmoothingWindow(smoothing, dialog => WorkingRunner.Run(this, () => { smoothing = dialog.Options; PushUndo(); values = AdvancedSmoother.Apply(values, selected, smoothing, rpm, map); Changed($"Smoothed {selected.Count} sandbox cells"); })) { Owner = Window.GetWindow(this) }); }
-    private void SmoothColumns(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || b - t < 2) { Info("Select at least three rows."); return; } PushUndo(); for (var c = l; c <= r; c++) for (var row = t + 1; row < b; row++) { var x = (map[t] - map[row]) / (map[t] - map[b]); values[row, c] = values[t, c] + (values[b, c] - values[t, c]) * Ease(x); } Changed("Smoothed selected columns"); }
-    private void SmoothRows(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || r - l < 2) { Info("Select at least three columns."); return; } PushUndo(); for (var row = t; row <= b; row++) for (var c = l + 1; c < r; c++) { var x = (rpm[c] - rpm[l]) / (rpm[r] - rpm[l]); values[row, c] = values[row, l] + (values[row, r] - values[row, l]) * Ease(x); } Changed("Smoothed selected rows"); }
+    private void SmoothColumns(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || b - t < 2) { Info("Select at least three rows."); return; } PushUndo(); for (var c = l; c <= r; c++) for (var row = t + 1; row < b; row++) { var x = (map[t] - map[row]) / (map[t] - map[b]); values[row, c] = values[t, c] + (values[b, c] - values[t, c]) * Ease(x); } Changed("Smoothed selected columns"); ClearCellSelection(); status.Text = "Smoothed selected sandbox columns  •  selection cleared"; }
+    private void SmoothRows(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || r - l < 2) { Info("Select at least three columns."); return; } PushUndo(); for (var row = t; row <= b; row++) for (var c = l + 1; c < r; c++) { var x = (rpm[c] - rpm[l]) / (rpm[r] - rpm[l]); values[row, c] = values[row, l] + (values[row, r] - values[row, l]) * Ease(x); } Changed("Smoothed selected rows"); ClearCellSelection(); status.Text = "Smoothed selected sandbox rows  •  selection cleared"; }
     private void Clear(object? sender, RoutedEventArgs e) { var selected = Selected(); if (selected.Count == 0) return; PushUndo(); foreach (var p in selected) values[p.Row, p.Col] = 0; Changed($"Cleared {selected.Count} sandbox cells"); }
     private void Offset(object? sender, RoutedEventArgs e) { var selected = Selected(); if (selected.Count == 0) return; ModelessWindowManager.ShowOrActivate("Sandbox.Offset", () => new OffsetSelectionWindow(offsetAmount, offsetPercent, (direction, amount, percent) => { offsetAmount = amount; offsetPercent = percent; PushUndo(); foreach (var p in selected) values[p.Row, p.Col] = percent ? values[p.Row, p.Col] * (1 + direction * amount / 100d) : values[p.Row, p.Col] + direction * amount; Changed($"Offset {selected.Count} sandbox cells"); }) { Owner = Window.GetWindow(this) }); }
 
     private void View3D(object? sender, RoutedEventArgs e)
     {
+        ClearCellSelection();
         ModelessWindowManager.ShowOrActivate("Sandbox.3D", () =>
         {
             var window = new Surface3DWindow(values, rpm, map, mapUnit, false, Colors.Red, Colors.Magenta, (t, b, l, r) => { start = (t, l); end = (b, r); SmoothBasic(); return (double[,])values.Clone(); }, "3D Map Sandbox", "TABLE VALUE", Handle3D, "Y AXIS", XAxisTitle, "0.########", valueFormatter: FormatDisplayValue) { Owner = Window.GetWindow(this) };
@@ -264,6 +311,7 @@ public sealed class SandboxPanel : Grid
     {
         if (action == SurfaceSelectionAction.Undo) { Undo(); refresh((double[,])values.Clone()); return; }
         if (action == SurfaceSelectionAction.Redo) { Redo(); refresh((double[,])values.Clone()); return; }
+        if (action == SurfaceSelectionAction.SelectRing) { pinned.Clear(); foreach (var cell in selected) pinned.Add(cell); start = end = null; UpdateSelection(); status.Text = $"Selected {selected.Count} sandbox transition-ring cells in 3D"; return; }
         pinned.Clear(); foreach (var p in selected) pinned.Add(p); start = (top, left); end = (bottom, right); UpdateSelection();
         void Refresh3D() => refresh((double[,])values.Clone());
         switch (action)
@@ -387,8 +435,13 @@ public sealed class SandboxPanel : Grid
         loading = true; var min = double.PositiveInfinity; var max = double.NegativeInfinity;
         for (var r = 0; r < map.Length; r++) for (var c = 0; c < rpm.Length; c++) { var value = values[r, c]; if (value < min) min = value; if (value > max) max = value; }
         var span = Math.Max(.001, max - min);
-        for (var r = 0; r < map.Length; r++) for (var c = 0; c < rpm.Length; c++) { cells[r, c].Text = FormatDisplayValue(values[r, c]); cells[r, c].Background = UiBrushCache.SpectrumAt((values[r, c] - min) / span); }
+        for (var r = 0; r < map.Length; r++) for (var c = 0; c < rpm.Length; c++) { cells[r, c].Text = FormatDisplayValue(values[r, c]); cells[r, c].Background = UiBrushCache.SpectrumAt((values[r, c] - min) / span); UpdateCellToolTip(r, c); }
         loading = false;
+    }
+    private void UpdateCellToolTip(int row, int col)
+    {
+        if (row < 0 || row >= map.Length || col < 0 || col >= rpm.Length || row >= cells.GetLength(0) || col >= cells.GetLength(1) || cells[row, col] is null) return;
+        cells[row, col].ToolTip = $"{XAxisTitle}: {rpm[col].ToString(XFormat, CultureInfo.InvariantCulture)}  •  {YAxisTitle}: {map[row].ToString(MapFormat, CultureInfo.InvariantCulture)}  •  Value: {FormatDisplayValue(values[row, col])}";
     }
     private HashSet<(int Row, int Col)> Selected() { var result = pinned.ToHashSet(); if (Bounds(out var t, out var b, out var l, out var r)) for (var row = t; row <= b; row++) for (var c = l; c <= r; c++) result.Add((row, c)); return result; }
     private bool Bounds(out int top, out int bottom, out int left, out int right) { top = bottom = left = right = 0; if (start is null || end is null) return false; top = Math.Min(start.Value.Row, end.Value.Row); bottom = Math.Max(start.Value.Row, end.Value.Row); left = Math.Min(start.Value.Col, end.Value.Col); right = Math.Max(start.Value.Col, end.Value.Col); return true; }

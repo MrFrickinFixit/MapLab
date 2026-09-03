@@ -6,7 +6,7 @@ using System.Windows.Media.Media3D;
 
 namespace TimingTableCalculator;
 
-public enum SurfaceSelectionAction { Undo, Redo, Copy, Paste, Offset, Smooth, Refine, Advanced, SmoothRows, SmoothColumns, Clear }
+public enum SurfaceSelectionAction { Undo, Redo, Copy, Paste, Offset, SelectRing, Smooth, Refine, Advanced, SmoothRows, SmoothColumns, Clear }
 
 public sealed class Surface3DWindow : Window
 {
@@ -41,6 +41,7 @@ public sealed class Surface3DWindow : Window
     private TextBlock hoverText = null!;
     private (int Row, int Col)? hoverCell;
     private readonly List<(TextBlock Label, Point3D LocalPosition)> scaleOverlayLabels = [];
+    private int transitionRingThickness = 1;
 
     public Surface3DWindow(double[,] values, double[] rpm, double[] map, string mapUnit, bool useCustomColors, Color lowColor, Color highColor, Func<int, int, int, int, double[,]> smoothSelection, string windowTitle = "3D Timing Map", string valueAxisTitle = "SPARK TIMING (°)", Action<SurfaceSelectionAction, int, int, int, int, IReadOnlyCollection<(int Row, int Col)>, Action<double[,]>>? selectionAction = null, string mapAxisTitle = "MAP", string rpmAxisTitle = "ENGINE RPM", string rpmFormat = "0", string valueFormat = "0.0", Func<double, string>? valueFormatter = null)
     {
@@ -118,13 +119,14 @@ public sealed class Surface3DWindow : Window
         menu.Items.Add(ActionItem("Copy selected", SurfaceSelectionAction.Copy));
         menu.Items.Add(ActionItem("Paste", SurfaceSelectionAction.Paste));
         menu.Items.Add(ActionItem("Offset selection…", SurfaceSelectionAction.Offset));
+        menu.Items.Add(ActionItem("Select transition ring…", SurfaceSelectionAction.SelectRing));
         menu.Items.Add(new Separator());
         menu.Items.Add(ActionItem("Smooth selected…", SurfaceSelectionAction.Advanced));
         menu.Items.Add(ActionItem("Smooth rows", SurfaceSelectionAction.SmoothRows));
         menu.Items.Add(ActionItem("Smooth columns", SurfaceSelectionAction.SmoothColumns));
         menu.Items.Add(new Separator());
         menu.Items.Add(ActionItem("Clear selected", SurfaceSelectionAction.Clear));
-        menu.Opened += (_, _) => menu.IsOpen = selectionStart is not null && selectionEnd is not null;
+        menu.Opened += (_, _) => menu.IsOpen = SelectedSurfaceCells().Count > 0;
         return menu;
     }
 
@@ -137,15 +139,39 @@ public sealed class Surface3DWindow : Window
 
     private void RunSelectionAction(SurfaceSelectionAction action)
     {
-        if (selectionAction is null || selectionStart is null || selectionEnd is null) return;
-        var top = Math.Min(selectionStart.Value.Row, selectionEnd.Value.Row); var bottom = Math.Max(selectionStart.Value.Row, selectionEnd.Value.Row);
-        var left = Math.Min(selectionStart.Value.Col, selectionEnd.Value.Col); var right = Math.Max(selectionStart.Value.Col, selectionEnd.Value.Col);
-        selectionAction(action, top, bottom, left, right, SelectedSurfaceCells(), UpdateSurfaceValues);
+        if (selectionAction is null) return;
+        var selected = SelectedSurfaceCells();
+        if (selected.Count == 0) return;
+        var top = selected.Min(cell => cell.Row); var bottom = selected.Max(cell => cell.Row);
+        var left = selected.Min(cell => cell.Col); var right = selected.Max(cell => cell.Col);
+        if (action == SurfaceSelectionAction.SelectRing && !TransitionRingSelection.TryGetRectangle(selected, out top, out bottom, out left, out right))
+        {
+            if (action == SurfaceSelectionAction.SelectRing) MessageBox.Show(this, "Select one solid rectangular area before creating a transition ring.", "Transition ring", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (action == SurfaceSelectionAction.SelectRing) { OpenTransitionRing(top, bottom, left, right); return; }
+        selectionAction(action, top, bottom, left, right, selected, UpdateSurfaceValues);
         if (action == SurfaceSelectionAction.Paste)
         {
             selectionStart = selectionEnd = null; pinnedSurfaceSelection.Clear(); selectionVisual.Content = null; smoothButton.IsEnabled = false;
             selectionStatus.Text = "Paste complete  •  selection cleared";
         }
+    }
+
+    private void OpenTransitionRing(int top, int bottom, int left, int right)
+    {
+        var maximum = TransitionRingSelection.MaximumThickness(top, bottom, left, right);
+        if (maximum < 1) { MessageBox.Show(this, "Select at least a 3 × 3 area so the ring has an unselected center.", "Transition ring", MessageBoxButton.OK, MessageBoxImage.Information); return; }
+        void Apply(int width)
+        {
+            transitionRingThickness = width; var ring = TransitionRingSelection.Create(top, bottom, left, right, width);
+            pinnedSurfaceSelection.Clear(); foreach (var cell in ring) pinnedSurfaceSelection.Add(cell);
+            selectionStart = selectionEnd = null; selectionVisual.Content = CreateSelectionOverlay(ring); smoothButton.IsEnabled = true;
+            selectionStatus.Text = $"{ring.Count} transition-ring cells selected";
+            selectionAction?.Invoke(SurfaceSelectionAction.SelectRing, top, bottom, left, right, ring, UpdateSurfaceValues);
+        }
+        var dialog = ModelessWindowManager.ShowOrActivate($"3D.{Title}.TransitionRing", () => new TransitionRingWindow(maximum, transitionRingThickness, Apply) { Owner = this });
+        dialog.Configure(maximum, transitionRingThickness, Apply);
     }
 
     private void RunHistoryAction(SurfaceSelectionAction action)

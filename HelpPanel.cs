@@ -45,6 +45,8 @@ public sealed class HelpPanel : Grid
         Section(document, "Selecting and Editing Cells", Bullets(
             "Drag with the left mouse button to select a rectangular area.",
             "Ctrl+click or Ctrl+drag to add separated cells or another area.",
+            "Right-click one solid rectangular selection and choose Select transition ring to replace it with an adjustable-width perimeter band while leaving its center unselected.",
+            "Choose Highlight region of interest to leave a red rectangular outline around the selected cells after the normal selection is cleared. Each 2D table keeps its own highlight; use Clear region of interest to remove it.",
             "Click a single unselected cell to replace the previous selection. Ctrl+A selects the complete active table.",
             "With several cells selected, edit one selected cell and press Enter to apply the value to all selected cells.",
             "Right-click a selection for copy, paste, offset, smoothing, and clear commands.",
@@ -65,6 +67,7 @@ public sealed class HelpPanel : Grid
             "Rows (Smooth Rows in the right-click menu) reshapes each row between its left and right selected endpoints. It needs at least three columns and leaves those endpoint columns unchanged.",
             "Columns (Smooth Columns in the right-click menu) reshapes each column between its top and bottom selected endpoints. It needs at least three rows and leaves those endpoint rows unchanged.",
             "Smooth Selected opens Advanced Smoothing. It works on the exact selected cells, including separated Ctrl-selected areas; use it for irregular selections instead of Rows or Columns, which operate across the selection's bounding rectangle.",
+            "For a pothole or raised feature, create a transition ring and use Smooth to Surroundings. The unselected center and the cells outside the original rectangle remain fixed shape anchors.",
             "Choose an algorithm inside Advanced Smoothing. Smooth to Surroundings is the option for blending a narrow wrinkle into the good surface beside it.",
             "These tools are available in Fueling, Ignition Timing, and Map Sandbox, including their editable 3D views. Fueling smoothing edits VE values; the lb/hr view is a calculated display."));
         document.Blocks.Add(Illustration("Row and column smoothing use the outside selected cells as anchors and reshape only the cells between them.", SmoothingDiagram()));
