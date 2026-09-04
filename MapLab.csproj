@@ -10,9 +10,9 @@
     <RootNamespace>TimingTableCalculator</RootNamespace>
     <Title>Map Lab</Title>
     <Product>Map Lab</Product>
-    <Version>1.0.2</Version>
-    <FileVersion>1.0.2</FileVersion>
-    <AssemblyVersion>1.0.2</AssemblyVersion>
+    <Version>1.0.3</Version>
+    <FileVersion>1.0.3.0</FileVersion>
+    <AssemblyVersion>1.0.3.0</AssemblyVersion>
     <Authors>Brian Diffenbaugh</Authors>
     <Copyright>Copyright (c) 2026 Brian Diffenbaugh</Copyright>
     <Description>Engine ignition timing and fueling map editor.</Description>

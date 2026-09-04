@@ -14,7 +14,7 @@ Run the following command from the repository root:
 The script publishes a self-contained 64-bit Windows build and creates:
 
 ```text
-artifacts\installer\MapLab-1.0.1-win-x64.msi
+artifacts\installer\MapLab-1.0.3-beta-win-x64.msi
 ```
 
 To assign a new installer version:
@@ -41,7 +41,7 @@ Windows x64 installer with:
 ```powershell
 .\scripts\build-inno-installer.ps1
 # Optional version and compiler-path overrides:
-.\scripts\build-inno-installer.ps1 -Version 1.0.1 -CompilerPath 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+.\scripts\build-inno-installer.ps1 -Version 1.0.3 -CompilerPath 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
 ```
 
 The helper reads the version and executable name from `MapLab.csproj`, so beta
@@ -58,7 +58,8 @@ For the Inno Setup Compiler IDE, first run:
 
 Then open `Installer\MapLab.iss` and select **Compile**. Without command-line
 defines, the script detects the executable from the published runtime config and
-uses its numeric file version (including the fourth component) in the output name.
+defaults to version `1.0.3`. The installed application version is displayed as
+`1.0.3-beta` while Windows file-version metadata remains numeric.
 
 On a first interactive install, setup prompts for **all users** (administrator
 rights) or **just for you**, presents the license and destination folder, and

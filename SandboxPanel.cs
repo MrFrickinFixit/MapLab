@@ -15,6 +15,7 @@ public sealed class SandboxPanel : Grid
 {
     private readonly Grid table = new() { Background = new SolidColorBrush(Color.FromRgb(8, 13, 20)), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
     private readonly TextBlock status = new() { Text = "Sandbox ready", Foreground = new SolidColorBrush(Color.FromRgb(169, 201, 192)), FontSize = 12 };
+    private readonly TextBlock currentFileText = new() { Text = "Current file: Untitled", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, Margin = new Thickness(0, 3, 0, 0) };
     private readonly TextBox xSize = Box("31", 44), ySize = Box("31", 44);
     private readonly ComboBox unitBox, xUnitBox, leadingPrecisionBox, trailingPrecisionBox;
     private TextBox[,] cells = new TextBox[0, 0];
@@ -79,6 +80,7 @@ public sealed class SandboxPanel : Grid
         title.Children.Add(new TextBlock { Text = "MAP LAB", Foreground = new SolidColorBrush(Color.FromRgb(0, 103, 192)), FontSize = 12, FontWeight = FontWeights.Bold });
         title.Children.Add(new TextBlock { Text = "Map Sandbox", Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), FontSize = 25, FontWeight = FontWeights.SemiBold });
         title.Children.Add(new TextBlock { Text = "Build and reshape custom tables without operating-region boundaries.", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 12, Margin = new Thickness(0, 4, 0, 0) });
+        title.Children.Add(currentFileText);
         heading.Children.Add(title);
         var badge = new Border { Background = new SolidColorBrush(Color.FromRgb(17, 29, 39)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 64, 53)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(16), Padding = new Thickness(14, 8, 14, 8), VerticalAlignment = VerticalAlignment.Center, Child = status };
         Grid.SetColumn(badge, 1); heading.Children.Add(badge); Children.Add(heading);
@@ -108,6 +110,11 @@ public sealed class SandboxPanel : Grid
         PreviewKeyDown += SandboxKeyDown;
         table.PreviewMouseLeftButtonUp += (_, _) => { selecting = false; axisSelecting = false; };
         if (!Load()) Initialize(31, 31); else Build();
+    }
+
+    internal void SetCurrentFile(string displayName, string? fullPath)
+    {
+        currentFileText.Text = $"Current file: {displayName}"; currentFileText.ToolTip = fullPath;
     }
 
     private void Initialize(int rows, int cols)
@@ -332,6 +339,11 @@ public sealed class SandboxPanel : Grid
     {
         if (action == SurfaceSelectionAction.Undo) { Undo(); refresh((double[,])values.Clone()); return; }
         if (action == SurfaceSelectionAction.Redo) { Redo(); refresh((double[,])values.Clone()); return; }
+        if (action is SurfaceSelectionAction.FlattenPath or SurfaceSelectionAction.SmoothPath)
+        {
+            ApplyTwoPointPath(selected, action == SurfaceSelectionAction.FlattenPath ? TwoPointSurfaceMode.Flatten : TwoPointSurfaceMode.Smooth);
+            refresh((double[,])values.Clone()); return;
+        }
         if (action == SurfaceSelectionAction.SelectRing) { pinned.Clear(); foreach (var cell in selected) pinned.Add(cell); start = end = null; UpdateSelection(); status.Text = $"Selected {selected.Count} sandbox transition-ring cells in 3D"; return; }
         pinned.Clear(); foreach (var p in selected) pinned.Add(p); start = (top, left); end = (bottom, right); UpdateSelection();
         void Refresh3D() => refresh((double[,])values.Clone());
@@ -347,6 +359,20 @@ public sealed class SandboxPanel : Grid
             case SurfaceSelectionAction.SmoothColumns: SmoothColumns(this, new RoutedEventArgs()); Refresh3D(); break;
             case SurfaceSelectionAction.Clear: Clear(this, new RoutedEventArgs()); Refresh3D(); break;
         }
+    }
+    private void ApplyTwoPointPath(IReadOnlyCollection<(int Row, int Col)> selected, TwoPointSurfaceMode mode)
+    {
+        if (selected.Count != 2) return;
+        var endpoints = selected.ToArray();
+        var edited = TwoPointSurfaceEditor.Apply(values, endpoints[0], endpoints[1], mode);
+        var changes = edited.ChangedCells
+            .Select(point => (point.Row, point.Col, Value: Math.Round(edited.Values[point.Row, point.Col], 3, MidpointRounding.AwayFromZero)))
+            .Where(change => change.Value != values[change.Row, change.Col]).ToArray();
+        pinned.Clear(); foreach (var point in edited.Path) pinned.Add(point);
+        start = end = null; selecting = false;
+        if (changes.Length == 0) { Refresh(); UpdateSelection(); status.Text = $"The selected sandbox path is already {mode.ToString().ToLowerInvariant()}"; return; }
+        PushUndo(); foreach (var change in changes) values[change.Row, change.Col] = change.Value;
+        Changed($"{(mode == TwoPointSurfaceMode.Flatten ? "Flattened" : "Smoothed")} {changes.Length} sandbox cells between two fixed endpoints"); UpdateSelection();
     }
     private double[,] Commit3DSculpt(double[,] updated, IReadOnlyCollection<(int Row, int Col)> affected)
     {
