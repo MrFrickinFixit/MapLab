@@ -17,7 +17,7 @@ public sealed class FuelingPanel : Grid
     private readonly Grid table = new() { Background = new SolidColorBrush(Color.FromRgb(8, 13, 20)) };
     private readonly TextBlock status = new() { Foreground = new SolidColorBrush(Color.FromRgb(118, 135, 156)), FontSize = 11 };
     private readonly TextBox matrixXBox, matrixYBox;
-    private readonly ComboBox leadingPrecisionBox, trailingPrecisionBox;
+    private readonly ComboBox leadingPrecisionBox, trailingPrecisionBox, valueLeadingPrecisionBox, valueTrailingPrecisionBox;
     private readonly Action<int, int> resizeMatrix;
     private readonly Action<bool, int[]> autoFillAxis;
     private readonly Action<bool, int?, int[]> pasteAxis;
@@ -42,18 +42,11 @@ public sealed class FuelingPanel : Grid
     private string MapFormat => mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? "0.0" : "0";
     private string FormatMap(double value) => value.ToString(MapFormat, CultureInfo.InvariantCulture);
     private static string FormatExactAxisValue(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
-    private static string FormatEditableVe(double value) => Math.Round(value, 3).ToString("0.###", CultureInfo.InvariantCulture);
-    private static double RoundEditableVe(double value) => Math.Round(value, 3, MidpointRounding.AwayFromZero);
+    private string FormatEditableVe(double value) => RoundEditableVe(value).ToString(trailingValueDecimals == 0 ? "0" : "0." + new string('#', trailingValueDecimals), CultureInfo.InvariantCulture);
+    private double RoundEditableVe(double value) => Math.Round(value, MagnitudeNumberFormatter.DecimalPlaces(value, leadingValueDigits, trailingValueDecimals), MidpointRounding.AwayFromZero);
     private int leadingDisplayDigits = 3, trailingDisplayDecimals = 1;
-    private string FormatVeDisplayValue(double value)
-    {
-        var magnitude = Math.Abs(value);
-        var leadingDigits = magnitude < 1 ? 1 : (int)Math.Floor(Math.Log10(magnitude)) + 1;
-        var format = trailingDisplayDecimals > 0 && leadingDigits < leadingDisplayDigits
-            ? "0." + new string('0', trailingDisplayDecimals)
-            : "0";
-        return value.ToString(format, CultureInfo.InvariantCulture);
-    }
+    private int leadingValueDigits = 4, trailingValueDecimals = 3;
+    private string FormatVeDisplayValue(double value) => MagnitudeNumberFormatter.Format(value, leadingDisplayDigits, trailingDisplayDecimals);
     private string VeExcelNumberFormat()
     {
         if (trailingDisplayDecimals == 0 || leadingDisplayDigits <= 1) return "0";
@@ -76,8 +69,8 @@ public sealed class FuelingPanel : Grid
     private VeSetupSettings veSetupSettings = new();
     private double selectionOffsetAmount = 1;
     private bool selectionOffsetIsPercentage;
-    private readonly Stack<double[,]> undoHistory = [];
-    private readonly Stack<double[,]> redoHistory = [];
+    private readonly Stack<FuelHistorySnapshot> undoHistory = [];
+    private readonly Stack<FuelHistorySnapshot> redoHistory = [];
     private readonly Dictionary<TextBox, string> editOriginals = [];
     private readonly HashSet<TextBox> groupCellEditsAwaitingEnter = [];
     private readonly Dictionary<TextBox, double> axisEditOriginalValues = [];
@@ -92,7 +85,9 @@ public sealed class FuelingPanel : Grid
         PreviewMouseDown += FuelingPanel_PreviewMouseDown;
         matrixXBox = MatrixSizeBox("31"); matrixYBox = MatrixSizeBox("31");
         leadingPrecisionBox = PrecisionBox(1, 4, leadingDisplayDigits); trailingPrecisionBox = PrecisionBox(0, 3, trailingDisplayDecimals);
+        valueLeadingPrecisionBox = PrecisionBox(1, 4, leadingValueDigits); valueTrailingPrecisionBox = PrecisionBox(0, 3, trailingValueDecimals);
         leadingPrecisionBox.SelectionChanged += (_, _) => ApplyDisplayPrecision(); trailingPrecisionBox.SelectionChanged += (_, _) => ApplyDisplayPrecision();
+        valueLeadingPrecisionBox.SelectionChanged += (_, _) => ApplyDisplayPrecision(); valueTrailingPrecisionBox.SelectionChanged += (_, _) => ApplyDisplayPrecision();
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition()); RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         mapUnitBox = CreateMapUnitBox();
         var heading = new Grid { Margin = new Thickness(4, 0, 0, 20) }; heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -866,7 +861,7 @@ public sealed class FuelingPanel : Grid
     {
         if (loading || ve.Length == 0) return;
         if (undoHistory.Count >= 50) { var retained = undoHistory.Reverse().Skip(1).ToArray(); undoHistory.Clear(); foreach (var item in retained) undoHistory.Push(item); }
-        undoHistory.Push((double[,])ve.Clone()); redoHistory.Clear();
+        undoHistory.Push(CaptureHistory()); redoHistory.Clear();
     }
 
     private void Undo()
@@ -874,7 +869,7 @@ public sealed class FuelingPanel : Grid
         if (undoHistory.Count == 0) { status.Text = "Nothing to undo in the fuel table"; return; }
         WorkingRunner.Run(this, () =>
         {
-            redoHistory.Push((double[,])ve.Clone()); ve = undoHistory.Pop(); Save(); RefreshAll(); UpdateSelection(); status.Text = "Fuel change undone";
+            redoHistory.Push(CaptureHistory()); RestoreHistory(undoHistory.Pop()); Save(); RefreshAll(); UpdateSelection(); status.Text = "Fuel change undone";
         });
     }
 
@@ -883,8 +878,15 @@ public sealed class FuelingPanel : Grid
         if (redoHistory.Count == 0) { status.Text = "Nothing to redo in the fuel table"; return; }
         WorkingRunner.Run(this, () =>
         {
-            undoHistory.Push((double[,])ve.Clone()); ve = redoHistory.Pop(); Save(); RefreshAll(); UpdateSelection(); status.Text = "Fuel change redone";
+            undoHistory.Push(CaptureHistory()); RestoreHistory(redoHistory.Pop()); Save(); RefreshAll(); UpdateSelection(); status.Text = "Fuel change redone";
         });
+    }
+
+    private FuelHistorySnapshot CaptureHistory() => new((double[,])ve.Clone(), leadingValueDigits, trailingValueDecimals);
+    private void RestoreHistory(FuelHistorySnapshot snapshot)
+    {
+        ve = (double[,])snapshot.Values.Clone(); leadingValueDigits = snapshot.LeadingValueDigits; trailingValueDecimals = snapshot.TrailingValueDecimals;
+        syncingDisplayPrecision = true; valueLeadingPrecisionBox.SelectedIndex = leadingValueDigits - 1; valueTrailingPrecisionBox.SelectedIndex = trailingValueDecimals; syncingDisplayPrecision = false;
     }
 
     private void RefreshAll()
@@ -1092,9 +1094,11 @@ public sealed class FuelingPanel : Grid
             field.Children.Add(new TextBlock { Text = label, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 10, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 5, 0) });
             field.Children.Add(box); return field;
         }
-        return ControlGroup("VE NUMBER DISPLAY",
-            Field("LEADING DIGITS", leadingPrecisionBox, "Show trailing decimals when the VE value has fewer than this many digits before the decimal point."),
-            Field("TRAILING DECIMALS", trailingPrecisionBox, "Number of decimal places shown for VE values below the leading-digit threshold."));
+        return ControlGroup("VE DECIMAL PRECISION",
+            Field("DISPLAY LEADING", leadingPrecisionBox, "Leading-digit threshold used only to display VE values."),
+            Field("DISPLAY TRAILING", trailingPrecisionBox, "Decimal places shown below the display leading-digit threshold."),
+            Field("ACTUAL LEADING", valueLeadingPrecisionBox, "Leading-digit threshold applied to stored VE values."),
+            Field("ACTUAL TRAILING", valueTrailingPrecisionBox, "Stored decimal places below the actual leading-digit threshold."));
     }
     private static ComboBox PrecisionBox(int minimum, int maximum, int selected)
     {
@@ -1104,9 +1108,12 @@ public sealed class FuelingPanel : Grid
     }
     private void ApplyDisplayPrecision()
     {
-        if (syncingDisplayPrecision || leadingPrecisionBox.SelectedItem is not ComboBoxItem { Tag: int leading } || trailingPrecisionBox.SelectedItem is not ComboBoxItem { Tag: int trailing }) return;
-        leadingDisplayDigits = leading; trailingDisplayDecimals = trailing;
-        if (ve.Length > 0) { RefreshAll(); ApplyBoundaries(); Save(); status.Text = $"VE display: decimals below {leadingDisplayDigits} leading digits • {trailingDisplayDecimals} trailing decimal place{(trailingDisplayDecimals == 1 ? "" : "s")}"; }
+        if (syncingDisplayPrecision || leadingPrecisionBox.SelectedItem is not ComboBoxItem { Tag: int displayLeading } || trailingPrecisionBox.SelectedItem is not ComboBoxItem { Tag: int displayTrailing } || valueLeadingPrecisionBox.SelectedItem is not ComboBoxItem { Tag: int actualLeading } || valueTrailingPrecisionBox.SelectedItem is not ComboBoxItem { Tag: int actualTrailing }) return;
+        var actualChanged = actualLeading != leadingValueDigits || actualTrailing != trailingValueDecimals;
+        if (actualChanged && ve.Length > 0) PushUndo();
+        leadingDisplayDigits = displayLeading; trailingDisplayDecimals = displayTrailing; leadingValueDigits = actualLeading; trailingValueDecimals = actualTrailing;
+        if (actualChanged) NormalizeStoredValues();
+        if (ve.Length > 0) { Save(); RefreshAll(); ApplyBoundaries(); status.Text = $"VE display {leadingDisplayDigits}/{trailingDisplayDecimals}  •  stored precision {leadingValueDigits}/{trailingValueDecimals}"; }
     }
     private static Button Button(string text, RoutedEventHandler click, bool primary = false) { var button = new Button { Content = text, Padding = new Thickness(12, 7, 12, 7), Margin = new Thickness(0, 0, 7, 0), Background = new SolidColorBrush(primary ? Color.FromRgb(0, 103, 192) : Color.FromRgb(249, 249, 249)), Foreground = primary ? Brushes.White : new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(primary ? Color.FromRgb(0, 90, 170) : Color.FromRgb(190, 190, 190)), BorderThickness = new Thickness(1), FontWeight = FontWeights.SemiBold, FontFamily = new FontFamily("Segoe UI") }; button.Click += click; return button; }
     private static TextBox MatrixSizeBox(string text) => new() { Text = text, Width = 44, Padding = new Thickness(6), Margin = new Thickness(0, 0, 6, 0), TextAlignment = TextAlignment.Center, Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(Color.FromRgb(184, 184, 184)), BorderThickness = new Thickness(1) };
@@ -1117,6 +1124,7 @@ public sealed class FuelingPanel : Grid
     private void Save()
     {
         if (loading || ve.Length == 0) return;
+        NormalizeStoredValues();
         SyncLearnApply();
         try
         {
@@ -1133,7 +1141,8 @@ public sealed class FuelingPanel : Grid
                 RefinementStrength = refinementStrength, RefinementPasses = refinementPasses, AdvancedOptions = advancedSmoothingOptions,
                 SelectionOffsetAmount = selectionOffsetAmount, SelectionOffsetIsPercentage = selectionOffsetIsPercentage,
                 VeSetup = veSetupSettings, ShowFuelFlow = showFuelFlow,
-                LeadingDisplayDigits = leadingDisplayDigits, TrailingDisplayDecimals = trailingDisplayDecimals
+                LeadingDisplayDigits = leadingDisplayDigits, TrailingDisplayDecimals = trailingDisplayDecimals,
+                LeadingValueDigits = leadingValueDigits, TrailingValueDecimals = trailingValueDecimals
             };
             Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!);
             var json = JsonSerializer.Serialize(state); if (string.Equals(json, lastSavedJson, StringComparison.Ordinal)) return;
@@ -1166,7 +1175,8 @@ public sealed class FuelingPanel : Grid
             selectionOffsetAmount = state.SelectionOffsetAmount; selectionOffsetIsPercentage = state.SelectionOffsetIsPercentage;
             veSetupSettings = state.VeSetup ?? veSetupSettings; showFuelFlow = state.ShowFuelFlow;
             leadingDisplayDigits = Math.Clamp(state.LeadingDisplayDigits, 1, 4); trailingDisplayDecimals = Math.Clamp(state.TrailingDisplayDecimals, 0, 3);
-            syncingDisplayPrecision = true; leadingPrecisionBox.SelectedIndex = leadingDisplayDigits - 1; trailingPrecisionBox.SelectedIndex = trailingDisplayDecimals; syncingDisplayPrecision = false;
+            leadingValueDigits = Math.Clamp(state.LeadingValueDigits, 1, 4); trailingValueDecimals = Math.Clamp(state.TrailingValueDecimals, 0, 3);
+            syncingDisplayPrecision = true; leadingPrecisionBox.SelectedIndex = leadingDisplayDigits - 1; trailingPrecisionBox.SelectedIndex = trailingDisplayDecimals; valueLeadingPrecisionBox.SelectedIndex = leadingValueDigits - 1; valueTrailingPrecisionBox.SelectedIndex = trailingValueDecimals; syncingDisplayPrecision = false;
             syncingConversion = true; conversionViewBox.IsChecked = showFuelFlow; syncingConversion = false;
             fuelTableTitle.Text = showFuelFlow ? "Fuel Table — Estimated Fuel Flow (lb/hr)" : "Fuel Table — VE (%)";
             syncingLearnApply = true;
@@ -1209,5 +1219,14 @@ public sealed class FuelingPanel : Grid
         public bool ShowFuelFlow { get; set; }
         public int LeadingDisplayDigits { get; set; } = 3;
         public int TrailingDisplayDecimals { get; set; } = 1;
+        public int LeadingValueDigits { get; set; } = 4;
+        public int TrailingValueDecimals { get; set; } = 3;
     }
+
+    private void NormalizeStoredValues()
+    {
+        for (var row = 0; row < ve.GetLength(0); row++) for (var col = 0; col < ve.GetLength(1); col++) ve[row, col] = RoundEditableVe(ve[row, col]);
+    }
+
+    private sealed record FuelHistorySnapshot(double[,] Values, int LeadingValueDigits, int TrailingValueDecimals);
 }

@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     private TextBox[,] valueCells = new TextBox[31, 31];
     private double[,] timingValues = new double[31, 31];
     private int timingLeadingDisplayDigits = 3, timingTrailingDisplayDecimals = 1;
+    private int timingLeadingValueDigits = 3, timingTrailingValueDecimals = 1;
     private bool syncingTimingDisplayPrecision;
     private readonly Dictionary<TextBox, string> cellEditOriginalValues = [];
     private readonly HashSet<TextBox> groupCellEditsAwaitingEnter = [];
@@ -80,8 +81,8 @@ public partial class MainWindow : Window
     private double RoundMapValue(double value) => Math.Round(value / MapAxisIncrement) * MapAxisIncrement;
     private string FormatMap(double value) => value.ToString(MapAxisFormat, CultureInfo.InvariantCulture);
     private string FormatTimingDisplayValue(double value) => MagnitudeNumberFormatter.Format(value, timingLeadingDisplayDigits, timingTrailingDisplayDecimals);
-    private double RoundEditableTiming(double value) => Math.Round(value, timingTrailingDisplayDecimals, MidpointRounding.AwayFromZero);
-    private string FormatEditableTiming(double value) => RoundEditableTiming(value).ToString(timingTrailingDisplayDecimals == 0 ? "0" : "0." + new string('#', timingTrailingDisplayDecimals), CultureInfo.InvariantCulture);
+    private double RoundEditableTiming(double value) => Math.Round(value, MagnitudeNumberFormatter.DecimalPlaces(value, timingLeadingValueDigits, timingTrailingValueDecimals), MidpointRounding.AwayFromZero);
+    private string FormatEditableTiming(double value) => RoundEditableTiming(value).ToString(timingTrailingValueDecimals == 0 ? "0" : "0." + new string('#', timingTrailingValueDecimals), CultureInfo.InvariantCulture);
     private static string FormatExactAxisValue(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
     private double idleTransitionRpm = 1200, wotTransitionMap = 85;
     private RegionPointPick regionPointPick;
@@ -661,13 +662,13 @@ public partial class MainWindow : Window
 
     private void TimingDisplayPrecision_Changed(object sender, SelectionChangedEventArgs e)
     {
-        if (syncingTimingDisplayPrecision || loadingState || TimingLeadingPrecisionBox is null || TimingTrailingPrecisionBox is null) return;
-        if (TimingLeadingPrecisionBox.SelectedItem is not ComboBoxItem leadingItem || TimingTrailingPrecisionBox.SelectedItem is not ComboBoxItem trailingItem) return;
-        if (!int.TryParse(leadingItem.Content?.ToString(), out var leadingDigits) || !int.TryParse(trailingItem.Content?.ToString(), out var decimalPlaces)) return;
-        var precisionChanged = decimalPlaces != timingTrailingDisplayDecimals;
+        if (syncingTimingDisplayPrecision || loadingState || TimingLeadingPrecisionBox is null || TimingTrailingPrecisionBox is null || TimingValueLeadingPrecisionBox is null || TimingValueTrailingPrecisionBox is null) return;
+        if (TimingLeadingPrecisionBox.SelectedItem is not ComboBoxItem displayLeadingItem || TimingTrailingPrecisionBox.SelectedItem is not ComboBoxItem displayTrailingItem || TimingValueLeadingPrecisionBox.SelectedItem is not ComboBoxItem valueLeadingItem || TimingValueTrailingPrecisionBox.SelectedItem is not ComboBoxItem valueTrailingItem) return;
+        if (!int.TryParse(displayLeadingItem.Content?.ToString(), out var displayLeading) || !int.TryParse(displayTrailingItem.Content?.ToString(), out var displayTrailing) || !int.TryParse(valueLeadingItem.Content?.ToString(), out var valueLeading) || !int.TryParse(valueTrailingItem.Content?.ToString(), out var valueTrailing)) return;
+        var precisionChanged = valueLeading != timingLeadingValueDigits || valueTrailing != timingTrailingValueDecimals;
         if (precisionChanged && timingValues.Length > 0) PushUndo();
-        timingLeadingDisplayDigits = leadingDigits;
-        timingTrailingDisplayDecimals = decimalPlaces;
+        timingLeadingDisplayDigits = displayLeading; timingTrailingDisplayDecimals = displayTrailing;
+        timingLeadingValueDigits = valueLeading; timingTrailingValueDecimals = valueTrailing;
         for (var row = 0; row < valueCells.GetLength(0); row++)
             for (var col = 0; col < valueCells.GetLength(1); col++)
                 if (valueCells[row, col] is not null)
@@ -676,9 +677,7 @@ public partial class MainWindow : Window
                     else RefreshCellColor(valueCells[row, col]);
                 }
         SaveState();
-        if (StatusText is not null) StatusText.Text = precisionChanged
-            ? $"Timing values rounded to {timingTrailingDisplayDecimals} decimal place{(timingTrailingDisplayDecimals == 1 ? "" : "s")}  •  future changes use this precision"
-            : $"Timing display threshold set to {timingLeadingDisplayDigits} leading digits";
+        if (StatusText is not null) StatusText.Text = $"Timing display {timingLeadingDisplayDigits}/{timingTrailingDisplayDecimals}  •  stored precision {timingLeadingValueDigits}/{timingTrailingValueDecimals}";
     }
 
     private void ResizeMatrixCore(int newColumns, int newRows, int oldRows, int oldColumns, double[,] oldTiming, double[] resizedRpm, double[] resizedMap)
@@ -1932,7 +1931,7 @@ public partial class MainWindow : Window
             timing[row] = new double[ColumnCount];
             for (var col = 0; col < ColumnCount; col++) timing[row][col] = timingValues[row, col];
         }
-        return new MapSnapshot(rpmAxis.ToArray(), mapAxis.ToArray(), timing, idleTransitionRpm, wotTransitionMap, LowTimingBox.Text, HighTimingBox.Text, timingLeadingDisplayDigits, timingTrailingDisplayDecimals);
+        return new MapSnapshot(rpmAxis.ToArray(), mapAxis.ToArray(), timing, idleTransitionRpm, wotTransitionMap, LowTimingBox.Text, HighTimingBox.Text, timingLeadingDisplayDigits, timingTrailingDisplayDecimals, timingLeadingValueDigits, timingTrailingValueDecimals);
     }
 
     private void RestoreSnapshot(MapSnapshot snapshot)
@@ -1947,10 +1946,13 @@ public partial class MainWindow : Window
             IdleRpmBox.Text = idleTransitionRpm.ToString("0", CultureInfo.InvariantCulture);
             WotMapBox.Text = wotTransitionMap.ToString("0.0", CultureInfo.InvariantCulture);
             LowTimingBox.Text = snapshot.LowTiming; HighTimingBox.Text = snapshot.HighTiming;
-            timingLeadingDisplayDigits = snapshot.LeadingDisplayDigits; timingTrailingDisplayDecimals = snapshot.DecimalPlaces;
+            timingLeadingDisplayDigits = snapshot.LeadingDisplayDigits; timingTrailingDisplayDecimals = snapshot.DisplayDecimalPlaces;
+            timingLeadingValueDigits = snapshot.LeadingValueDigits; timingTrailingValueDecimals = snapshot.ValueDecimalPlaces;
             syncingTimingDisplayPrecision = true;
             TimingLeadingPrecisionBox.SelectedIndex = Math.Clamp(timingLeadingDisplayDigits - 1, 0, TimingLeadingPrecisionBox.Items.Count - 1);
             TimingTrailingPrecisionBox.SelectedIndex = Math.Clamp(timingTrailingDisplayDecimals, 0, TimingTrailingPrecisionBox.Items.Count - 1);
+            TimingValueLeadingPrecisionBox.SelectedIndex = Math.Clamp(timingLeadingValueDigits - 1, 0, TimingValueLeadingPrecisionBox.Items.Count - 1);
+            TimingValueTrailingPrecisionBox.SelectedIndex = Math.Clamp(timingTrailingValueDecimals, 0, TimingValueTrailingPrecisionBox.Items.Count - 1);
             syncingTimingDisplayPrecision = false;
             var low = double.TryParse(snapshot.LowTiming, NumberStyles.Float, CultureInfo.InvariantCulture, out var lowValue) ? lowValue : 42;
             var high = double.TryParse(snapshot.HighTiming, NumberStyles.Float, CultureInfo.InvariantCulture, out var highValue) ? highValue : 12;
@@ -1962,7 +1964,7 @@ public partial class MainWindow : Window
         finally { loadingState = false; }
     }
 
-    private sealed record MapSnapshot(double[] RpmAxis, double[] MapAxis, double[][] Timing, double IdleRpm, double WotMap, string LowTiming, string HighTiming, int LeadingDisplayDigits, int DecimalPlaces);
+    private sealed record MapSnapshot(double[] RpmAxis, double[] MapAxis, double[][] Timing, double IdleRpm, double WotMap, string LowTiming, string HighTiming, int LeadingDisplayDigits, int DisplayDecimalPlaces, int LeadingValueDigits, int ValueDecimalPlaces);
 
     private void SaveState()
     {
@@ -1992,7 +1994,9 @@ public partial class MainWindow : Window
                 VerticalRegionSmoothCells = verticalRegionSmoothCells,
                 HorizontalRegionSmoothCells = horizontalRegionSmoothCells,
                 TimingLeadingDisplayDigits = timingLeadingDisplayDigits,
-                TimingTrailingDisplayDecimals = timingTrailingDisplayDecimals
+                TimingTrailingDisplayDecimals = timingTrailingDisplayDecimals,
+                TimingLeadingValueDigits = timingLeadingValueDigits,
+                TimingTrailingValueDecimals = timingTrailingValueDecimals
             };
             Directory.CreateDirectory(Path.GetDirectoryName(AutosavePath)!);
             var json = JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true });
@@ -2032,9 +2036,13 @@ public partial class MainWindow : Window
             horizontalRegionSmoothCells = Math.Clamp(state.HorizontalRegionSmoothCells, 3, 64);
             timingLeadingDisplayDigits = Math.Clamp(state.TimingLeadingDisplayDigits, 1, 4);
             timingTrailingDisplayDecimals = Math.Clamp(state.TimingTrailingDisplayDecimals, 0, 3);
+            timingLeadingValueDigits = Math.Clamp(state.TimingLeadingValueDigits, 1, 4);
+            timingTrailingValueDecimals = Math.Clamp(state.TimingTrailingValueDecimals, 0, 3);
             syncingTimingDisplayPrecision = true;
             TimingLeadingPrecisionBox.SelectedIndex = timingLeadingDisplayDigits - 1;
             TimingTrailingPrecisionBox.SelectedIndex = timingTrailingDisplayDecimals;
+            TimingValueLeadingPrecisionBox.SelectedIndex = timingLeadingValueDigits - 1;
+            TimingValueTrailingPrecisionBox.SelectedIndex = timingTrailingValueDecimals;
             syncingTimingDisplayPrecision = false;
             IdleRpmBox.Text = state.IdleRpm; IdleMapBox.Text = state.IdleMap; WotRpmBox.Text = state.WotRpm; WotMapBox.Text = state.WotMap;
             rpmAxis = IsLegacyDefaultRpmAxis(state.RpmAxis) ? DefaultRpmAxis.ToArray() : state.RpmAxis;
@@ -2093,6 +2101,8 @@ public partial class MainWindow : Window
         public int HorizontalRegionSmoothCells { get; set; } = 3;
         public int TimingLeadingDisplayDigits { get; set; } = 3;
         public int TimingTrailingDisplayDecimals { get; set; } = 1;
+        public int TimingLeadingValueDigits { get; set; } = 3;
+        public int TimingTrailingValueDecimals { get; set; } = 1;
     }
 
     private enum RegionPointPick { None, IdleToCruise, CruiseToWot, Both }

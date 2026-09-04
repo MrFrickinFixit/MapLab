@@ -36,10 +36,9 @@ public sealed class HelpPanel : Grid
             "Timing, fueling, and sandbox values each have separate Undo and Redo history."));
 
         Section(document, "Number Display and Stored Precision", Bullets(
-            "Fueling, Ignition Timing, and Map Sandbox each have independent numeric-format controls.",
-            "Leading Digits sets the magnitude at which values switch to whole-number display. With the default setting of 3, 85.47 displays as 85.5 while 105.47 displays as 105.",
-            "For Fueling and Map Sandbox, Trailing Decimals changes display only; cell edits and pasted values retain up to three decimal places.",
-            "For Ignition Timing, Stored Decimals is the actual table precision. Changing it rounds every timing cell as one Undo step, and future edits, pastes, offsets, smoothing, region calculations, and 3D changes are stored at that precision.",
+            "Fueling, Ignition Timing, and Map Sandbox each provide separate Display Leading, Display Trailing, Actual Leading, and Actual Trailing controls.",
+            "Display precision changes only how values appear. Actual precision controls the stored table values. With 3 actual leading digits and 1 actual trailing decimal, 85.47 becomes 85.5 while 105.47 becomes 105.",
+            "Changing either Actual control rounds the complete active table as one Undo step. Future edits, pastes, offsets, smoothing, generated values, and 3D changes use the selected actual precision.",
             "The selected display format is also used by the 3D value scale, 3D tooltip, and Excel number formatting. Clipboard and CSV data retain the stored precision."));
 
         Section(document, "Selecting and Editing Cells", Bullets(
@@ -168,8 +167,8 @@ public sealed class HelpPanel : Grid
             "Use Undo immediately after an unwanted edit, paste, offset, smoothing operation, resize, or axis change."));
 
         Section(document, "Display and Long Operations", Bullets(
-            "Use Number Display below each map to choose leading digits and trailing decimal precision without changing the stored values.",
-            "Fueling values may retain up to three decimal places even when the table displays a rounded value.",
+            "Use Decimal Precision below each map to configure display formatting separately from the actual stored-value precision.",
+            "Actual Leading and Actual Trailing apply to the underlying Timing, Fueling, or Sandbox data even when the displayed value uses different precision.",
             "Large resizes, smoothing operations, and extensive Undo or Redo changes show a Working progress window.",
             "Only one instance of each modeless tool dialog is opened. Selecting its command again restores the existing dialog.",
             "Closing or cancelling a dialog returns focus to Map Lab and preserves the main window state."));

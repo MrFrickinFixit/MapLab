@@ -17,7 +17,7 @@ public sealed class SandboxPanel : Grid
     private readonly TextBlock status = new() { Text = "Sandbox ready", Foreground = new SolidColorBrush(Color.FromRgb(169, 201, 192)), FontSize = 12 };
     private readonly TextBlock currentFileText = new() { Text = "Current file: Untitled", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, Margin = new Thickness(0, 3, 0, 0) };
     private readonly TextBox xSize = Box("31", 44), ySize = Box("31", 44);
-    private readonly ComboBox unitBox, xUnitBox, leadingPrecisionBox, trailingPrecisionBox;
+    private readonly ComboBox unitBox, xUnitBox, leadingPrecisionBox, trailingPrecisionBox, valueLeadingPrecisionBox, valueTrailingPrecisionBox;
     private TextBox[,] cells = new TextBox[0, 0];
     private TextBox[] mapEditors = [], rpmEditors = [];
     private double[,] values = new double[0, 0];
@@ -40,6 +40,7 @@ public sealed class SandboxPanel : Grid
     private double offsetAmount = 1;
     private bool offsetPercent;
     private int leadingDisplayDigits = 3, trailingDisplayDecimals = 1;
+    private int leadingValueDigits = 4, trailingValueDecimals = 3;
     private bool syncingDisplayPrecision;
     private static string SavePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimingTableCalculator", "sandbox-autosave.json");
     private string? lastSavedJson;
@@ -53,7 +54,8 @@ public sealed class SandboxPanel : Grid
     private static string FormatExactAxisValue(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
     private string XAxisTitle => xUnit.Equals("Unitless", StringComparison.OrdinalIgnoreCase) ? "X AXIS" : $"X AXIS ({xUnit})";
     private string FormatDisplayValue(double value) => MagnitudeNumberFormatter.Format(value, leadingDisplayDigits, trailingDisplayDecimals);
-    private static string FormatEditableValue(double value) => Math.Round(value, 3).ToString("0.###", CultureInfo.InvariantCulture);
+    private double RoundEditableValue(double value) => Math.Round(value, MagnitudeNumberFormatter.DecimalPlaces(value, leadingValueDigits, trailingValueDecimals), MidpointRounding.AwayFromZero);
+    private string FormatEditableValue(double value) => RoundEditableValue(value).ToString(trailingValueDecimals == 0 ? "0" : "0." + new string('#', trailingValueDecimals), CultureInfo.InvariantCulture);
 
     public SandboxPanel()
     {
@@ -71,8 +73,12 @@ public sealed class SandboxPanel : Grid
         xUnitBox.SelectionChanged += (_, _) => { if (!syncingUnit) XUnitSelectionChanged(); };
         leadingPrecisionBox = PrecisionBox(1, 4, leadingDisplayDigits);
         trailingPrecisionBox = PrecisionBox(0, 3, trailingDisplayDecimals);
+        valueLeadingPrecisionBox = PrecisionBox(1, 4, leadingValueDigits);
+        valueTrailingPrecisionBox = PrecisionBox(0, 3, trailingValueDecimals);
         leadingPrecisionBox.SelectionChanged += DisplayPrecisionChanged;
         trailingPrecisionBox.SelectionChanged += DisplayPrecisionChanged;
+        valueLeadingPrecisionBox.SelectionChanged += DisplayPrecisionChanged;
+        valueTrailingPrecisionBox.SelectionChanged += DisplayPrecisionChanged;
 
         var heading = new Grid { Margin = new Thickness(4, 0, 0, 20) };
         heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -99,7 +105,7 @@ public sealed class SandboxPanel : Grid
         Grid.SetRow(commandBar, 1); Children.Add(commandBar);
 
         var bottomTools = new StackPanel { Orientation = Orientation.Horizontal };
-        bottomTools.Children.Add(Group("NUMBER DISPLAY", Label("LEADING DIGITS"), leadingPrecisionBox, Label("TRAILING DECIMALS"), trailingPrecisionBox));
+        bottomTools.Children.Add(Group("DECIMAL PRECISION", Label("DISPLAY LEADING"), leadingPrecisionBox, Label("DISPLAY TRAILING"), trailingPrecisionBox, Label("ACTUAL LEADING"), valueLeadingPrecisionBox, Label("ACTUAL TRAILING"), valueTrailingPrecisionBox));
         bottomTools.Children.Add(Group("VIEW & OUTPUT", Button("▦  3D Map", View3D), Button("⇩  Export CSV", ExportCsv), Button("▤  Export Excel", ExportExcel, true)));
         bottomTools.Children.Add(Group("HISTORY", Button("↶  Undo", (_, _) => Undo()), Button("↷  Redo", (_, _) => Redo())));
         var bottomCommandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = bottomTools, Margin = new Thickness(0, 10, 0, 0) };
@@ -222,7 +228,7 @@ public sealed class SandboxPanel : Grid
         groupCellEditsAwaitingEnter.Remove(cell);
         if (loading || cell.Tag is not ValueTuple<int, int> p || !double.TryParse(cell.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || !double.IsFinite(value)) { Refresh(); return; }
         var changed = editOriginals.Remove(cell, out var original) && original != cell.Text; if (!changed) return;
-        value = Math.Round(value, 3);
+        value = RoundEditableValue(value);
         var selected = Selected(); if (!selected.Contains((p.Item1, p.Item2))) selected = [(p.Item1, p.Item2)];
         PushUndo(); foreach (var point in selected) values[point.Row, point.Col] = value; Refresh(); UpdateSelection(); Save(); status.Text = $"Set {selected.Count} sandbox cells to {FormatEditableValue(value)}";
     }
@@ -366,7 +372,7 @@ public sealed class SandboxPanel : Grid
         var endpoints = selected.ToArray();
         var edited = TwoPointSurfaceEditor.Apply(values, endpoints[0], endpoints[1], mode);
         var changes = edited.ChangedCells
-            .Select(point => (point.Row, point.Col, Value: Math.Round(edited.Values[point.Row, point.Col], 3, MidpointRounding.AwayFromZero)))
+            .Select(point => (point.Row, point.Col, Value: RoundEditableValue(edited.Values[point.Row, point.Col])))
             .Where(change => change.Value != values[change.Row, change.Col]).ToArray();
         pinned.Clear(); foreach (var point in edited.Path) pinned.Add(point);
         start = end = null; selecting = false;
@@ -381,7 +387,7 @@ public sealed class SandboxPanel : Grid
         foreach (var (row, col) in affected)
         {
             if (row < 0 || row >= values.GetLength(0) || col < 0 || col >= values.GetLength(1)) throw new ArgumentException("A sculpted sandbox cell is outside the table.");
-            candidate[row, col] = Math.Round(updated[row, col], 3, MidpointRounding.AwayFromZero);
+            candidate[row, col] = RoundEditableValue(updated[row, col]);
             if (candidate[row, col] != values[row, col]) changed++;
         }
         if (changed == 0) { status.Text = "Sculpt stroke rounded to the current sandbox values"; return (double[,])values.Clone(); }
@@ -403,7 +409,7 @@ public sealed class SandboxPanel : Grid
         var parsed = lines.Select(line => line.Split(['\t', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).ToArray();
         if (parsed.Any(row => row.Length != parsed[0].Length) || parsed.SelectMany(row => row).Any(token => !double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out _))) { Info("Clipboard data must be a rectangular table of numbers."); return; }
         var origin = Bounds(out var t, out _, out var l, out _) ? (Row: t, Col: l) : (Row: 0, Col: 0); if (origin.Row + parsed.Length > map.Length || origin.Col + parsed[0].Length > rpm.Length) { Info("The pasted table does not fit from the selected cell."); return; }
-        PushUndo(); for (var r = 0; r < parsed.Length; r++) for (var c = 0; c < parsed[r].Length; c++) values[origin.Row + r, origin.Col + c] = Math.Round(double.Parse(parsed[r][c], CultureInfo.InvariantCulture), 3);
+        PushUndo(); for (var r = 0; r < parsed.Length; r++) for (var c = 0; c < parsed[r].Length; c++) values[origin.Row + r, origin.Col + c] = RoundEditableValue(double.Parse(parsed[r][c], CultureInfo.InvariantCulture));
         ClearCellSelection(); Changed($"Pasted {parsed[0].Length} × {parsed.Length} sandbox cells");
     }
 
@@ -474,21 +480,24 @@ public sealed class SandboxPanel : Grid
     private void PushUndo() { if (loading || values.Length == 0) return; undo.Push(Snapshot()); while (undo.Count > 50) { var keep = undo.Reverse().Skip(1).ToArray(); undo.Clear(); foreach (var item in keep) undo.Push(item); } redo.Clear(); }
     private void Undo() { if (undo.Count == 0) { status.Text = "Nothing to undo"; return; } WorkingRunner.Run(this, () => { redo.Push(Snapshot()); Restore(undo.Pop()); status.Text = "Sandbox change undone"; }); }
     private void Redo() { if (redo.Count == 0) { status.Text = "Nothing to redo"; return; } WorkingRunner.Run(this, () => { undo.Push(Snapshot()); Restore(redo.Pop()); status.Text = "Sandbox change redone"; }); }
-    private SandboxSnapshot Snapshot() => new(rpm.ToArray(), map.ToArray(), mapUnit, ToJagged(values), customUnits.ToArray(), xUnit, customXUnits.ToArray(), leadingDisplayDigits, trailingDisplayDecimals);
-    private void Restore(SandboxSnapshot snapshot) { loading = true; rpm = snapshot.Rpm.ToArray(); map = snapshot.Map.ToArray(); mapUnit = snapshot.MapUnit; xUnit = snapshot.XUnit ?? "RPM"; values = FromJagged(snapshot.Values); customUnits.Clear(); customUnits.AddRange(snapshot.CustomUnits ?? []); customXUnits.Clear(); customXUnits.AddRange(snapshot.CustomXUnits ?? []); ApplyDisplayPrecision(snapshot.LeadingDisplayDigits, snapshot.TrailingDisplayDecimals); RefreshUnitItems(); RefreshXUnitItems(); xSize.Text = rpm.Length.ToString(); ySize.Text = map.Length.ToString(); loading = false; Build(); Save(); }
+    private SandboxSnapshot Snapshot() => new(rpm.ToArray(), map.ToArray(), mapUnit, ToJagged(values), customUnits.ToArray(), xUnit, customXUnits.ToArray(), leadingDisplayDigits, trailingDisplayDecimals, leadingValueDigits, trailingValueDecimals);
+    private void Restore(SandboxSnapshot snapshot) { loading = true; rpm = snapshot.Rpm.ToArray(); map = snapshot.Map.ToArray(); mapUnit = snapshot.MapUnit; xUnit = snapshot.XUnit ?? "RPM"; values = FromJagged(snapshot.Values); customUnits.Clear(); customUnits.AddRange(snapshot.CustomUnits ?? []); customXUnits.Clear(); customXUnits.AddRange(snapshot.CustomXUnits ?? []); ApplyPrecision(snapshot.LeadingDisplayDigits, snapshot.TrailingDisplayDecimals, snapshot.LeadingValueDigits, snapshot.TrailingValueDecimals); RefreshUnitItems(); RefreshXUnitItems(); xSize.Text = rpm.Length.ToString(); ySize.Text = map.Length.ToString(); loading = false; Build(); Save(); }
 
-    private void Changed(string message) { Refresh(); UpdateSelection(); Save(); status.Text = message; }
+    private void Changed(string message) { NormalizeStoredValues(); Refresh(); UpdateSelection(); Save(); status.Text = message; }
     private void DisplayPrecisionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (syncingDisplayPrecision || leadingPrecisionBox.SelectedItem is not ComboBoxItem leading || trailingPrecisionBox.SelectedItem is not ComboBoxItem trailing) return;
-        if (!int.TryParse(leading.Content?.ToString(), out var leadingDigits) || !int.TryParse(trailing.Content?.ToString(), out var trailingDecimals)) return;
-        leadingDisplayDigits = leadingDigits; trailingDisplayDecimals = trailingDecimals;
-        Refresh(); Save(); status.Text = $"Sandbox display set to {leadingDisplayDigits} leading digits / {trailingDisplayDecimals} trailing decimals";
+        if (syncingDisplayPrecision || leadingPrecisionBox.SelectedItem is not ComboBoxItem displayLeadingItem || trailingPrecisionBox.SelectedItem is not ComboBoxItem displayTrailingItem || valueLeadingPrecisionBox.SelectedItem is not ComboBoxItem valueLeadingItem || valueTrailingPrecisionBox.SelectedItem is not ComboBoxItem valueTrailingItem) return;
+        if (!int.TryParse(displayLeadingItem.Content?.ToString(), out var displayLeading) || !int.TryParse(displayTrailingItem.Content?.ToString(), out var displayTrailing) || !int.TryParse(valueLeadingItem.Content?.ToString(), out var actualLeading) || !int.TryParse(valueTrailingItem.Content?.ToString(), out var actualTrailing)) return;
+        var actualChanged = actualLeading != leadingValueDigits || actualTrailing != trailingValueDecimals;
+        if (actualChanged && values.Length > 0) PushUndo();
+        leadingDisplayDigits = displayLeading; trailingDisplayDecimals = displayTrailing; leadingValueDigits = actualLeading; trailingValueDecimals = actualTrailing;
+        if (actualChanged) NormalizeStoredValues();
+        Refresh(); Save(); status.Text = $"Sandbox display {leadingDisplayDigits}/{trailingDisplayDecimals}  •  stored precision {leadingValueDigits}/{trailingValueDecimals}";
     }
-    private void ApplyDisplayPrecision(int leadingDigits, int trailingDecimals)
+    private void ApplyPrecision(int displayLeading, int displayTrailing, int actualLeading, int actualTrailing)
     {
-        leadingDisplayDigits = Math.Clamp(leadingDigits, 1, 4); trailingDisplayDecimals = Math.Clamp(trailingDecimals, 0, 3);
-        syncingDisplayPrecision = true; leadingPrecisionBox.SelectedIndex = leadingDisplayDigits - 1; trailingPrecisionBox.SelectedIndex = trailingDisplayDecimals; syncingDisplayPrecision = false;
+        leadingDisplayDigits = Math.Clamp(displayLeading, 1, 4); trailingDisplayDecimals = Math.Clamp(displayTrailing, 0, 3); leadingValueDigits = Math.Clamp(actualLeading, 1, 4); trailingValueDecimals = Math.Clamp(actualTrailing, 0, 3);
+        syncingDisplayPrecision = true; leadingPrecisionBox.SelectedIndex = leadingDisplayDigits - 1; trailingPrecisionBox.SelectedIndex = trailingDisplayDecimals; valueLeadingPrecisionBox.SelectedIndex = leadingValueDigits - 1; valueTrailingPrecisionBox.SelectedIndex = trailingValueDecimals; syncingDisplayPrecision = false;
     }
     private void Refresh()
     {
@@ -527,8 +536,8 @@ public sealed class SandboxPanel : Grid
     private void RefreshAxisEditors() { for (var i = 0; i < map.Length; i++) if (mapEditors[i] is not null) mapEditors[i].Text = FormatExactAxisValue(map[i]); for (var i = 0; i < rpm.Length; i++) if (rpmEditors[i] is not null) rpmEditors[i].Text = FormatExactAxisValue(rpm[i]); }
 
     private void SandboxKeyDown(object sender, KeyEventArgs e) { if (Keyboard.Modifiers != ModifierKeys.Control) return; if (e.Key == Key.A) { pinned.Clear(); start = (0, 0); end = (map.Length - 1, rpm.Length - 1); UpdateSelection(); e.Handled = true; } else if (e.Key == Key.C) { Copy(); e.Handled = true; } else if (e.Key == Key.V) { Paste(); e.Handled = true; } else if (e.Key == Key.Z) { Undo(); e.Handled = true; } else if (e.Key == Key.Y) { Redo(); e.Handled = true; } }
-    private void Save() { if (loading || values.Length == 0) return; try { var json = JsonSerializer.Serialize(Snapshot()); if (string.Equals(json, lastSavedJson, StringComparison.Ordinal)) return; Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!); File.WriteAllText(SavePath, json); lastSavedJson = json; } catch { } }
-    private bool Load() { try { if (!File.Exists(SavePath)) return false; var savedJson = File.ReadAllText(SavePath); var state = JsonSerializer.Deserialize<SandboxSnapshot>(savedJson); if (state is null || state.Rpm.Length is < 8 or > 64 || state.Map.Length is < 8 or > 64 || state.Values.Length != state.Map.Length || state.Values.Any(row => row.Length != state.Rpm.Length)) return false; rpm = state.Rpm; map = state.Map; mapUnit = state.MapUnit; xUnit = state.XUnit ?? "RPM"; values = FromJagged(state.Values); customUnits.Clear(); customUnits.AddRange(state.CustomUnits ?? []); customXUnits.Clear(); customXUnits.AddRange(state.CustomXUnits ?? []); ApplyDisplayPrecision(state.LeadingDisplayDigits, state.TrailingDisplayDecimals); RefreshUnitItems(); RefreshXUnitItems(); xSize.Text = rpm.Length.ToString(); ySize.Text = map.Length.ToString(); lastSavedJson = savedJson; return true; } catch { return false; } }
+    private void Save() { if (loading || values.Length == 0) return; try { NormalizeStoredValues(); var json = JsonSerializer.Serialize(Snapshot()); if (string.Equals(json, lastSavedJson, StringComparison.Ordinal)) return; Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!); File.WriteAllText(SavePath, json); lastSavedJson = json; } catch { } }
+    private bool Load() { try { if (!File.Exists(SavePath)) return false; var savedJson = File.ReadAllText(SavePath); var state = JsonSerializer.Deserialize<SandboxSnapshot>(savedJson); if (state is null || state.Rpm.Length is < 8 or > 64 || state.Map.Length is < 8 or > 64 || state.Values.Length != state.Map.Length || state.Values.Any(row => row.Length != state.Rpm.Length)) return false; rpm = state.Rpm; map = state.Map; mapUnit = state.MapUnit; xUnit = state.XUnit ?? "RPM"; values = FromJagged(state.Values); customUnits.Clear(); customUnits.AddRange(state.CustomUnits ?? []); customXUnits.Clear(); customXUnits.AddRange(state.CustomXUnits ?? []); ApplyPrecision(state.LeadingDisplayDigits, state.TrailingDisplayDecimals, state.LeadingValueDigits, state.TrailingValueDecimals); NormalizeStoredValues(); RefreshUnitItems(); RefreshXUnitItems(); xSize.Text = rpm.Length.ToString(); ySize.Text = map.Length.ToString(); lastSavedJson = savedJson; return true; } catch { return false; } }
     internal string ExportSettingsJson() { Save(); return !string.IsNullOrWhiteSpace(lastSavedJson) ? lastSavedJson : File.ReadAllText(SavePath); }
     internal bool CanImportSettingsJson(string json) { try { var state = JsonSerializer.Deserialize<SandboxSnapshot>(json); return state is not null && state.Rpm.Length is >= 8 and <= 64 && state.Map.Length is >= 8 and <= 64 && state.Values.Length == state.Map.Length && state.Values.All(row => row.Length == state.Rpm.Length); } catch { return false; } }
     internal bool ImportSettingsJson(string json) { if (!CanImportSettingsJson(json)) return false; Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!); File.WriteAllText(SavePath, json); lastSavedJson = null; if (!Load()) return false; undo.Clear(); redo.Clear(); Build(); Save(); return true; }
@@ -553,5 +562,6 @@ public sealed class SandboxPanel : Grid
     private static Button Button(string text, RoutedEventHandler click, bool primary = false) { var button = new Button { Content = text, Padding = new Thickness(12, 7, 12, 7), Margin = new Thickness(0, 0, 7, 0), Background = new SolidColorBrush(primary ? Color.FromRgb(0, 103, 192) : Color.FromRgb(249, 249, 249)), Foreground = primary ? Brushes.White : new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(primary ? Color.FromRgb(0, 90, 170) : Color.FromRgb(190, 190, 190)), FontWeight = FontWeights.SemiBold }; button.Click += click; return button; }
     private static MenuItem Item(string header, RoutedEventHandler click) { var item = new MenuItem { Header = header }; item.Click += click; return item; }
     private static void Info(string message) => MessageBox.Show(message, "Map Sandbox", MessageBoxButton.OK, MessageBoxImage.Information);
-    private sealed record SandboxSnapshot(double[] Rpm, double[] Map, string MapUnit, double[][] Values, string[]? CustomUnits = null, string? XUnit = "RPM", string[]? CustomXUnits = null, int LeadingDisplayDigits = 3, int TrailingDisplayDecimals = 1);
+    private void NormalizeStoredValues() { for (var row = 0; row < values.GetLength(0); row++) for (var col = 0; col < values.GetLength(1); col++) values[row, col] = RoundEditableValue(values[row, col]); }
+    private sealed record SandboxSnapshot(double[] Rpm, double[] Map, string MapUnit, double[][] Values, string[]? CustomUnits = null, string? XUnit = "RPM", string[]? CustomXUnits = null, int LeadingDisplayDigits = 3, int TrailingDisplayDecimals = 1, int LeadingValueDigits = 4, int TrailingValueDecimals = 3);
 }
