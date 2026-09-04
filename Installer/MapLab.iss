@@ -21,7 +21,7 @@
   #error "The application executable is missing from PublishDir."
 #endif
 #ifndef AppVersion
-  #define AppVersion GetFileVersion(PublishDir + "\" + AppExeName)
+  #define AppVersion "1.0.3"
 #endif
 #if !FileExists(PublishDir + "\coreclr.dll") || !FileExists(PublishDir + "\PresentationFramework.dll")
   #error "PublishDir must contain a self-contained Windows desktop build."
@@ -34,7 +34,8 @@
 ; Keep this ID stable across Inno releases. It is separate from the MSI identity.
 AppId={{F80CDDC2-462A-4DC9-83E9-88FC36BDC2EC}
 AppName=Map Lab (Beta)
-AppVersion={#AppVersion}
+AppVersion={#AppVersion}-beta
+VersionInfoVersion={#AppVersion}
 AppPublisher=Brian Diffenbaugh
 AppCopyright=Copyright (c) 2026 Brian Diffenbaugh
 DefaultDirName={autopf}\Map Lab

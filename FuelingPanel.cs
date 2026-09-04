@@ -26,6 +26,7 @@ public sealed class FuelingPanel : Grid
     private ComboBox mapUnitBox = null!;
     private CheckBox conversionViewBox = null!;
     private TextBlock fuelTableTitle = null!;
+    private readonly TextBlock currentFileText = FileNameTextBlock();
     private Button boundaryButton = null!;
     private bool settingBoundaries, boundaryPickFromWizard, syncingMapUnit, syncingConversion, syncingDisplayPrecision, showFuelFlow;
     private VeSetupWizard? veSetupWizard;
@@ -96,12 +97,11 @@ public sealed class FuelingPanel : Grid
         mapUnitBox = CreateMapUnitBox();
         var heading = new Grid { Margin = new Thickness(4, 0, 0, 20) }; heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var title = new StackPanel(); title.Children.Add(new TextBlock { Text = "FUELING LAB", Foreground = new SolidColorBrush(Color.FromRgb(0, 103, 192)), FontSize = 12, FontWeight = FontWeights.Bold });
-        fuelTableTitle = new TextBlock { Text = "Fuel Table — VE (%)", Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), FontSize = 25, FontWeight = FontWeights.SemiBold }; title.Children.Add(fuelTableTitle); heading.Children.Add(title);
-        var mapUnits = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 24, 0) };
-        mapUnits.Children.Add(new TextBlock { Text = "MAP UNITS", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) }); mapUnits.Children.Add(mapUnitBox);
+        fuelTableTitle = new TextBlock { Text = "Fuel Table — VE (%)", Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), FontSize = 25, FontWeight = FontWeights.SemiBold }; title.Children.Add(fuelTableTitle); title.Children.Add(currentFileText); heading.Children.Add(title);
+        var viewOptions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 24, 0) };
         conversionViewBox = new CheckBox { Content = "View as lb/hr", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(18, 0, 0, 0), FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)) };
-        conversionViewBox.Checked += (_, _) => { if (!syncingConversion) SetFuelFlowView(true); }; conversionViewBox.Unchecked += (_, _) => { if (!syncingConversion) SetFuelFlowView(false); }; mapUnits.Children.Add(conversionViewBox);
-        Grid.SetColumn(mapUnits, 1); heading.Children.Add(mapUnits);
+        conversionViewBox.Checked += (_, _) => { if (!syncingConversion) SetFuelFlowView(true); }; conversionViewBox.Unchecked += (_, _) => { if (!syncingConversion) SetFuelFlowView(false); }; viewOptions.Children.Add(conversionViewBox);
+        Grid.SetColumn(viewOptions, 1); heading.Children.Add(viewOptions);
         status.Text = "Fuel table ready"; status.Foreground = new SolidColorBrush(Color.FromRgb(169, 201, 192)); status.FontSize = 12; status.VerticalAlignment = VerticalAlignment.Center;
         var statusBadge = new Border { Background = new SolidColorBrush(Color.FromRgb(17, 29, 39)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 64, 53)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(16), Padding = new Thickness(14, 8, 14, 8), VerticalAlignment = VerticalAlignment.Center, Child = status };
         Grid.SetColumn(statusBadge, 3); heading.Children.Add(statusBadge); Children.Add(heading);
@@ -109,9 +109,12 @@ public sealed class FuelingPanel : Grid
         var frame = new Border { Background = new SolidColorBrush(Color.FromRgb(8, 13, 20)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 50, 71)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(3), Child = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, CanContentScroll = false, Content = table } };
         Grid.SetRow(frame, 2); Children.Add(frame);
         var tools = new StackPanel { Orientation = Orientation.Horizontal };
-        tools.Children.Add(ControlGroup("FUEL SETUP TOOLS", Button("◒  VE Setup", OpenVeSetup, true)));
+        var fuelSetup = new StackPanel { Orientation = Orientation.Horizontal };
+        fuelSetup.Children.Add(Button("◒  VE Setup", OpenVeSetup, true));
+        fuelSetup.Children.Add(new TextBlock { Text = "MAP UNITS", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(3, 0, 8, 0) });
+        fuelSetup.Children.Add(mapUnitBox); tools.Children.Add(ControlGroup("FUEL SETUP TOOLS", fuelSetup));
         tools.Children.Add(MatrixAxisGroup());
-        tools.Children.Add(ControlGroup("CELL EDITING", Button("⧉  Copy", (_, _) => CopySelection()), Button("▣  Paste", (_, _) => PasteSelection()), Button("△  Delta", DeltaCompare)));
+        tools.Children.Add(ControlGroup("CELL EDITING", Button("⧉  Copy", (_, _) => CopySelection()), Button("▣  Paste", (_, _) => PasteSelection())));
         tools.Children.Add(ControlGroup("SMOOTHING", Button("⚙  Smooth Selected…", AdvancedSmooth, true), Button("↕  Columns", SmoothColumns), Button("↔  Rows", SmoothRows)));
         var commandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = tools, Margin = new Thickness(0, 0, 0, 10) };
         Grid.SetRow(commandBar, 1); Children.Add(commandBar);
@@ -124,6 +127,11 @@ public sealed class FuelingPanel : Grid
         PreviewKeyDown += FuelingPanel_PreviewKeyDown;
         table.PreviewMouseLeftButtonUp += (_, _) => { selecting = false; axisSelecting = false; };
         LearnApply.Changed += () => { if (!syncingLearnApply) Save(); };
+    }
+
+    internal void SetCurrentFile(string displayName, string? fullPath)
+    {
+        currentFileText.Text = $"Current file: {displayName}"; currentFileText.ToolTip = fullPath;
     }
 
     private void SyncLearnApply()
@@ -676,111 +684,6 @@ public sealed class FuelingPanel : Grid
         Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Fuel values pasted from clipboard  •  selection cleared";
     }
 
-    private void DeltaCompare(object? sender, RoutedEventArgs e)
-    {
-        if (showFuelFlow) { Info("Delta compare works on VE percentages. Clear 'View as lb/hr' before comparing fuel-table values."); return; }
-        if (!TryReadClipboardTable(out var pasted)) return;
-        if (!TryCreateDeltaTarget(pasted, out var target, out var top, out var bottom, out var left, out var right)) return;
-
-        var deltas = new List<double>();
-        for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) deltas.Add(target[row, col] - ve[row, col]);
-        var window = new DeltaCompareWindow(
-            "Fuel Delta Compare",
-            bottom - top + 1,
-            right - left + 1,
-            deltas.Min(),
-            deltas.Max(),
-            deltas.Average(),
-            deltas.Average(Math.Abs),
-            (mode, strength, passes) => ApplyDeltaCompare(target, top, bottom, left, right, mode, strength, passes))
-        { Owner = Window.GetWindow(this) };
-        window.ShowDialog();
-    }
-
-    private bool TryReadClipboardTable(out double[][] values)
-    {
-        values = [];
-        string text; try { if (!Clipboard.ContainsText()) { Info("Copy a numeric table to the clipboard first."); return false; } text = Clipboard.GetText().Trim(); } catch { Info("The clipboard is currently unavailable."); return false; }
-        var rows = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Split(line.Contains('\t') ? '\t' : ',', StringSplitOptions.TrimEntries)).ToArray();
-        if (rows.Length == 0) { Info("Copy a numeric table to the clipboard first."); return false; }
-        values = new double[rows.Length][];
-        for (var row = 0; row < rows.Length; row++)
-        {
-            values[row] = new double[rows[row].Length];
-            for (var col = 0; col < rows[row].Length; col++)
-                if (!double.TryParse(rows[row][col], NumberStyles.Float, CultureInfo.InvariantCulture, out values[row][col]) || !double.IsFinite(values[row][col]))
-                { Info("Clipboard cells must contain numeric values."); return false; }
-        }
-        return true;
-    }
-
-    private bool TryCreateDeltaTarget(double[][] pasted, out double[,] target, out int top, out int bottom, out int left, out int right)
-    {
-        target = (double[,])ve.Clone();
-        if (Bounds(out top, out bottom, out left, out right))
-        {
-            if (pasted.Length == 1 && pasted[0].Length == 1)
-            {
-                for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) target[row, col] = pasted[0][0];
-                return true;
-            }
-            if (top + pasted.Length > map.Length || left + pasted.Max(row => row.Length) > rpm.Length)
-            { Info("The pasted table is too large for the selected starting fuel cell."); return false; }
-            bottom = top + pasted.Length - 1; right = left + pasted.Max(row => row.Length) - 1;
-            for (var sourceRow = 0; sourceRow < pasted.Length; sourceRow++)
-            for (var sourceCol = 0; sourceCol < pasted[sourceRow].Length; sourceCol++)
-                target[top + sourceRow, left + sourceCol] = pasted[sourceRow][sourceCol];
-            return true;
-        }
-
-        if (pasted.Length != map.Length || pasted.Any(row => row.Length != rpm.Length))
-        { Info("Select a destination fuel cell, or copy a full-size table that matches the Fueling matrix."); return false; }
-        top = 0; bottom = map.Length - 1; left = 0; right = rpm.Length - 1;
-        for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++) target[row, col] = pasted[row][col];
-        return true;
-    }
-
-    private void ApplyDeltaCompare(double[,] target, int top, int bottom, int left, int right, DeltaCompareApplyMode mode, double strength, int passes)
-    {
-        PushUndo();
-        var next = mode switch
-        {
-            DeltaCompareApplyMode.SmoothDelta => SmoothDeltaBlock(target, top, bottom, left, right, strength, passes),
-            _ => (double[,])target.Clone()
-        };
-        for (var row = 0; row < ve.GetLength(0); row++) for (var col = 0; col < ve.GetLength(1); col++) ve[row, col] = Math.Round(next[row, col], 1);
-        Save(); RefreshAll(); ClearFuelSelection();
-        status.Text = mode switch
-        {
-            DeltaCompareApplyMode.SmoothDelta => $"Smoothed pasted delta across {right - left + 1} x {bottom - top + 1} fuel cells",
-            _ => $"Applied pasted target to {right - left + 1} x {bottom - top + 1} fuel cells"
-        };
-    }
-
-    private double[,] SmoothDeltaBlock(double[,] target, int top, int bottom, int left, int right, double strength, int passes)
-    {
-        var result = (double[,])target.Clone();
-        for (var pass = 0; pass < passes; pass++)
-        {
-            var next = (double[,])result.Clone();
-            for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++)
-            {
-                double sum = 0, weight = 0;
-                for (var dr = -1; dr <= 1; dr++) for (var dc = -1; dc <= 1; dc++)
-                {
-                    var rr = row + dr; var cc = col + dc;
-                    if (rr < top || rr > bottom || cc < left || cc > right) continue;
-                    var w = (dr == 0 ? 2 : 1) * (dc == 0 ? 2 : 1);
-                    sum += result[rr, cc] * w; weight += w;
-                }
-                next[row, col] = result[row, col] + (sum / Math.Max(.0001, weight) - result[row, col]) * strength;
-            }
-            result = next;
-        }
-        return result;
-    }
-
     private void ClearFuelSelection()
     {
         pinnedFuelSelection.Clear(); start = end = null; selecting = false; ApplyBoundaries();
@@ -917,6 +820,11 @@ public sealed class FuelingPanel : Grid
     {
         if (action == SurfaceSelectionAction.Undo) { Undo(); refresh((double[,])ve.Clone()); return; }
         if (action == SurfaceSelectionAction.Redo) { Redo(); refresh((double[,])ve.Clone()); return; }
+        if (action is SurfaceSelectionAction.FlattenPath or SurfaceSelectionAction.SmoothPath)
+        {
+            ApplyFuelTwoPointPath(selectedCells, action == SurfaceSelectionAction.FlattenPath ? TwoPointSurfaceMode.Flatten : TwoPointSurfaceMode.Smooth);
+            refresh((double[,])ve.Clone()); return;
+        }
         if (action == SurfaceSelectionAction.SelectRing) { pinnedFuelSelection.Clear(); foreach (var cell in selectedCells) pinnedFuelSelection.Add(cell); start = end = null; UpdateSelection(); status.Text = $"Selected {selectedCells.Count} fuel transition-ring cells in 3D"; return; }
         pinnedFuelSelection.Clear(); foreach (var cell in selectedCells) pinnedFuelSelection.Add(cell);
         start = (top, left); end = (bottom, right); selecting = false; UpdateSelection();
@@ -937,6 +845,21 @@ public sealed class FuelingPanel : Grid
             case SurfaceSelectionAction.SmoothColumns: SmoothColumns(this, new RoutedEventArgs()); Refresh(); break;
             case SurfaceSelectionAction.Clear: ClearSelected(this, new RoutedEventArgs()); Refresh(); break;
         }
+    }
+
+    private void ApplyFuelTwoPointPath(IReadOnlyCollection<(int Row, int Col)> selectedCells, TwoPointSurfaceMode mode)
+    {
+        if (selectedCells.Count != 2) return;
+        var endpoints = selectedCells.ToArray();
+        var edited = TwoPointSurfaceEditor.Apply(ve, endpoints[0], endpoints[1], mode);
+        var changes = edited.ChangedCells
+            .Select(point => (point.Row, point.Col, Value: RoundEditableVe(edited.Values[point.Row, point.Col])))
+            .Where(change => change.Value != ve[change.Row, change.Col]).ToArray();
+        pinnedFuelSelection.Clear(); foreach (var point in edited.Path) pinnedFuelSelection.Add(point);
+        start = end = null; selecting = false;
+        if (changes.Length == 0) { RefreshAll(); UpdateSelection(); status.Text = $"The selected fuel path is already {mode.ToString().ToLowerInvariant()}"; return; }
+        PushUndo(); foreach (var change in changes) ve[change.Row, change.Col] = change.Value;
+        Save(); RefreshAll(); UpdateSelection(); status.Text = $"{(mode == TwoPointSurfaceMode.Flatten ? "Flattened" : "Smoothed")} {changes.Length} fuel cells between two fixed endpoints";
     }
 
     private void PushUndo()
@@ -1160,6 +1083,7 @@ public sealed class FuelingPanel : Grid
         content.Children.Add(row);
         return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 7, 0), Child = content };
     }
+    private static TextBlock FileNameTextBlock() => new() { Text = "Current file: Untitled", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, Margin = new Thickness(0, 3, 0, 0) };
     private Border DisplayPrecisionGroup()
     {
         UIElement Field(string label, ComboBox box, string tip)

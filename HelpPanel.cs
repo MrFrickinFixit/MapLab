@@ -25,7 +25,7 @@ public sealed class HelpPanel : Grid
             "Choose Fueling, Ignition Timing, or Map Sandbox.",
             "Set the matrix size and edit or paste the X and Y axis breakpoints.",
             "Drag across cells to select an area. Ctrl+click or Ctrl+drag adds another area.",
-            "Type into a selected cell to apply that value to every selected cell.",
+            "Type into a selected cell and press Enter to apply that value to every selected cell. Clicking away cancels a pending group edit.",
             "Smooth the selection, then inspect it in the 3D view.",
             "Export the finished map to CSV or Excel. Setup and editing cards are above the map; display, output, and history cards are below it."));
 
@@ -36,10 +36,10 @@ public sealed class HelpPanel : Grid
             "Timing, fueling, and sandbox values each have separate Undo and Redo history."));
 
         Section(document, "Number Display and Stored Precision", Bullets(
-            "Fueling, Ignition Timing, and Map Sandbox each have independent Leading Digits and Trailing Decimals display controls.",
+            "Fueling, Ignition Timing, and Map Sandbox each have independent numeric-format controls.",
             "Leading Digits sets the magnitude at which values switch to whole-number display. With the default setting of 3, 85.47 displays as 85.5 while 105.47 displays as 105.",
-            "Trailing Decimals controls how many decimal places are shown below that threshold; it does not change the stored table value.",
-            "Cell edits and pasted table values retain up to three decimal places even when the normal table display is rounded.",
+            "For Fueling and Map Sandbox, Trailing Decimals changes display only; cell edits and pasted values retain up to three decimal places.",
+            "For Ignition Timing, Stored Decimals is the actual table precision. Changing it rounds every timing cell as one Undo step, and future edits, pastes, offsets, smoothing, region calculations, and 3D changes are stored at that precision.",
             "The selected display format is also used by the 3D value scale, 3D tooltip, and Excel number formatting. Clipboard and CSV data retain the stored precision."));
 
         Section(document, "Selecting and Editing Cells", Bullets(
@@ -128,7 +128,7 @@ public sealed class HelpPanel : Grid
             "After transfer, choose whether to clear the Learn Apply Table or keep its values. Keeping them and transferring again compounds the correction on the updated VE. Clear removes all learn offsets, including retained off-axis entries.",
             "A transfer, including optional smoothing, is one Fueling Undo step. Learn edits and clearing have their own Undo/Redo in the Learn Apply tab; Fueling Undo does not restore cleared learn values.",
             "Offsets are attached to RPM/MAP coordinates. Axis changes retain unmatched or ambiguous offsets without transferring them; their count appears below the learn table. Matching offsets return when their coordinates are available again. Axis changes reset learn Undo/Redo history.",
-            "Learn offsets autosave with Fueling and are included in .map exports. Importing an older file without Learn Apply data starts this table empty."));
+            "Learn offsets autosave with Fueling and are included in saved .map files. Opening an older file without Learn Apply data starts this table empty."));
 
         Section(document, "Map Sandbox", Bullets(
             "Use Sandbox for custom numeric tables that do not need operating-region boundaries.",
@@ -136,32 +136,32 @@ public sealed class HelpPanel : Grid
             "Sandbox includes selection editing, offsets, all smoothing algorithms, 3D editing, history, autosave, CSV, and Excel export.",
             "Sandbox changes never modify Fueling or Ignition Timing."));
 
-        Section(document, "Fuel Delta Smoothing", Bullets(
-            "Fueling's Delta Compare compares the pasted block with the current values. Use Pasted applies those values exactly, without smoothing.",
-            "Smooth Delta applies the pasted values and then basic weighted smoothing within that pasted block. Cells outside the block remain unchanged and are not sampled.",
-            "Delta Compare has its own strength and passes. To blend a pasted wrinkle toward outside neighbors, apply the paste, select the cells to repair, then use Smooth Selected with Smooth to Surroundings."));
-
         Section(document, "3D View", Bullets(
-            "Drag to orbit and use the mouse wheel to zoom.",
+            "Right-drag to orbit and use the mouse wheel to zoom. A stationary right-click opens the selected-cell tools.",
+            "The lower-left orientation widget shows a miniature version of the current surface. It uses the same values, heat colors, contour grid, and rotation as the main 3D map.",
             "Select one solid rectangular area of at least 2 rows by 2 columns in the 2D Timing, Fueling, or Sandbox table before opening 3D Map. Only those cells and their matching axis ranges are shown; opening 3D Map with no selection shows the full table.",
             "The selected rectangle is the fixed 3D workspace until that viewer closes. Close it and choose another 2D rectangle to work on a different area; edits and Undo still map to the original table cells.",
             "Hover over the surface for the live X/Y/value tooltip and crosshair.",
-            "Choose Select surface cells, then click or drag. Hold Ctrl to add separated cells or areas.",
+            "Left-click or left-drag directly on the surface to select cells. Hold Ctrl to add separated cells or areas. When a Sculpt tool is active, left-drag sculpts instead.",
+            "For a two-point path, click the first surface cell and Ctrl+click the second. Flatten path replaces only the interior path with a straight value ramp; Smooth path softens only that path. Both endpoints remain unchanged, and diagonal paths are supported.",
             "Right-click a 3D selection for the same editing and smoothing commands as the 2D table.",
             "For direct surface editing, choose Raise, Lower, Smooth, or Flatten in the Sculpt toolbar, then drag on the surface. Radius follows actual X/Y breakpoint spacing; Strength controls blending and Amount controls the center-point change for Raise and Lower.",
             "Soft and Medium falloff fade toward the brush edge; Hard applies full strength across the brush. Flatten samples its target value where the stroke begins. Smooth blends toward local neighboring cells.",
             "Limit to selection becomes available after selecting surface cells and prevents the brush from writing outside that mask. Prevent overshoot keeps results inside the table's value range at the start of the stroke.",
             "Sculpt changes preview while dragging and commit on mouse-up as one source-table Undo step. Press Escape before mouse-up to cancel the preview. Fuel sculpting is available in the editable VE view, not the calculated lb/hr view.",
-            "Return to Rotation clears the 3D selection. Closing the viewer clears its corresponding 2D selection.",
+            "Clear Selection clears the 3D selection. Closing the viewer clears its corresponding 2D selection.",
             "3D Undo and Redo operate on that viewer's source table."));
-        document.Blocks.Add(Illustration("Orbit in Rotation mode, zoom with the wheel, then switch to surface selection for editing.", ThreeDDiagram()));
+        document.Blocks.Add(Illustration("Right-drag to orbit, use the wheel to zoom, and left-drag to select surface cells.", ThreeDDiagram()));
 
         Section(document, "Copy, Paste, Export, and Recovery", Bullets(
             "Copied cells use tab-separated rows and can be moved between Map Lab tables and compatible tuning software.",
             "Select an axis starting point before pasting a copied row or column of breakpoints.",
             "CSV and Excel put the X scale at the bottom. Excel includes matching heat-map formatting without header filters.",
-            "Settings → Export .map saves Timing, Fueling, Learn Apply, and Sandbox tables, axes, units, boundaries, colors, display preferences, smoothing choices, and VE setup options in one portable file.",
-            "Settings → Import .map validates the complete file before replacing the workspaces, then autosaves the imported settings.",
+            "Settings → Save writes Timing, Fueling, Learn Apply, and Sandbox tables, axes, units, boundaries, colors, display preferences, smoothing choices, and VE setup options to the current .map file. The first Save asks for a filename.",
+            "Save As creates or selects a different .map file. Open validates the complete file before replacing the workspaces, then makes that file the current Save target.",
+            "The current .map filename is shown in the application title and in every 2D table view. Untitled means the workspace has not yet been assigned a manual Save target.",
+            "When closing Map Lab with changes made since the last manual Save, choose Yes to save, No to close without updating the .map file, or Cancel to keep working. Canceling the Save As dialog also keeps Map Lab open.",
+            "Keyboard shortcuts are Ctrl+O for Open, Ctrl+S for Save, and Ctrl+Shift+S for Save As.",
             "Timing, Fueling, and Sandbox autosave separately; Learn Apply data is saved with Fueling. Dialog settings are retained until changed.",
             "Only one instance of each tool dialog is opened. Selecting its command again restores and activates the existing dialog.",
             "A Working… progress window is shown for longer map changes and extensive Undo or Redo operations.",
@@ -263,7 +263,7 @@ public sealed class HelpPanel : Grid
         var canvas = DiagramCanvas(720, 225); var surface = new Polygon { Points = new PointCollection { new(175, 42), new(520, 28), new(620, 139), new(105, 171) }, Fill = new LinearGradientBrush(Color.FromRgb(255, 75, 45), Color.FromRgb(113, 40, 220), 0), Stroke = Brushes.Black, StrokeThickness = 1.5 }; canvas.Children.Add(surface);
         for (var i = 1; i < 8; i++) { var x1 = 105 + (175 - 105) * i / 8d; var y1 = 171 + (42 - 171) * i / 8d; var x2 = 620 + (520 - 620) * i / 8d; var y2 = 139 + (28 - 139) * i / 8d; canvas.Children.Add(new Line { X1 = x1, Y1 = y1, X2 = x2, Y2 = y2, Stroke = new SolidColorBrush(Color.FromArgb(150, 0, 0, 0)), StrokeThickness = 1 }); }
         for (var i = 1; i < 8; i++) { var x1 = 175 + (520 - 175) * i / 8d; var y1 = 42 + (28 - 42) * i / 8d; var x2 = 105 + (620 - 105) * i / 8d; var y2 = 171 + (139 - 171) * i / 8d; canvas.Children.Add(new Line { X1 = x1, Y1 = y1, X2 = x2, Y2 = y2, Stroke = new SolidColorBrush(Color.FromArgb(150, 0, 0, 0)), StrokeThickness = 1 }); }
-        AddArrow(canvas, 90, 67, 137, 31, Accent.Color); AddArrow(canvas, 137, 31, 190, 58, Accent.Color); AddLabel(canvas, "DRAG TO ORBIT", 25, 19, Accent, true);
+        AddArrow(canvas, 90, 67, 137, 31, Accent.Color); AddArrow(canvas, 137, 31, 190, 58, Accent.Color); AddLabel(canvas, "RIGHT-DRAG TO ORBIT", 25, 19, Accent, true);
         AddLabel(canvas, "WHEEL TO ZOOM", 528, 17, Muted, true); AddLabel(canvas, "SELECT SURFACE CELLS", 252, 190, new SolidColorBrush(Color.FromRgb(30, 130, 111)), true);
         var marker = new Ellipse { Width = 16, Height = 16, Fill = new SolidColorBrush(Color.FromRgb(85, 214, 190)), Stroke = Brushes.White, StrokeThickness = 2 }; Canvas.SetLeft(marker, 390); Canvas.SetTop(marker, 92); canvas.Children.Add(marker); return canvas;
     }

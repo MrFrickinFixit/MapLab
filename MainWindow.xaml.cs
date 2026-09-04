@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -59,6 +60,8 @@ public partial class MainWindow : Window
     private readonly Stack<MapSnapshot> undoHistory = [];
     private readonly Stack<MapSnapshot> redoHistory = [];
     private static string AutosavePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimingTableCalculator", "autosave.json");
+    private string? currentMapFilePath;
+    private string? savedWorkspaceFingerprint;
     private double[] rpmAxis = [];
     private double[] mapAxis = [];
     private (int Row, int Col)? selectionStart;
@@ -77,8 +80,8 @@ public partial class MainWindow : Window
     private double RoundMapValue(double value) => Math.Round(value / MapAxisIncrement) * MapAxisIncrement;
     private string FormatMap(double value) => value.ToString(MapAxisFormat, CultureInfo.InvariantCulture);
     private string FormatTimingDisplayValue(double value) => MagnitudeNumberFormatter.Format(value, timingLeadingDisplayDigits, timingTrailingDisplayDecimals);
-    private static double RoundEditableTiming(double value) => Math.Round(value, 3);
-    private static string FormatEditableTiming(double value) => RoundEditableTiming(value).ToString("0.###", CultureInfo.InvariantCulture);
+    private double RoundEditableTiming(double value) => Math.Round(value, timingTrailingDisplayDecimals, MidpointRounding.AwayFromZero);
+    private string FormatEditableTiming(double value) => RoundEditableTiming(value).ToString(timingTrailingDisplayDecimals == 0 ? "0" : "0." + new string('#', timingTrailingDisplayDecimals), CultureInfo.InvariantCulture);
     private static string FormatExactAxisValue(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
     private double idleTransitionRpm = 1200, wotTransitionMap = 85;
     private RegionPointPick regionPointPick;
@@ -90,9 +93,10 @@ public partial class MainWindow : Window
         fuelingPanel = new FuelingPanel(ResizeMatrixFromFuel, AutoFillAxisFromFuel, PasteAxisFromFuel, SetRegionBoundariesFromFuel, EditAxisFromFuel); FuelingHost.Content = fuelingPanel;
         learnApplyPanel = new LearnApplyPanel(fuelingPanel.LearnApply, fuelingPanel.TransferLearnOffsets); LearnApplyHost.Content = learnApplyPanel;
         sandboxPanel = new SandboxPanel(); SandboxHost.Content = sandboxPanel;
-        SettingsHost.Content = new SettingsPanel(ExportMapSettings, ImportMapSettings);
+        SettingsHost.Content = new SettingsPanel(OpenMapFile, SaveMapFile, SaveMapFileAs);
         HelpHost.Content = new HelpPanel();
         AboutHost.Content = new AboutPanel();
+        UpdateMapFilePresentation("Use Save or Ctrl+S to name this workspace.");
         PreviewKeyDown += MainWindow_PreviewKeyDown;
         PreviewMouseDown += MainWindow_PreviewMouseDown;
         Loaded += (_, _) =>
@@ -100,9 +104,10 @@ public partial class MainWindow : Window
             TableGrid.PreviewMouseLeftButtonUp += (_, _) => { selecting = false; axisSelecting = false; };
             TableGrid.PreviewMouseMove += AxisDrag_MouseMove;
             if (!LoadState()) GenerateTable();
+            savedWorkspaceFingerprint = CaptureWorkspaceFingerprint();
             autosaveTimer.Tick += (_, _) => SaveState(); autosaveTimer.Start();
         };
-        Closing += (_, _) => { autosaveTimer.Stop(); SaveState(); };
+        Closing += MainWindow_Closing;
     }
     private void MainWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -112,39 +117,66 @@ public partial class MainWindow : Window
     }
     private void RecalculateTiming_Click(object sender, RoutedEventArgs e) => RecalculateTimingValues();
 
-    private void ExportMapSettings()
+    private void SaveMapFile()
+    {
+        _ = TrySaveMapFile();
+    }
+
+    private void SaveMapFileAs()
+    {
+        _ = TrySaveMapFileAs();
+    }
+
+    private bool TrySaveMapFile()
+    {
+        return string.IsNullOrWhiteSpace(currentMapFilePath) ? TrySaveMapFileAs() : WriteMapFile(currentMapFilePath);
+    }
+
+    private bool TrySaveMapFileAs()
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Save Map Lab file as",
+            Filter = "Map Lab file (*.map)|*.map",
+            DefaultExt = ".map",
+            AddExtension = true,
+            FileName = currentMapFilePath is null ? "" : Path.GetFileName(currentMapFilePath),
+            InitialDirectory = currentMapFilePath is null ? "" : Path.GetDirectoryName(currentMapFilePath)
+        };
+        if (dialog.ShowDialog(this) != true) return false;
+        return WriteMapFile(dialog.FileName);
+    }
+
+    private bool WriteMapFile(string filePath)
     {
         try
         {
             SaveState();
+            var timingJson = ExportTimingSettingsJson();
+            var fuelingJson = fuelingPanel.ExportSettingsJson();
+            var sandboxJson = sandboxPanel.ExportSettingsJson();
             var package = new MapSettingsPackage
             {
                 ExportedUtc = DateTime.UtcNow,
-                Timing = JsonDocument.Parse(ExportTimingSettingsJson()).RootElement.Clone(),
-                Fueling = JsonDocument.Parse(fuelingPanel.ExportSettingsJson()).RootElement.Clone(),
-                Sandbox = JsonDocument.Parse(sandboxPanel.ExportSettingsJson()).RootElement.Clone()
+                Timing = JsonDocument.Parse(timingJson).RootElement.Clone(),
+                Fueling = JsonDocument.Parse(fuelingJson).RootElement.Clone(),
+                Sandbox = JsonDocument.Parse(sandboxJson).RootElement.Clone()
             };
-            var dialog = new SaveFileDialog
-            {
-                Title = "Export Map Lab settings",
-                Filter = "Map Lab settings (*.map)|*.map",
-                DefaultExt = ".map",
-                AddExtension = true,
-                FileName = $"MapLab-settings-{DateTime.Now:yyyy-MM-dd}.map"
-            };
-            if (dialog.ShowDialog(this) != true) return;
-            File.WriteAllText(dialog.FileName, JsonSerializer.Serialize(package, new JsonSerializerOptions { WriteIndented = true }));
-            (SettingsHost.Content as SettingsPanel)?.SetStatus($"Exported {Path.GetFileName(dialog.FileName)}");
+            File.WriteAllText(filePath, JsonSerializer.Serialize(package, new JsonSerializerOptions { WriteIndented = true }));
+            savedWorkspaceFingerprint = BuildWorkspaceFingerprint(timingJson, fuelingJson, sandboxJson);
+            currentMapFilePath = Path.GetFullPath(filePath); UpdateMapFilePresentation($"Saved {Path.GetFileName(currentMapFilePath)}");
+            return true;
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"Map Lab could not export the settings file.\n\n{ex.Message}", "Export settings", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, $"Map Lab could not save the file.\n\n{ex.Message}", "Save Map Lab file", MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
         }
     }
 
-    private void ImportMapSettings()
+    private void OpenMapFile()
     {
-        var dialog = new OpenFileDialog { Title = "Import Map Lab settings", Filter = "Map Lab settings (*.map)|*.map", DefaultExt = ".map", CheckFileExists = true };
+        var dialog = new OpenFileDialog { Title = "Open Map Lab file", Filter = "Map Lab file (*.map)|*.map", DefaultExt = ".map", CheckFileExists = true };
         if (dialog.ShowDialog(this) != true) return;
         try
         {
@@ -155,17 +187,68 @@ public partial class MainWindow : Window
             var fuelingJson = package.Fueling.GetRawText();
             var sandboxJson = package.Sandbox.GetRawText();
             if (!CanImportTimingSettings(timingJson) || !fuelingPanel.CanImportSettingsJson(fuelingJson) || !sandboxPanel.CanImportSettingsJson(sandboxJson))
-                throw new InvalidDataException("The file contains missing, damaged, or unsupported table settings.");
-            if (MessageBox.Show(this, "Importing replaces the current Timing, Fueling, Learn Apply, and Sandbox settings and tables. Continue?", "Import Map Lab settings", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+                throw new InvalidDataException("The file contains missing, damaged, or unsupported map data.");
+            if (MessageBox.Show(this, "Opening this file replaces the current Timing, Fueling, Learn Apply, and Sandbox tables. Your current work remains protected by autosave. Continue?", "Open Map Lab file", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
             if (!ImportTimingSettingsJson(timingJson) || !fuelingPanel.ImportSettingsJson(fuelingJson) || !sandboxPanel.ImportSettingsJson(sandboxJson))
-                throw new InvalidDataException("Map Lab could not apply all settings from this file.");
-            StatusText.Text = "Settings imported";
-            (SettingsHost.Content as SettingsPanel)?.SetStatus($"Imported {Path.GetFileName(dialog.FileName)}");
+                throw new InvalidDataException("Map Lab could not apply all data from this file.");
+            currentMapFilePath = Path.GetFullPath(dialog.FileName); StatusText.Text = $"Opened {Path.GetFileName(currentMapFilePath)}";
+            savedWorkspaceFingerprint = CaptureWorkspaceFingerprint();
+            UpdateMapFilePresentation($"Opened {Path.GetFileName(currentMapFilePath)}");
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"Map Lab could not import the settings file.\n\n{ex.Message}", "Import settings", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(this, $"Map Lab could not open the file.\n\n{ex.Message}", "Open Map Lab file", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    private void MainWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        if (savedWorkspaceFingerprint is not null && string.Equals(savedWorkspaceFingerprint, CaptureWorkspaceFingerprint(), StringComparison.Ordinal))
+        {
+            autosaveTimer.Stop(); SaveState();
+            return;
+        }
+
+        var fileName = currentMapFilePath is null ? "Untitled" : Path.GetFileName(currentMapFilePath);
+        var result = MessageBox.Show(this,
+            $"Do you want to save changes to {fileName}?",
+            "Map Lab",
+            MessageBoxButton.YesNoCancel,
+            MessageBoxImage.Warning);
+        if (result == MessageBoxResult.Cancel)
+        {
+            e.Cancel = true;
+            return;
+        }
+        if (result == MessageBoxResult.Yes && !TrySaveMapFile())
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        autosaveTimer.Stop();
+        SaveState();
+    }
+
+    private string CaptureWorkspaceFingerprint()
+    {
+        return BuildWorkspaceFingerprint(ExportTimingSettingsJson(), fuelingPanel.ExportSettingsJson(), sandboxPanel.ExportSettingsJson());
+    }
+
+    private static string BuildWorkspaceFingerprint(string timingJson, string fuelingJson, string sandboxJson)
+    {
+        return string.Concat(timingJson, "\u001e", fuelingJson, "\u001e", sandboxJson);
+    }
+
+    private void UpdateMapFilePresentation(string status)
+    {
+        var displayName = currentMapFilePath is null ? "Untitled" : Path.GetFileName(currentMapFilePath);
+        Title = currentMapFilePath is null ? "Map Lab — Untitled" : $"{Path.GetFileNameWithoutExtension(currentMapFilePath)} — Map Lab";
+        TimingCurrentFileText.Text = $"Current file: {displayName}"; TimingCurrentFileText.ToolTip = currentMapFilePath;
+        fuelingPanel.SetCurrentFile(displayName, currentMapFilePath);
+        learnApplyPanel.SetCurrentFile(displayName, currentMapFilePath);
+        sandboxPanel.SetCurrentFile(displayName, currentMapFilePath);
+        (SettingsHost.Content as SettingsPanel)?.SetCurrentFile(currentMapFilePath, status);
     }
 
     private string ExportTimingSettingsJson()
@@ -580,12 +663,22 @@ public partial class MainWindow : Window
     {
         if (syncingTimingDisplayPrecision || loadingState || TimingLeadingPrecisionBox is null || TimingTrailingPrecisionBox is null) return;
         if (TimingLeadingPrecisionBox.SelectedItem is not ComboBoxItem leadingItem || TimingTrailingPrecisionBox.SelectedItem is not ComboBoxItem trailingItem) return;
-        if (!int.TryParse(leadingItem.Content?.ToString(), out timingLeadingDisplayDigits) || !int.TryParse(trailingItem.Content?.ToString(), out timingTrailingDisplayDecimals)) return;
+        if (!int.TryParse(leadingItem.Content?.ToString(), out var leadingDigits) || !int.TryParse(trailingItem.Content?.ToString(), out var decimalPlaces)) return;
+        var precisionChanged = decimalPlaces != timingTrailingDisplayDecimals;
+        if (precisionChanged && timingValues.Length > 0) PushUndo();
+        timingLeadingDisplayDigits = leadingDigits;
+        timingTrailingDisplayDecimals = decimalPlaces;
         for (var row = 0; row < valueCells.GetLength(0); row++)
             for (var col = 0; col < valueCells.GetLength(1); col++)
-                if (valueCells[row, col] is not null) RefreshCellColor(valueCells[row, col]);
+                if (valueCells[row, col] is not null)
+                {
+                    if (precisionChanged) SetCellValue(row, col, timingValues[row, col]);
+                    else RefreshCellColor(valueCells[row, col]);
+                }
         SaveState();
-        if (StatusText is not null) StatusText.Text = $"Timing display set to {timingLeadingDisplayDigits} leading digits / {timingTrailingDisplayDecimals} trailing decimals";
+        if (StatusText is not null) StatusText.Text = precisionChanged
+            ? $"Timing values rounded to {timingTrailingDisplayDecimals} decimal place{(timingTrailingDisplayDecimals == 1 ? "" : "s")}  •  future changes use this precision"
+            : $"Timing display threshold set to {timingLeadingDisplayDigits} leading digits";
     }
 
     private void ResizeMatrixCore(int newColumns, int newRows, int oldRows, int oldColumns, double[,] oldTiming, double[] resizedRpm, double[] resizedMap)
@@ -702,6 +795,11 @@ public partial class MainWindow : Window
     {
         if (action == SurfaceSelectionAction.Undo) { Undo(); refresh(ReadTimingValues()); return; }
         if (action == SurfaceSelectionAction.Redo) { Redo(); refresh(ReadTimingValues()); return; }
+        if (action is SurfaceSelectionAction.FlattenPath or SurfaceSelectionAction.SmoothPath)
+        {
+            ApplyTimingTwoPointPath(selectedCells, action == SurfaceSelectionAction.FlattenPath ? TwoPointSurfaceMode.Flatten : TwoPointSurfaceMode.Smooth);
+            refresh(ReadTimingValues()); return;
+        }
         if (action == SurfaceSelectionAction.SelectRing) { pinnedTimingSelection.Clear(); foreach (var cell in selectedCells) pinnedTimingSelection.Add(cell); selectionStart = selectionEnd = null; UpdateSelection(); StatusText.Text = $"Selected {selectedCells.Count} timing transition-ring cells in 3D"; return; }
         pinnedTimingSelection.Clear(); foreach (var cell in selectedCells) pinnedTimingSelection.Add(cell);
         selectionStart = (top, left); selectionEnd = (bottom, right); selecting = false;
@@ -723,6 +821,21 @@ public partial class MainWindow : Window
             case SurfaceSelectionAction.SmoothColumns: SmoothColumns_Click(this, new RoutedEventArgs()); Refresh(); break;
             case SurfaceSelectionAction.Clear: ClearSelectedTiming(this, new RoutedEventArgs()); Refresh(); break;
         }
+    }
+
+    private void ApplyTimingTwoPointPath(IReadOnlyCollection<(int Row, int Col)> selectedCells, TwoPointSurfaceMode mode)
+    {
+        if (selectedCells.Count != 2) return;
+        var endpoints = selectedCells.ToArray();
+        var edited = TwoPointSurfaceEditor.Apply(ReadTimingValues(), endpoints[0], endpoints[1], mode);
+        var changes = edited.ChangedCells
+            .Select(point => (point.Row, point.Col, Value: RoundEditableTiming(edited.Values[point.Row, point.Col])))
+            .Where(change => change.Value != timingValues[change.Row, change.Col]).ToArray();
+        pinnedTimingSelection.Clear(); foreach (var point in edited.Path) pinnedTimingSelection.Add(point);
+        selectionStart = selectionEnd = null; selecting = false;
+        if (changes.Length == 0) { UpdateSelection(); StatusText.Text = $"The selected timing path is already {mode.ToString().ToLowerInvariant()}"; return; }
+        PushUndo(); foreach (var change in changes) SetCellValue(change.Row, change.Col, change.Value);
+        SaveState(); UpdateSelection(); StatusText.Text = $"{(mode == TwoPointSurfaceMode.Flatten ? "Flattened" : "Smoothed")} {changes.Length} timing cells between two fixed endpoints";
     }
 
     private void Refine_Click(object sender, RoutedEventArgs e)
@@ -830,6 +943,10 @@ public partial class MainWindow : Window
 
     private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        var modifiers = Keyboard.Modifiers;
+        if ((modifiers & ModifierKeys.Control) != 0 && (modifiers & ModifierKeys.Shift) != 0 && e.Key == Key.S) { SaveMapFileAs(); e.Handled = true; return; }
+        if (modifiers == ModifierKeys.Control && e.Key == Key.S) { SaveMapFile(); e.Handled = true; return; }
+        if (modifiers == ModifierKeys.Control && e.Key == Key.O) { OpenMapFile(); e.Handled = true; return; }
         if (e.Key == Key.Escape && regionPointPick != RegionPointPick.None)
         {
             regionPointPick = RegionPointPick.None; TableGrid.Cursor = Cursors.Arrow; SetRegionBoundariesButton.Content = "⌖  Set region boundaries";
@@ -1815,7 +1932,7 @@ public partial class MainWindow : Window
             timing[row] = new double[ColumnCount];
             for (var col = 0; col < ColumnCount; col++) timing[row][col] = timingValues[row, col];
         }
-        return new MapSnapshot(rpmAxis.ToArray(), mapAxis.ToArray(), timing, idleTransitionRpm, wotTransitionMap, LowTimingBox.Text, HighTimingBox.Text);
+        return new MapSnapshot(rpmAxis.ToArray(), mapAxis.ToArray(), timing, idleTransitionRpm, wotTransitionMap, LowTimingBox.Text, HighTimingBox.Text, timingLeadingDisplayDigits, timingTrailingDisplayDecimals);
     }
 
     private void RestoreSnapshot(MapSnapshot snapshot)
@@ -1830,6 +1947,11 @@ public partial class MainWindow : Window
             IdleRpmBox.Text = idleTransitionRpm.ToString("0", CultureInfo.InvariantCulture);
             WotMapBox.Text = wotTransitionMap.ToString("0.0", CultureInfo.InvariantCulture);
             LowTimingBox.Text = snapshot.LowTiming; HighTimingBox.Text = snapshot.HighTiming;
+            timingLeadingDisplayDigits = snapshot.LeadingDisplayDigits; timingTrailingDisplayDecimals = snapshot.DecimalPlaces;
+            syncingTimingDisplayPrecision = true;
+            TimingLeadingPrecisionBox.SelectedIndex = Math.Clamp(timingLeadingDisplayDigits - 1, 0, TimingLeadingPrecisionBox.Items.Count - 1);
+            TimingTrailingPrecisionBox.SelectedIndex = Math.Clamp(timingTrailingDisplayDecimals, 0, TimingTrailingPrecisionBox.Items.Count - 1);
+            syncingTimingDisplayPrecision = false;
             var low = double.TryParse(snapshot.LowTiming, NumberStyles.Float, CultureInfo.InvariantCulture, out var lowValue) ? lowValue : 42;
             var high = double.TryParse(snapshot.HighTiming, NumberStyles.Float, CultureInfo.InvariantCulture, out var highValue) ? highValue : 12;
             BuildGrid(low, high, mapAxis[^1], mapAxis[0]);
@@ -1840,7 +1962,7 @@ public partial class MainWindow : Window
         finally { loadingState = false; }
     }
 
-    private sealed record MapSnapshot(double[] RpmAxis, double[] MapAxis, double[][] Timing, double IdleRpm, double WotMap, string LowTiming, string HighTiming);
+    private sealed record MapSnapshot(double[] RpmAxis, double[] MapAxis, double[][] Timing, double IdleRpm, double WotMap, string LowTiming, string HighTiming, int LeadingDisplayDigits, int DecimalPlaces);
 
     private void SaveState()
     {

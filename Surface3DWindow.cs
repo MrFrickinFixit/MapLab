@@ -7,7 +7,7 @@ using System.Windows.Media.Media3D;
 
 namespace TimingTableCalculator;
 
-public enum SurfaceSelectionAction { Undo, Redo, Copy, Paste, Offset, SelectRing, Smooth, Refine, Advanced, SmoothRows, SmoothColumns, Clear }
+public enum SurfaceSelectionAction { Undo, Redo, Copy, Paste, Offset, SelectRing, Smooth, Refine, Advanced, SmoothRows, SmoothColumns, FlattenPath, SmoothPath, Clear }
 
 public sealed class Surface3DWindow : Window
 {
@@ -16,8 +16,8 @@ public sealed class Surface3DWindow : Window
     private readonly AxisAngleRotation3D pitch = new(new Vector3D(1, 0, 0), 0);
     private readonly Viewport3D viewport;
     private readonly Canvas overlayLayer = new() { IsHitTestVisible = false, ClipToBounds = true };
-    private Point lastPoint;
-    private bool rotating, selectionMode, selectingSurface;
+    private Point lastPoint, orbitStartPoint;
+    private bool rotating, orbitDragged, suppressNextContextMenu, selectingSurface;
     private readonly double[,] values;
     private readonly int rows, cols;
     private readonly double[] rpmAxis, mapAxis;
@@ -38,7 +38,7 @@ public sealed class Surface3DWindow : Window
     private (int Row, int Col)? selectionStart, selectionEnd;
     private readonly HashSet<(int Row, int Col)> pinnedSurfaceSelection = [];
     private bool hideSelectionOverlay;
-    private Button smoothButton = null!, selectButton = null!;
+    private Button smoothButton = null!, selectButton = null!, flattenPathButton = null!, smoothPathButton = null!;
     private readonly List<ToggleButton> sculptButtons = [];
     private Slider brushRadius = null!, brushStrength = null!;
     private TextBox brushAmount = null!;
@@ -49,6 +49,8 @@ public sealed class Surface3DWindow : Window
     private Border hoverTip = null!;
     private TextBlock hoverText = null!;
     private (int Row, int Col)? hoverCell;
+    private Border orientationGizmo = null!;
+    private GeometryModel3D orientationSurface = null!, orientationGrid = null!;
     private readonly List<(TextBlock Label, Point3D LocalPosition)> scaleOverlayLabels = [];
     private readonly List<TextBlock> valueScaleLabels = [];
     private int transitionRingThickness = 1;
@@ -78,22 +80,30 @@ public sealed class Surface3DWindow : Window
         var selectionControls = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
         var undoButton = new Button { Content = "↶  Undo", Padding = new Thickness(12, 6, 12, 6), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White };
         var redoButton = new Button { Content = "↷  Redo", Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(8, 0, 0, 0), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White };
-        selectButton = new Button { Content = "Select surface cells", Padding = new Thickness(12, 6, 12, 6), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White };
+        selectButton = new Button { Content = "Clear selection", Padding = new Thickness(12, 6, 12, 6), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White, ToolTip = "Clear all selected surface cells. Left-drag selects; right-drag rotates." };
         selectButton.Margin = new Thickness(16, 0, 0, 0);
         smoothButton = new Button { Content = "Smooth selected…", Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(8, 0, 0, 0), Background = new SolidColorBrush(Color.FromRgb(54, 199, 173)), Foreground = Brushes.Black, FontWeight = FontWeights.Bold, IsEnabled = false };
-        selectionStatus = new TextBlock { Text = "Rotation mode", Foreground = new SolidColorBrush(Color.FromRgb(143, 161, 184)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
+        flattenPathButton = new Button { Content = "↗  Flatten path", Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(8, 0, 0, 0), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(72, 82, 95)), ToolTip = "Select exactly two cells. Interior cells become a straight value ramp; endpoints stay fixed." };
+        smoothPathButton = new Button { Content = "∿  Smooth path", Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(8, 0, 0, 0), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(72, 82, 95)), ToolTip = "Select exactly two cells. Smooth only the cells along the path; endpoints stay fixed." };
+        selectionStatus = new TextBlock { Text = "Left-drag selects  •  right-drag rotates", Foreground = new SolidColorBrush(Color.FromRgb(143, 161, 184)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
         undoButton.IsEnabled = redoButton.IsEnabled = selectionAction is not null;
         undoButton.Click += (_, _) => RunHistoryAction(SurfaceSelectionAction.Undo); redoButton.Click += (_, _) => RunHistoryAction(SurfaceSelectionAction.Redo);
-        selectButton.Click += (_, _) => ToggleSelectionMode();
+        selectButton.Click += (_, _) => ClearSurfaceSelection();
         smoothButton.Click += (_, _) => { if (selectionAction is not null) RunSelectionAction(SurfaceSelectionAction.Advanced); else ApplySelectedSmoothing(); };
-        selectionControls.Children.Add(undoButton); selectionControls.Children.Add(redoButton); selectionControls.Children.Add(selectButton); selectionControls.Children.Add(smoothButton); selectionControls.Children.Add(selectionStatus); heading.Children.Add(selectionControls);
+        flattenPathButton.Click += (_, _) => RunSelectionAction(SurfaceSelectionAction.FlattenPath);
+        smoothPathButton.Click += (_, _) => RunSelectionAction(SurfaceSelectionAction.SmoothPath);
+        flattenPathButton.Visibility = smoothPathButton.Visibility = selectionAction is null ? Visibility.Collapsed : Visibility.Visible;
+        selectionControls.Children.Add(undoButton); selectionControls.Children.Add(redoButton); selectionControls.Children.Add(selectButton); selectionControls.Children.Add(smoothButton); selectionControls.Children.Add(flattenPathButton); selectionControls.Children.Add(smoothPathButton); selectionControls.Children.Add(selectionStatus); heading.Children.Add(selectionControls);
         if (sculptCommit is not null) heading.Children.Add(CreateSculptControls());
         root.Children.Add(heading);
 
         viewport = new Viewport3D { ClipToBounds = true };
         if (selectionAction is not null) viewport.ContextMenu = CreateSelectionContextMenu();
-        viewport.MouseLeftButtonDown += (_, e) => BeginPointer(viewport, e);
-        viewport.MouseLeftButtonUp += (_, _) => EndPointer(viewport);
+        viewport.ContextMenuOpening += (_, e) => { if (suppressNextContextMenu) { suppressNextContextMenu = false; e.Handled = true; } };
+        viewport.MouseLeftButtonDown += (_, e) => BeginLeftPointer(viewport, e);
+        viewport.MouseLeftButtonUp += (_, _) => EndLeftPointer(viewport);
+        viewport.MouseRightButtonDown += (_, e) => BeginOrbit(viewport, e);
+        viewport.MouseRightButtonUp += (_, e) => EndOrbit(viewport, e);
         viewport.MouseMove += (_, e) => { MovePointer(viewport, e); UpdateHover(viewport, e.GetPosition(viewport)); };
         viewport.MouseLeave += (_, _) => ClearHover();
         viewport.MouseWheel += (_, e) => Zoom(e.Delta);
@@ -122,10 +132,11 @@ public sealed class Surface3DWindow : Window
         hoverText = new TextBlock { Foreground = Brushes.White, FontSize = 12, FontWeight = FontWeights.SemiBold, LineHeight = 18 };
         hoverTip = new Border { Background = new SolidColorBrush(Color.FromArgb(235, 15, 24, 36)), BorderBrush = new SolidColorBrush(Color.FromRgb(85, 214, 190)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Padding = new Thickness(9, 6, 9, 6), Child = hoverText, Visibility = Visibility.Collapsed };
         overlayLayer.Children.Add(hoverTip);
+        orientationGizmo = CreateOrientationGizmo(); overlayLayer.Children.Add(orientationGizmo);
         var viewportHost = new Grid(); viewportHost.Children.Add(viewport); viewportHost.Children.Add(overlayLayer);
         var frame = new Border { Background = new SolidColorBrush(Color.FromRgb(10, 16, 25)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 50, 71)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Child = viewportHost };
         Grid.SetRow(frame, 1); root.Children.Add(frame);
-        var help = new TextBlock { Text = "Drag to rotate  •  Select cells, then Ctrl+click or Ctrl+drag to add another area  •  Mouse wheel to zoom", Foreground = new SolidColorBrush(Color.FromRgb(118, 135, 156)), FontSize = 12, Margin = new Thickness(4, 12, 0, 0) };
+        var help = new TextBlock { Text = "Left-drag selects  •  Right-drag rotates  •  Ctrl+click or Ctrl+drag adds another area  •  Right-click opens tools  •  Wheel zooms", Foreground = new SolidColorBrush(Color.FromRgb(118, 135, 156)), FontSize = 12, Margin = new Thickness(4, 12, 0, 0) };
         Grid.SetRow(help, 2); root.Children.Add(help); Content = root;
         viewport.Loaded += (_, _) => UpdateScaleOverlayPositions();
         viewport.SizeChanged += (_, _) => UpdateScaleOverlayPositions();
@@ -175,6 +186,9 @@ public sealed class Surface3DWindow : Window
         menu.Items.Add(ActionItem("Smooth rows", SurfaceSelectionAction.SmoothRows));
         menu.Items.Add(ActionItem("Smooth columns", SurfaceSelectionAction.SmoothColumns));
         menu.Items.Add(new Separator());
+        menu.Items.Add(ActionItem("Flatten between two selected points", SurfaceSelectionAction.FlattenPath));
+        menu.Items.Add(ActionItem("Smooth between two selected points", SurfaceSelectionAction.SmoothPath));
+        menu.Items.Add(new Separator());
         menu.Items.Add(ActionItem("Clear selected", SurfaceSelectionAction.Clear));
         menu.Opened += (_, _) => menu.IsOpen = SelectedSurfaceCells().Count > 0;
         return menu;
@@ -191,6 +205,11 @@ public sealed class Surface3DWindow : Window
     {
         if (selectionAction is null) return;
         var selected = SelectedSurfaceCells();
+        if (action is SurfaceSelectionAction.FlattenPath or SurfaceSelectionAction.SmoothPath && selected.Count != 2)
+        {
+            MessageBox.Show(this, "Select exactly two surface cells using Ctrl+click, then choose the two-point tool again.", "Choose two points", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
         if (selected.Count == 0) return;
         var top = selected.Min(cell => cell.Row); var bottom = selected.Max(cell => cell.Row);
         var left = selected.Min(cell => cell.Col); var right = selected.Max(cell => cell.Col);
@@ -201,9 +220,11 @@ public sealed class Surface3DWindow : Window
         }
         if (action == SurfaceSelectionAction.SelectRing) { OpenTransitionRing(top, bottom, left, right); return; }
         selectionAction(action, top, bottom, left, right, selected, updated => UpdateSurfaceValues(updated));
+        if (action is SurfaceSelectionAction.FlattenPath or SurfaceSelectionAction.SmoothPath)
+            selectionStatus.Text = action == SurfaceSelectionAction.FlattenPath ? "Path flattened  •  endpoints preserved" : "Path smoothed  •  endpoints preserved";
         if (action == SurfaceSelectionAction.Paste)
         {
-            hideSelectionOverlay = false; selectionStart = selectionEnd = null; pinnedSurfaceSelection.Clear(); selectionVisual.Content = null; smoothButton.IsEnabled = false;
+            hideSelectionOverlay = false; selectionStart = selectionEnd = null; pinnedSurfaceSelection.Clear(); selectionVisual.Content = null; UpdateSelectionActionState();
             UpdateSculptSelectionState();
             selectionStatus.Text = "Paste complete  •  selection cleared";
         }
@@ -218,7 +239,7 @@ public sealed class Surface3DWindow : Window
             transitionRingThickness = width; var ring = TransitionRingSelection.Create(top, bottom, left, right, width);
             hideSelectionOverlay = false;
             pinnedSurfaceSelection.Clear(); foreach (var cell in ring) pinnedSurfaceSelection.Add(cell);
-            selectionStart = selectionEnd = null; selectionVisual.Content = CreateSelectionOverlay(ring); smoothButton.IsEnabled = true;
+            selectionStart = selectionEnd = null; selectionVisual.Content = CreateSelectionOverlay(ring); UpdateSelectionActionState();
             UpdateSculptSelectionState();
             selectionStatus.Text = $"{ring.Count} transition-ring cells selected";
             selectionAction?.Invoke(SurfaceSelectionAction.SelectRing, top, bottom, left, right, ring, updated => UpdateSurfaceValues(updated));
@@ -243,7 +264,7 @@ public sealed class Surface3DWindow : Window
             if (cell.Row >= 0 && cell.Row < rows && cell.Col >= 0 && cell.Col < cols) pinnedSurfaceSelection.Add(cell);
         hideSelectionOverlay = hideImportedSelection && pinnedSurfaceSelection.Count > 0;
         selectionVisual.Content = pinnedSurfaceSelection.Count > 0 && !hideSelectionOverlay ? CreateSelectionOverlay(pinnedSurfaceSelection) : null;
-        smoothButton.IsEnabled = pinnedSurfaceSelection.Count > 0;
+        UpdateSelectionActionState();
         if (sculptCommit is not null && pinnedSurfaceSelection.Count > 0) limitSculptToSelection.IsChecked = true;
         UpdateSculptSelectionState();
         selectionStatus.Text = pinnedSurfaceSelection.Count > 0
@@ -259,6 +280,13 @@ public sealed class Surface3DWindow : Window
         surface.Geometry = updatedSurface.Geometry; surface.Material = updatedSurface.Material; surface.BackMaterial = updatedSurface.BackMaterial;
         var updatedGrid = CreateContourGrid(values);
         contourGrid.Geometry = updatedGrid.Geometry; contourGrid.Material = updatedGrid.Material; contourGrid.BackMaterial = updatedGrid.BackMaterial;
+        if (orientationSurface is not null)
+        {
+            var miniatureSurface = CreateSurface(values, useCustomColors, lowColor, highColor);
+            orientationSurface.Geometry = miniatureSurface.Geometry; orientationSurface.Material = miniatureSurface.Material; orientationSurface.BackMaterial = miniatureSurface.BackMaterial;
+            var miniatureGrid = CreateContourGrid(values);
+            orientationGrid.Geometry = miniatureGrid.Geometry; orientationGrid.Material = miniatureGrid.Material; orientationGrid.BackMaterial = miniatureGrid.BackMaterial;
+        }
         RefreshValueScaleLabels();
         var selected = SelectedSurfaceCells();
         selectionVisual.Content = selected.Count > 0 && !hideSelectionOverlay ? CreateSelectionOverlay(selected) : null;
@@ -526,11 +554,9 @@ public sealed class Surface3DWindow : Window
     {
         CancelSculptStroke();
         var enable = sculptMode != mode;
-        selectionMode = selectingSurface = rotating = false;
-        selectButton.Content = "Select surface cells";
-        selectButton.Background = UiBrushCache.GridLine;
+        selectingSurface = rotating = false;
         SetSculptMode(enable ? mode : null);
-        selectionStatus.Text = enable ? $"{mode} sculpt ready  •  drag on the surface" : "Rotation mode";
+        selectionStatus.Text = enable ? $"{mode} sculpt ready  •  left-drag on the surface  •  right-drag rotates" : "Left-drag selects  •  right-drag rotates";
     }
 
     private void SetSculptMode(SurfaceSculptMode? mode)
@@ -581,11 +607,11 @@ public sealed class Surface3DWindow : Window
         selectionStatus.Text = $"{sculptMode} sculpt preview  •  {sculptedCells.Count} cells  •  {range}";
     }
 
-    private void EndPointer(Viewport3D target)
+    private void EndLeftPointer(Viewport3D target)
     {
         if (sculptingSurface) FinishSculptStroke();
-        rotating = selectingSurface = false;
-        target.ReleaseMouseCapture();
+        selectingSurface = false;
+        if (ReferenceEquals(Mouse.Captured, target)) target.ReleaseMouseCapture();
     }
 
     private void FinishSculptStroke()
@@ -623,21 +649,15 @@ public sealed class Surface3DWindow : Window
         if (!hasSelection) limitSculptToSelection.IsChecked = true;
     }
 
-    private void ToggleSelectionMode()
+    private void ClearSurfaceSelection()
     {
-        CancelSculptStroke(); SetSculptMode(null);
-        selectionMode = !selectionMode; rotating = selectingSurface = false;
-        if (!selectionMode)
-        {
-            selectionStart = selectionEnd = null; pinnedSurfaceSelection.Clear(); selectionVisual.Content = null; smoothButton.IsEnabled = false;
-            UpdateSculptSelectionState();
-        }
-        selectButton.Content = selectionMode ? "Return to rotation" : "Select surface cells";
-        selectButton.Background = new SolidColorBrush(selectionMode ? Color.FromRgb(67, 145, 208) : Color.FromRgb(28, 38, 53));
-        selectionStatus.Text = selectionMode ? "Drag across the timing surface" : "Rotation mode";
+        CancelSculptStroke();
+        selectionStart = selectionEnd = null; pinnedSurfaceSelection.Clear(); selectingSurface = false;
+        selectionVisual.Content = null; UpdateSelectionActionState(); UpdateSculptSelectionState();
+        selectionStatus.Text = sculptMode is null ? "Selection cleared  •  left-drag selects  •  right-drag rotates" : $"Selection cleared  •  {sculptMode} sculpt ready";
     }
 
-    private void BeginPointer(Viewport3D viewport, MouseButtonEventArgs e)
+    private void BeginLeftPointer(Viewport3D viewport, MouseButtonEventArgs e)
     {
         var point = e.GetPosition(viewport);
         if (sculptMode is not null)
@@ -645,31 +665,50 @@ public sealed class Surface3DWindow : Window
             var cell = HitSurfaceCell(viewport, point);
             if (cell is null || !BeginSculptStroke(cell.Value)) return;
         }
-        else if (selectionMode)
+        else
         {
             var cell = HitSurfaceCell(viewport, point);
             if (cell is null) return;
             if ((Keyboard.Modifiers & ModifierKeys.Control) != 0) PinActiveSurfaceSelection(); else pinnedSurfaceSelection.Clear();
             selectionStart = selectionEnd = cell; selectingSurface = true; UpdateSelectionHighlight();
         }
-        else { rotating = true; lastPoint = point; }
         viewport.CaptureMouse(); e.Handled = true;
+    }
+
+    private void BeginOrbit(Viewport3D target, MouseButtonEventArgs e)
+    {
+        CancelSculptStroke();
+        orbitStartPoint = lastPoint = e.GetPosition(target); orbitDragged = false; suppressNextContextMenu = false; rotating = true;
+        target.CaptureMouse();
+    }
+
+    private void EndOrbit(Viewport3D target, MouseButtonEventArgs e)
+    {
+        rotating = false;
+        if (ReferenceEquals(Mouse.Captured, target)) target.ReleaseMouseCapture();
+        if (!orbitDragged) return;
+        suppressNextContextMenu = true; e.Handled = true;
+        selectionStatus.Text = sculptMode is null ? "View rotated  •  left-drag selects" : $"View rotated  •  {sculptMode} sculpt remains active";
     }
 
     private void MovePointer(Viewport3D viewport, MouseEventArgs e)
     {
         var point = e.GetPosition(viewport);
-        if (sculptingSurface)
+        if (rotating)
+        {
+            if (!orbitDragged && (Math.Abs(point.X - orbitStartPoint.X) >= SystemParameters.MinimumHorizontalDragDistance || Math.Abs(point.Y - orbitStartPoint.Y) >= SystemParameters.MinimumVerticalDragDistance)) orbitDragged = true;
+            Rotate(point);
+        }
+        else if (sculptingSurface)
         {
             var cell = HitSurfaceCell(viewport, point);
             if (cell is not null && cell != lastSculptCell) ApplySculptThrough(cell.Value);
         }
-        else if (selectionMode && selectingSurface)
+        else if (selectingSurface)
         {
             var cell = HitSurfaceCell(viewport, point);
             if (cell is not null && cell != selectionEnd) { selectionEnd = cell; UpdateSelectionHighlight(); }
         }
-        else Rotate(point);
     }
 
     private (int Row, int Col)? HitSurfaceCell(Viewport3D viewport, Point point)
@@ -739,7 +778,7 @@ public sealed class Surface3DWindow : Window
         var top = Math.Min(selectionStart.Value.Row, selectionEnd.Value.Row); var bottom = Math.Max(selectionStart.Value.Row, selectionEnd.Value.Row);
         var left = Math.Min(selectionStart.Value.Col, selectionEnd.Value.Col); var right = Math.Max(selectionStart.Value.Col, selectionEnd.Value.Col);
         var selectedCells = SelectedSurfaceCells(); selectionVisual.Content = CreateSelectionOverlay(selectedCells);
-        smoothButton.IsEnabled = selectedCells.Count > 0;
+        UpdateSelectionActionState(selectedCells.Count);
         UpdateSculptSelectionState();
         selectionStatus.Text = $"{selectedCells.Count} surface cells selected";
     }
@@ -760,6 +799,15 @@ public sealed class Surface3DWindow : Window
         var left = Math.Min(selectionStart.Value.Col, selectionEnd.Value.Col); var right = Math.Max(selectionStart.Value.Col, selectionEnd.Value.Col);
         for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) selected.Add((row, col));
         return selected;
+    }
+
+    private void UpdateSelectionActionState(int? selectedCount = null)
+    {
+        var count = selectedCount ?? SelectedSurfaceCells().Count;
+        smoothButton.IsEnabled = count > 0;
+        // Keep these buttons in the normal dark toolbar theme. Disabled WPF buttons
+        // can be rendered with a white system face while retaining our white text.
+        flattenPathButton.IsEnabled = smoothPathButton.IsEnabled = selectionAction is not null;
     }
 
     private GeometryModel3D CreateSelectionOverlay(HashSet<(int Row, int Col)> selectedCells)
@@ -788,7 +836,7 @@ public sealed class Surface3DWindow : Window
         var updated = smoothSelection(top, bottom, left, right);
         if (updated.GetLength(0) != rows || updated.GetLength(1) != cols) return;
         UpdateSurfaceValues(updated);
-        selectionStart = selectionEnd = null; pinnedSurfaceSelection.Clear(); selectionVisual.Content = null; smoothButton.IsEnabled = false;
+        selectionStart = selectionEnd = null; pinnedSurfaceSelection.Clear(); selectionVisual.Content = null; UpdateSelectionActionState();
         selectionStatus.Text = "Table updated  •  drag to select another region";
     }
 
@@ -809,6 +857,40 @@ public sealed class Surface3DWindow : Window
         };
         scaleOverlayLabels.Add((label, localPosition)); overlayLayer.Children.Add(label);
         return label;
+    }
+
+    private Border CreateOrientationGizmo()
+    {
+        var miniatureViewport = new Viewport3D { ClipToBounds = true, IsHitTestVisible = false };
+        miniatureViewport.Camera = new PerspectiveCamera(new Point3D(0, 18, 31), new Vector3D(0, -15, -31), new Vector3D(0, 1, 0), 47);
+        orientationSurface = CreateSurface(values, useCustomColors, lowColor, highColor); orientationSurface.Transform = transforms;
+        orientationGrid = CreateContourGrid(values); orientationGrid.Transform = transforms;
+        var scene = new Model3DGroup();
+        scene.Children.Add(new AmbientLight(Color.FromRgb(145, 155, 170)));
+        scene.Children.Add(new DirectionalLight(Colors.White, new Vector3D(-1, -2, -3)));
+        scene.Children.Add(orientationSurface); scene.Children.Add(orientationGrid);
+        miniatureViewport.Children.Add(new ModelVisual3D { Content = scene });
+        var host = new Grid(); host.Children.Add(miniatureViewport);
+        host.Children.Add(new TextBlock
+        {
+            Text = "MAP ORIENTATION", Foreground = new SolidColorBrush(Color.FromRgb(174, 188, 207)), FontSize = 9,
+            FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top,
+            Background = new SolidColorBrush(Color.FromArgb(185, 4, 8, 13)), Padding = new Thickness(5, 2, 5, 2), Margin = new Thickness(0, 5, 0, 0)
+        });
+        return new Border
+        {
+            Width = 176, Height = 132, CornerRadius = new CornerRadius(7), Padding = new Thickness(3),
+            Background = new SolidColorBrush(Color.FromArgb(205, 8, 13, 20)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(220, 54, 70, 91)), BorderThickness = new Thickness(1),
+            Child = host, IsHitTestVisible = false
+        };
+    }
+
+    private void UpdateOrientationGizmo()
+    {
+        if (orientationGizmo is null || viewport.ActualWidth <= 0 || viewport.ActualHeight <= 0) return;
+        Canvas.SetLeft(orientationGizmo, 12);
+        Canvas.SetTop(orientationGizmo, Math.Max(8, viewport.ActualHeight - orientationGizmo.Height - 12));
     }
 
     private void RefreshValueScaleLabels()
@@ -839,6 +921,7 @@ public sealed class Surface3DWindow : Window
             Canvas.SetLeft(item.Label, projected.Value.X - item.Label.DesiredSize.Width / 2);
             Canvas.SetTop(item.Label, projected.Value.Y - item.Label.DesiredSize.Height / 2);
         }
+        UpdateOrientationGizmo();
     }
 
     private bool IsOccludedBySurface(Point3D localLabelPosition)

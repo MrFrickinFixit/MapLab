@@ -14,6 +14,7 @@ public sealed class LearnApplyPanel : Grid
     private readonly Grid table = new() { Background = UiBrushCache.GridLine, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
     private readonly TextBlock status = new() { Text = "Learn table ready", Foreground = Brushes.DimGray, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxWidth = 320 };
     private readonly TextBlock summary = new() { Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 0) };
+    private readonly TextBlock currentFileText = new() { Text = "Current file: Untitled", Foreground = Brushes.DimGray, FontSize = 11, Margin = new Thickness(0, 3, 0, 0) };
     private readonly HashSet<(int Row, int Col)> selected = [], dragBase = [];
     private readonly Button undoButton, redoButton, transferButton;
     private TextBox[,] cells = new TextBox[0, 0];
@@ -32,7 +33,7 @@ public sealed class LearnApplyPanel : Grid
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var heading = new Grid { Margin = new Thickness(4, 0, 0, 20) };
         heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        heading.Children.Add(new TextBlock { Text = "Learn Apply Table - VE Offset (%)", FontSize = 25, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        var title = new StackPanel(); title.Children.Add(new TextBlock { Text = "Learn Apply Table - VE Offset (%)", FontSize = 25, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap }); title.Children.Add(currentFileText); heading.Children.Add(title);
         status.Margin = new Thickness(20, 0, 0, 0); Grid.SetColumn(status, 1); heading.Children.Add(status); Children.Add(heading);
 
         var tools = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
@@ -50,6 +51,11 @@ public sealed class LearnApplyPanel : Grid
         table.PreviewMouseLeftButtonUp += (_, _) => selecting = false;
         model.Changed += Refresh;
         Refresh();
+    }
+
+    internal void SetCurrentFile(string displayName, string? fullPath)
+    {
+        currentFileText.Text = $"Current file: {displayName}"; currentFileText.ToolTip = fullPath;
     }
 
     private void Build()

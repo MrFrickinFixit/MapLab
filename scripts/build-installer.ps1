@@ -1,6 +1,6 @@
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version = '1.0.0',
+    [string]$Version = '1.0.3',
     [ValidateSet('Release', 'Debug')]
     [string]$Configuration = 'Release'
 )
@@ -49,7 +49,7 @@ foreach ($entry in $dotnetLegalFiles.GetEnumerator()) {
     Copy-Item -LiteralPath $entry.Key -Destination $entry.Value -Force
 }
 
-$requiredPublishedFiles = @('MapLab-1.0.0-beta.exe', 'LICENSE.txt', 'DOTNET-LICENSE.txt', 'DOTNET-THIRD-PARTY-NOTICES.txt')
+$requiredPublishedFiles = @('MapLab-1.0.3-beta.exe', 'LICENSE.txt', 'DOTNET-LICENSE.txt', 'DOTNET-THIRD-PARTY-NOTICES.txt')
 foreach ($fileName in $requiredPublishedFiles) {
     $publishedFile = Join-Path $publishDirectory $fileName
     if (-not (Test-Path -LiteralPath $publishedFile)) {
