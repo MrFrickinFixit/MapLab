@@ -57,7 +57,26 @@ try {
         throw 'Autosave changed the pasted value.'
     }
 
-    "PASS Fuel paste and autosave preserved: $($actual -join ', ')"
+    $panel.GetType().GetField('start', $flags).SetValue($panel, [ValueTuple[int, int]]::new(2, 0))
+    $panel.GetType().GetField('end', $flags).SetValue($panel, [ValueTuple[int, int]]::new(2, 1))
+    $cells = $panel.GetType().GetField('cells', $flags).GetValue($panel)
+    $editedCell = $cells.GetValue(2, 0)
+    $editOriginals = $panel.GetType().GetField('editOriginals', $flags).GetValue($panel)
+    $editOriginals.Add($editedCell, $editedCell.Text)
+    $editedCell.Text = '73.987'
+    [void]$panel.GetType().GetMethod('CompleteFuelCellEdit', $flags).Invoke($panel, @($editedCell, $true))
+
+    $values = $panel.GetType().GetField('ve', $flags).GetValue($panel)
+    if ([Math]::Abs($values.GetValue(2, 0) - 73.987) -gt 1e-12 -or [Math]::Abs($values.GetValue(2, 1) - 73.987) -gt 1e-12) {
+        throw 'A direct selected-group edit changed the entered precision.'
+    }
+    $savedValues = (Get-Content -LiteralPath $testAutosave -Raw | ConvertFrom-Json).Values
+    if ([Math]::Abs([double]$savedValues[2][0] - 73.987) -gt 1e-12 -or [Math]::Abs([double]$savedValues[2][1] - 73.987) -gt 1e-12) {
+        throw 'Autosave changed the directly edited value.'
+    }
+
+    "PASS Fuel paste preserved: $($actual -join ', ')"
+    'PASS Fuel selected-group edit and autosave preserved: 73.987'
 }
 finally {
     if ($hadClipboardText) { [System.Windows.Clipboard]::SetText($originalClipboardText) }

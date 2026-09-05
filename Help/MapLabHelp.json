@@ -41,8 +41,8 @@
         "Display precision changes only how values appear. Actual precision controls the stored table values.",
         "With three actual leading digits and one actual trailing decimal, 85.47 becomes 85.5 while 105.47 becomes 105.",
         "Pasted table values are stored exactly as supplied and are not rounded during paste or autosave. Select or focus a cell to see its stored value.",
-        "Manual edits, offsets, smoothing, generated values, and 3D changes use the selected actual precision.",
-        "Changing either Actual control rounds the complete active table, including pasted values, as one Undo step.",
+        "Pasted values and direct single-cell or selected-group edits are stored exactly as entered. Calculated changes such as offsets, smoothing, generated values, and 3D edits use the selected actual precision.",
+        "Changing either Actual control rounds the complete active table, including pasted and directly edited values, as one Undo step.",
         "The display format is also used by the 3D value scale, 3D tooltip, and Excel number formatting. Clipboard and CSV data retain stored precision."
       ]
     },

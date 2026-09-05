@@ -608,10 +608,9 @@ public sealed class FuelingPanel : Grid
         if (!enterPressed && groupCellEditsAwaitingEnter.Remove(cell)) { editOriginals.Remove(cell); RefreshAll(); return; }
         groupCellEditsAwaitingEnter.Remove(cell);
         if (showFuelFlow) { RefreshAll(); return; }
-        if (loading || cell.Tag is not ValueTuple<int, int> p || !double.TryParse(cell.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) { RefreshAll(); return; }
+        if (loading || cell.Tag is not ValueTuple<int, int> p || !double.TryParse(cell.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || !double.IsFinite(value)) { RefreshAll(); return; }
         var changed = editOriginals.Remove(cell, out var original) && !string.Equals(original, cell.Text, StringComparison.Ordinal);
         if (!changed) { RefreshAll(); UpdateSelection(); return; }
-        value = RoundEditableVe(value);
         PushUndo();
         if (IsFuelCellSelected(p.Item1, p.Item2))
         {
