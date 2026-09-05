@@ -21,7 +21,7 @@
   #error "The application executable is missing from PublishDir."
 #endif
 #ifndef AppVersion
-  #define AppVersion "1.0.3.1"
+  #define AppVersion "1.0.3.2"
 #endif
 #if !FileExists(PublishDir + "\coreclr.dll") || !FileExists(PublishDir + "\PresentationFramework.dll")
   #error "PublishDir must contain a self-contained Windows desktop build."
