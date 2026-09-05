@@ -82,7 +82,7 @@ public partial class MainWindow : Window
     private string FormatMap(double value) => value.ToString(MapAxisFormat, CultureInfo.InvariantCulture);
     private string FormatTimingDisplayValue(double value) => MagnitudeNumberFormatter.Format(value, timingLeadingDisplayDigits, timingTrailingDisplayDecimals);
     private double RoundEditableTiming(double value) => Math.Round(value, MagnitudeNumberFormatter.DecimalPlaces(value, timingLeadingValueDigits, timingTrailingValueDecimals), MidpointRounding.AwayFromZero);
-    private string FormatEditableTiming(double value) => RoundEditableTiming(value).ToString(timingTrailingValueDecimals == 0 ? "0" : "0." + new string('#', timingTrailingValueDecimals), CultureInfo.InvariantCulture);
+    private static string FormatStoredTimingValue(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
     private static string FormatExactAxisValue(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
     private double idleTransitionRpm = 1200, wotTransitionMap = 85;
     private RegionPointPick regionPointPick;
@@ -489,7 +489,7 @@ public partial class MainWindow : Window
         timingValues[row, col] = RoundEditableTiming(value);
         var cell = new TextBox { Tag = (row, col), Text = FormatTimingDisplayValue(timingValues[row, col]), Foreground = Brushes.Black, Background = TimingBrush(value), BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 11, FontWeight = FontWeights.SemiBold, Padding = new Thickness(2) };
         cell.ToolTipOpening += (_, _) => { var point = ((int Row, int Col))cell.Tag; UpdateTimingCellToolTip(point.Row, point.Col); };
-        cell.GotKeyboardFocus += (_, _) => { var point = ((int Row, int Col))cell.Tag; cell.Text = FormatEditableTiming(timingValues[point.Row, point.Col]); cellEditOriginalValues[cell] = cell.Text; if (IsInsideTimingSelection(point.Row, point.Col) && SelectedTimingCells().Count > 1) groupCellEditsAwaitingEnter.Add(cell); else groupCellEditsAwaitingEnter.Remove(cell); cell.Background = Brushes.White; cell.SelectAll(); }; cell.PreviewMouseLeftButtonDown += Cell_MouseDown; cell.MouseEnter += Cell_MouseEnter;
+        cell.GotKeyboardFocus += (_, _) => { var point = ((int Row, int Col))cell.Tag; cell.Text = FormatStoredTimingValue(timingValues[point.Row, point.Col]); cellEditOriginalValues[cell] = cell.Text; if (IsInsideTimingSelection(point.Row, point.Col) && SelectedTimingCells().Count > 1) groupCellEditsAwaitingEnter.Add(cell); else groupCellEditsAwaitingEnter.Remove(cell); cell.Background = Brushes.White; cell.SelectAll(); }; cell.PreviewMouseLeftButtonDown += Cell_MouseDown; cell.MouseEnter += Cell_MouseEnter;
         cell.PreviewMouseRightButtonDown += TimingCell_RightClick; cell.ContextMenu = CreateTimingContextMenu();
         cell.LostFocus += (_, _) => CompleteCellEdit(cell); cell.KeyDown += (_, e) => { if (e.Key == Key.Enter) { CompleteCellEdit(cell, true); ClearTimingSelection(); Keyboard.ClearFocus(); e.Handled = true; } }; return cell;
     }
@@ -632,7 +632,7 @@ public partial class MainWindow : Window
         if (double.TryParse(original, NumberStyles.Float, CultureInfo.InvariantCulture, out var oldValue)) before.Timing[point.Item1][point.Item2] = oldValue;
         PushUndo(before);
         foreach (var selectedCell in selected) SetCellValue(selectedCell.Row, selectedCell.Col, value);
-        UpdateSelection(); SaveState(); StatusText.Text = $"Set {selected.Count} selected cells to {FormatEditableTiming(value)}";
+        UpdateSelection(); SaveState(); StatusText.Text = $"Set {selected.Count} selected cells to {FormatStoredTimingValue(value)}";
     }
 
     private void SelectAllTimingCells()
@@ -1056,7 +1056,7 @@ public partial class MainWindow : Window
             for (var col = left; col <= right; col++)
             {
                 if (col > left) text.Append('\t');
-                text.Append(FormatEditableTiming(timingValues[row, col]));
+                text.Append(FormatStoredTimingValue(timingValues[row, col]));
             }
             if (row < bottom) text.AppendLine();
         }
@@ -1087,19 +1087,20 @@ public partial class MainWindow : Window
         if (fillSelection)
         {
             if (!double.TryParse(rows[0][0], NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) { ShowPasteFormatError(); return; }
-            for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) { SetCellValue(row, col, value); changed++; }
+            if (!double.IsFinite(value)) { ShowPasteFormatError(); return; }
+            for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) { SetPastedCellValue(row, col, value); changed++; }
         }
         else
         {
             for (var sourceRow = 0; sourceRow < rows.Length && top + sourceRow < RowCount; sourceRow++)
             for (var sourceCol = 0; sourceCol < rows[sourceRow].Length && left + sourceCol < ColumnCount; sourceCol++)
             {
-                if (!double.TryParse(rows[sourceRow][sourceCol], NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) { ShowPasteFormatError(); return; }
-                SetCellValue(top + sourceRow, left + sourceCol, value); changed++;
+                if (!double.TryParse(rows[sourceRow][sourceCol], NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || !double.IsFinite(value)) { ShowPasteFormatError(); return; }
+                SetPastedCellValue(top + sourceRow, left + sourceCol, value); changed++;
             }
             selectionEnd = (Math.Min(RowCount - 1, top + rows.Length - 1), Math.Min(ColumnCount - 1, left + rows.Max(row => row.Length) - 1));
         }
-        ClearTimingSelection(); StatusText.Text = $"Pasted {changed} cells  •  selection cleared";
+        SaveState(); ClearTimingSelection(); StatusText.Text = $"Pasted {changed} cells exactly as supplied  •  selection cleared";
     }
 
     private bool TryGetSelectionBounds(out int top, out int bottom, out int left, out int right)
@@ -1115,6 +1116,13 @@ public partial class MainWindow : Window
     {
         timingValues[row, col] = RoundEditableTiming(value);
         valueCells[row, col].Text = FormatTimingDisplayValue(timingValues[row, col]);
+        RefreshCellColor(valueCells[row, col]);
+    }
+
+    private void SetPastedCellValue(int row, int col, double value)
+    {
+        timingValues[row, col] = value;
+        valueCells[row, col].Text = FormatTimingDisplayValue(value);
         RefreshCellColor(valueCells[row, col]);
     }
 
@@ -1875,7 +1883,7 @@ public partial class MainWindow : Window
     {
         if (rpmAxis.Length == 0) return; var dialog = new SaveFileDialog { Filter = "CSV file (*.csv)|*.csv", FileName = "timing-table.csv" }; if (dialog.ShowDialog(this) != true) return;
         var csv = new StringBuilder();
-        for (var row = 0; row < RowCount; row++) { csv.Append(FormatExactAxisValue(mapAxis[row])); for (var col = 0; col < ColumnCount; col++) csv.Append(',').Append(FormatEditableTiming(timingValues[row, col])); csv.AppendLine(); }
+        for (var row = 0; row < RowCount; row++) { csv.Append(FormatExactAxisValue(mapAxis[row])); for (var col = 0; col < ColumnCount; col++) csv.Append(',').Append(FormatStoredTimingValue(timingValues[row, col])); csv.AppendLine(); }
         csv.Append("Engine RPM"); foreach (var rpm in rpmAxis) csv.Append(',').Append(FormatExactAxisValue(rpm)); csv.AppendLine();
         File.WriteAllText(dialog.FileName, csv.ToString()); StatusText.Text = $"Saved {Path.GetFileName(dialog.FileName)}";
     }
@@ -1964,7 +1972,7 @@ public partial class MainWindow : Window
             var low = double.TryParse(snapshot.LowTiming, NumberStyles.Float, CultureInfo.InvariantCulture, out var lowValue) ? lowValue : 42;
             var high = double.TryParse(snapshot.HighTiming, NumberStyles.Float, CultureInfo.InvariantCulture, out var highValue) ? highValue : 12;
             BuildGrid(low, high, mapAxis[^1], mapAxis[0]);
-            for (var row = 0; row < RowCount; row++) for (var col = 0; col < ColumnCount; col++) SetCellValue(row, col, snapshot.Timing[row][col]);
+            for (var row = 0; row < RowCount; row++) for (var col = 0; col < ColumnCount; col++) SetPastedCellValue(row, col, snapshot.Timing[row][col]);
             selectionStart = selectionEnd = null; selectedMapAxis.Clear(); selectedRpmAxis.Clear(); activeAxisIsMap = null;
             ApplyRegionVisualization();
         }
@@ -2061,7 +2069,7 @@ public partial class MainWindow : Window
             var lowTiming = double.TryParse(state.LowTiming, NumberStyles.Float, CultureInfo.InvariantCulture, out var low) ? low : 42;
             var highTiming = double.TryParse(state.HighTiming, NumberStyles.Float, CultureInfo.InvariantCulture, out var high) ? high : 12;
             BuildGrid(lowTiming, highTiming, mapAxis[^1], mapAxis[0]);
-            for (var row = 0; row < RowCount; row++) for (var col = 0; col < ColumnCount; col++) SetCellValue(row, col, state.Timing[row][col]);
+            for (var row = 0; row < RowCount; row++) for (var col = 0; col < ColumnCount; col++) SetPastedCellValue(row, col, state.Timing[row][col]);
             ReadAndApplyRegions(false);
             selectionStart = selectionEnd = null; selectedRpmAxis.Clear(); selectedMapAxis.Clear(); activeAxisIsMap = null;
             StatusText.Text = "Autosaved table restored";

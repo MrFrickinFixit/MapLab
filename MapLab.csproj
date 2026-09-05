@@ -6,20 +6,20 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <AssemblyName>MapLab-1.0.3.2-beta</AssemblyName>
+    <AssemblyName>MapLab-1.0.3.3-beta</AssemblyName>
     <RootNamespace>TimingTableCalculator</RootNamespace>
     <Title>Map Lab</Title>
     <Product>Map Lab</Product>
-    <Version>1.0.3.2</Version>
-    <FileVersion>1.0.3.2</FileVersion>
-    <AssemblyVersion>1.0.3.2</AssemblyVersion>
+    <Version>1.0.3.3</Version>
+    <FileVersion>1.0.3.3</FileVersion>
+    <AssemblyVersion>1.0.3.3</AssemblyVersion>
     <Authors>Brian Diffenbaugh</Authors>
     <Copyright>Copyright (c) 2026 Brian Diffenbaugh</Copyright>
     <Description>Engine ignition timing and fueling map editor.</Description>
     <ApplicationIcon>Assets\MapLab.ico</ApplicationIcon>
     <StartupObject>TimingTableCalculator.App</StartupObject>
     <PackageId></PackageId>
-    <AssemblyTitle>MapLab-1.0.3.2-beta</AssemblyTitle>
+    <AssemblyTitle>MapLab-1.0.3.3-beta</AssemblyTitle>
   </PropertyGroup>
 
   <ItemGroup>

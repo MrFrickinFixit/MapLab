@@ -81,7 +81,7 @@ To assign one value to a group, select the cells, edit any cell in that selectio
 
 ## Clipboard interoperability
 
-Map Lab accepts tab-, comma-, semicolon-, or whitespace-delimited numeric data. A complete copied table can be pasted into a selected block, while a single copied row or column can be pasted directly into a selected axis range. Pasted axis values are retained as entered; PSI can use one decimal place, while kPa and RPM normally use whole-number formatting.
+Map Lab accepts tab-, comma-, semicolon-, or whitespace-delimited numeric data. A complete copied table can be pasted into a selected block, while a single copied row or column can be pasted directly into a selected axis range. Pasted table and axis values are retained exactly as entered and are not rounded by display formatting or autosave. Changing an Actual Precision control later explicitly rounds the corresponding table. PSI axes can use one decimal place, while kPa and RPM normally use whole-number formatting.
 
 The axis orientation used by Map Lab is:
 
@@ -113,7 +113,7 @@ pwsh -NoProfile -File .\scripts\build-inno-installer.ps1
 
 The script publishes a self-contained `win-x64` application and writes the setup program under `artifacts\inno\installer`. If Inno Setup is installed in a nonstandard location, supply `-CompilerPath` with the full path to `ISCC.exe`.
 
-The current source tree identifies the development build as **1.0.3.2-beta**. Check the [Releases page](https://github.com/MrFrickinFixit/MapLab/releases) for the latest published package.
+The current source tree identifies the development build as **1.0.3.3-beta**. Check the [Releases page](https://github.com/MrFrickinFixit/MapLab/releases) for the latest published package.
 
 ## Repository layout
 

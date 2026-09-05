@@ -42,7 +42,7 @@ public sealed class FuelingPanel : Grid
     private string MapFormat => mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? "0.0" : "0";
     private string FormatMap(double value) => value.ToString(MapFormat, CultureInfo.InvariantCulture);
     private static string FormatExactAxisValue(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
-    private string FormatEditableVe(double value) => RoundEditableVe(value).ToString(trailingValueDecimals == 0 ? "0" : "0." + new string('#', trailingValueDecimals), CultureInfo.InvariantCulture);
+    private static string FormatStoredVeValue(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
     private double RoundEditableVe(double value) => Math.Round(value, MagnitudeNumberFormatter.DecimalPlaces(value, leadingValueDigits, trailingValueDecimals), MidpointRounding.AwayFromZero);
     private int leadingDisplayDigits = 3, trailingDisplayDecimals = 1;
     private int leadingValueDigits = 4, trailingValueDecimals = 3;
@@ -143,7 +143,7 @@ public sealed class FuelingPanel : Grid
         var count = LearnApply.ActiveCount;
         if (count == 0) return 0;
         var updated = LearnApplyMath.Apply(ve, LearnApply.SnapshotValues(), smooth, rpm, map);
-        PushUndo(); ve = updated; Save(); RefreshAll(); ClearFuelSelection();
+        PushUndo(); ve = updated; NormalizeStoredValues(); Save(); RefreshAll(); ClearFuelSelection();
         status.Text = $"Transferred {count} learn offsets to VE{(smooth ? " and smoothed changed cells" : "")}";
         return count;
     }
@@ -166,6 +166,7 @@ public sealed class FuelingPanel : Grid
         if (ve.GetLength(0) != newMap.Length || ve.GetLength(1) != newRpm.Length)
         {
             ve = Resample(ve, newMap.Length, newRpm.Length);
+            NormalizeStoredValues();
             undoHistory.Clear(); redoHistory.Clear();
         }
         rpm = newRpm.ToArray();
@@ -453,7 +454,7 @@ public sealed class FuelingPanel : Grid
     private void ApplyVeSetup(double[,] updated, VeSetupSettings appliedSettings)
     {
         if (updated.GetLength(0) != ve.GetLength(0) || updated.GetLength(1) != ve.GetLength(1)) return;
-        PushUndo(); ve = (double[,])updated.Clone(); veSetupSettings = appliedSettings; Save(); RefreshAll(); UpdateSelection();
+        PushUndo(); ve = (double[,])updated.Clone(); NormalizeStoredValues(); veSetupSettings = appliedSettings; Save(); RefreshAll(); UpdateSelection();
         status.Text = $"VE setup applied  •  {ve.Cast<double>().Min():0.0}–{ve.Cast<double>().Max():0.0}%";
     }
 
@@ -471,7 +472,7 @@ public sealed class FuelingPanel : Grid
         for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++)
         {
             var load = (map[row] - map[^1]) / Math.Max(.1, map[0] - map[^1]); var speed = col / (double)Math.Max(1, rpm.Length - 1);
-            ve[row, col] = 42 + load * 62 + Math.Sin(speed * Math.PI) * 12;
+            ve[row, col] = RoundEditableVe(42 + load * 62 + Math.Sin(speed * Math.PI) * 12);
         }
     }
 
@@ -501,7 +502,7 @@ public sealed class FuelingPanel : Grid
                     cell.Background = Brushes.White;
                     if (!showFuelFlow)
                     {
-                        var editable = FormatEditableVe(ve[point.Item1, point.Item2]);
+                        var editable = FormatStoredVeValue(ve[point.Item1, point.Item2]);
                         editOriginals[cell] = editable;
                         cell.Text = editable;
                     }
@@ -598,7 +599,7 @@ public sealed class FuelingPanel : Grid
     {
         selectionOffsetAmount = amount; selectionOffsetIsPercentage = percentage; PushUndo(); var selected = SelectedFuelCells();
         if (selected.Count == 0) for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) selected.Add((row, col));
-        foreach (var cell in selected) ve[cell.Row, cell.Col] = percentage ? ve[cell.Row, cell.Col] * (1 + direction * amount / 100) : ve[cell.Row, cell.Col] + direction * amount;
+        foreach (var cell in selected) ve[cell.Row, cell.Col] = RoundEditableVe(percentage ? ve[cell.Row, cell.Col] * (1 + direction * amount / 100) : ve[cell.Row, cell.Col] + direction * amount);
         Save(); RefreshAll(); UpdateSelection(); status.Text = $"{selected.Count} fuel cells {(direction > 0 ? "increased" : "decreased")} by {amount:0.###}{(percentage ? "%" : "")}";
     }
     private void CellEdited(object sender, RoutedEventArgs e) { if (sender is TextBox cell) CompleteFuelCellEdit(cell); }
@@ -615,7 +616,7 @@ public sealed class FuelingPanel : Grid
         if (IsFuelCellSelected(p.Item1, p.Item2))
         {
             var selected = SelectedFuelCells(); foreach (var selectedCell in selected) ve[selectedCell.Row, selectedCell.Col] = value;
-            status.Text = $"Set {selected.Count} selected fuel cells to {FormatEditableVe(value)}";
+            status.Text = $"Set {selected.Count} selected fuel cells to {FormatStoredVeValue(value)}";
         }
         else ve[p.Item1, p.Item2] = value;
         Save(); RefreshAll(); UpdateSelection();
@@ -663,7 +664,6 @@ public sealed class FuelingPanel : Grid
         if (rows.Length == 1 && rows[0].Length == 1)
         {
             if (!double.TryParse(rows[0][0], NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || !double.IsFinite(value)) { Info("Clipboard cells must contain numeric values."); return; }
-            value = RoundEditableVe(value);
             for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) ve[row, col] = value;
         }
         else
@@ -672,11 +672,11 @@ public sealed class FuelingPanel : Grid
             for (var sourceCol = 0; sourceCol < rows[sourceRow].Length && left + sourceCol < rpm.Length; sourceCol++)
             {
                 if (!double.TryParse(rows[sourceRow][sourceCol], NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || !double.IsFinite(value)) { Info("Clipboard cells must contain numeric values."); return; }
-                var row = top + sourceRow; var col = left + sourceCol; ve[row, col] = RoundEditableVe(value);
+                var row = top + sourceRow; var col = left + sourceCol; ve[row, col] = value;
             }
             end = (Math.Min(map.Length - 1, top + rows.Length - 1), Math.Min(rpm.Length - 1, left + rows.Max(row => row.Length) - 1));
         }
-        Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Fuel values pasted from clipboard  •  selection cleared";
+        Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Fuel values pasted exactly as supplied  •  selection cleared";
     }
 
     private void ClearFuelSelection()
@@ -705,7 +705,7 @@ public sealed class FuelingPanel : Grid
     }
     private void ApplyAdvancedSmoothing(AdvancedSmoothingWindow dialog, IReadOnlyCollection<(int Row, int Col)> selected)
     {
-        advancedSmoothingOptions = dialog.Options; PushUndo(); ve = AdvancedSmoother.Apply(ve, selected, advancedSmoothingOptions, rpm, map);
+        advancedSmoothingOptions = dialog.Options; PushUndo(); ve = AdvancedSmoother.Apply(ve, selected, advancedSmoothingOptions, rpm, map); NormalizeStoredValues();
         Save(); RefreshAll(); UpdateSelection(); status.Text = $"Smoothed {selected.Count} selected fuel cells  •  {advancedSmoothingOptions.Algorithm}  •  {advancedSmoothingOptions.Passes} passes";
     }
     private void DirectionalSmooth(object? sender, RoutedEventArgs e)
@@ -719,7 +719,7 @@ public sealed class FuelingPanel : Grid
     {
         directionalOuterToInner = dialog.OuterToInner; directionalStrength = dialog.Strength; directionalPasses = dialog.Passes;
         PushUndo();
-        ve = DirectionalSmoother.Apply(ve, top, bottom, left, right, dialog.OuterToInner, dialog.Strength, dialog.Passes);
+        ve = DirectionalSmoother.Apply(ve, top, bottom, left, right, dialog.OuterToInner, dialog.Strength, dialog.Passes); NormalizeStoredValues();
         Save(); RefreshAll(); UpdateSelection(); status.Text = dialog.OuterToInner ? "Smoothed fuel selection from outer perimeter inward" : "Smoothed fuel selection from inner core outward";
     }
     private void Smooth(int top, int bottom, int left, int right, int passes, double strength)
@@ -727,11 +727,11 @@ public sealed class FuelingPanel : Grid
         PushUndo();
         var work = (double[,])ve.Clone();
         for (var pass = 0; pass < passes; pass++) { var next = (double[,])work.Clone(); for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) { double sum = 0, weight = 0; for (var dr = -1; dr <= 1; dr++) for (var dc = -1; dc <= 1; dc++) { var rr = row + dr; var cc = col + dc; if (rr < top || rr > bottom || cc < left || cc > right) continue; var w = (dr == 0 ? 2 : 1) * (dc == 0 ? 2 : 1); sum += work[rr, cc] * w; weight += w; } next[row, col] = work[row, col] + (sum / weight - work[row, col]) * strength; } work = next; }
-        ve = work; Save(); RefreshAll(); UpdateSelection(); status.Text = $"Smoothed {right - left + 1} × {bottom - top + 1} fuel cells";
+        ve = work; NormalizeStoredValues(); Save(); RefreshAll(); UpdateSelection(); status.Text = $"Smoothed {right - left + 1} × {bottom - top + 1} fuel cells";
     }
 
-    private void SmoothColumns(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || b - t < 2) { Info("Select at least 3 rows."); return; } PushUndo(); for (var col = l; col <= r; col++) for (var row = t + 1; row < b; row++) { var x = (map[t] - map[row]) / (map[t] - map[b]); x = Ease(x); ve[row, col] = ve[t, col] + (ve[b, col] - ve[t, col]) * x; } Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Smoothed selected fuel columns  •  selection cleared"; }
-    private void SmoothRows(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || r - l < 2) { Info("Select at least 3 columns."); return; } PushUndo(); for (var row = t; row <= b; row++) for (var col = l + 1; col < r; col++) { var x = (rpm[col] - rpm[l]) / (rpm[r] - rpm[l]); x = Ease(x); ve[row, col] = ve[row, l] + (ve[row, r] - ve[row, l]) * x; } Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Smoothed selected fuel rows  •  selection cleared"; }
+    private void SmoothColumns(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || b - t < 2) { Info("Select at least 3 rows."); return; } PushUndo(); for (var col = l; col <= r; col++) for (var row = t + 1; row < b; row++) { var x = (map[t] - map[row]) / (map[t] - map[b]); x = Ease(x); ve[row, col] = ve[t, col] + (ve[b, col] - ve[t, col]) * x; } NormalizeStoredValues(); Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Smoothed selected fuel columns  •  selection cleared"; }
+    private void SmoothRows(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || r - l < 2) { Info("Select at least 3 columns."); return; } PushUndo(); for (var row = t; row <= b; row++) for (var col = l + 1; col < r; col++) { var x = (rpm[col] - rpm[l]) / (rpm[r] - rpm[l]); x = Ease(x); ve[row, col] = ve[row, l] + (ve[row, r] - ve[row, l]) * x; } NormalizeStoredValues(); Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Smoothed selected fuel rows  •  selection cleared"; }
     private double[,] CommitFuel3DSculpt(double[,] updated, IReadOnlyCollection<(int Row, int Col)> affected)
     {
         if (updated.GetLength(0) != ve.GetLength(0) || updated.GetLength(1) != ve.GetLength(1)) throw new ArgumentException("The sculpted VE surface does not match the fuel table.");
@@ -929,7 +929,9 @@ public sealed class FuelingPanel : Grid
             : row <= wotBoundaryRow ? "Part Throttle to WOT" : "Cruise to Part Throttle";
         var value = displayedValues.GetLength(0) == map.Length && displayedValues.GetLength(1) == rpm.Length ? displayedValues[row, col] : ve[row, col];
         var displayedValue = showFuelFlow ? value.ToString("0.0", CultureInfo.InvariantCulture) : FormatVeDisplayValue(value);
-        cells[row, col].ToolTip = $"{region}  •  {rpm[col]:0} RPM  •  {FormatMap(map[row])} {mapUnit}  •  {displayedValue}{(showFuelFlow ? " lb/hr" : "% VE")}";
+        cells[row, col].ToolTip = showFuelFlow
+            ? $"{region}  •  {rpm[col]:0} RPM  •  {FormatMap(map[row])} {mapUnit}  •  {displayedValue} lb/hr"
+            : $"{region}  •  {rpm[col]:0} RPM  •  {FormatMap(map[row])} {mapUnit}  •  Display: {displayedValue}% VE  •  Stored: {FormatStoredVeValue(ve[row, col])}% VE";
     }
     private bool IsBoundary(int row, int col) => col == idleBoundaryCol || row == wotBoundaryRow;
     private static int Closest(double[] axis, double value) { var best = 0; var distance = double.MaxValue; for (var i = 0; i < axis.Length; i++) { var current = Math.Abs(axis[i] - value); if (current < distance) { best = i; distance = current; } } return best; }
@@ -1124,7 +1126,6 @@ public sealed class FuelingPanel : Grid
     private void Save()
     {
         if (loading || ve.Length == 0) return;
-        NormalizeStoredValues();
         SyncLearnApply();
         try
         {
