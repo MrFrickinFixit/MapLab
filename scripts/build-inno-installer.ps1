@@ -1,5 +1,5 @@
 param(
-    [ValidatePattern('^\d+\.\d+\.\d+$')]
+    [ValidatePattern('^\d+\.\d+\.\d+(?:\.\d+)?$')]
     [string]$Version,
     [ValidateSet('Release', 'Debug')]
     [string]$Configuration = 'Release',
@@ -36,7 +36,8 @@ $metadataOutput = & dotnet msbuild $applicationProject -nologo "-p:Configuration
 if ($LASTEXITCODE -ne 0) { throw 'Could not read the Map Lab project metadata.' }
 $metadata = ($metadataOutput -join [Environment]::NewLine) | ConvertFrom-Json
 if (-not $Version) { $Version = ($metadata.Properties.Version -split '-', 2)[0] }
-if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'The installer version must be major.minor.patch.' }
+if ($Version -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$') { throw 'The installer version must be major.minor.patch or major.minor.patch.revision.' }
+$fileVersion = if (($Version -split '\.').Count -eq 3) { "$Version.0" } else { $Version }
 $executableName = "$($metadata.Properties.AssemblyName).exe"
 if ([string]::IsNullOrWhiteSpace($metadata.Properties.AssemblyName) -or [IO.Path]::GetFileName($executableName) -ne $executableName) {
     throw 'The project AssemblyName must be a valid executable file name.'
@@ -59,7 +60,7 @@ New-Item -ItemType Directory -Path $installerDirectory -Force | Out-Null
 
 & dotnet publish $applicationProject --configuration $Configuration --runtime win-x64 `
     --self-contained true --output $publishDirectory "-p:Version=$Version" `
-    "-p:FileVersion=$Version.0" "-p:AssemblyVersion=$Version.0" -p:DebugType=None -p:DebugSymbols=false
+    "-p:FileVersion=$fileVersion" "-p:AssemblyVersion=$fileVersion" -p:DebugType=None -p:DebugSymbols=false
 if ($LASTEXITCODE -ne 0) { throw 'Map Lab publish failed.' }
 
 $dotnetRoot = Split-Path -Parent (Get-Command dotnet -ErrorAction Stop).Source

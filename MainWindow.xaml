@@ -49,7 +49,7 @@
  <TabItem Header="SETTINGS">
   <Grid Margin="18"><ContentControl x:Name="SettingsHost"/></Grid>
  </TabItem>
- <TabItem Header="HELP">
+ <TabItem x:Name="HelpTab" Header="HELP">
   <Grid Margin="18"><ContentControl x:Name="HelpHost"/></Grid>
  </TabItem>
  <TabItem Header="ABOUT">
