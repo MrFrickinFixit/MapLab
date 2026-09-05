@@ -18,6 +18,7 @@ public sealed class FuelingPanel : Grid
     private readonly TextBlock status = new() { Foreground = new SolidColorBrush(Color.FromRgb(118, 135, 156)), FontSize = 11 };
     private readonly TextBox matrixXBox, matrixYBox;
     private readonly ComboBox leadingPrecisionBox, trailingPrecisionBox, valueLeadingPrecisionBox, valueTrailingPrecisionBox;
+    private readonly ComboBox displayTrailingZeroesBox, actualTrailingZeroesBox;
     private readonly Action<int, int> resizeMatrix;
     private readonly Action<bool, int[]> autoFillAxis;
     private readonly Action<bool, int?, int[]> pasteAxis;
@@ -42,17 +43,14 @@ public sealed class FuelingPanel : Grid
     private string MapFormat => mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? "0.0" : "0";
     private string FormatMap(double value) => value.ToString(MapFormat, CultureInfo.InvariantCulture);
     private static string FormatExactAxisValue(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
-    private static string FormatStoredVeValue(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+    private string FormatStoredVeValue(double value) => MagnitudeNumberFormatter.FormatActual(value, trailingValueDecimals, actualTrailingZeroPlaces);
     private double RoundEditableVe(double value) => Math.Round(value, MagnitudeNumberFormatter.DecimalPlaces(value, leadingValueDigits, trailingValueDecimals), MidpointRounding.AwayFromZero);
+    private double RoundSmoothedVe(double value) => Math.Round(value, trailingValueDecimals, MidpointRounding.AwayFromZero);
     private int leadingDisplayDigits = 3, trailingDisplayDecimals = 1;
     private int leadingValueDigits = 4, trailingValueDecimals = 3;
-    private string FormatVeDisplayValue(double value) => MagnitudeNumberFormatter.Format(value, leadingDisplayDigits, trailingDisplayDecimals);
-    private string VeExcelNumberFormat()
-    {
-        if (trailingDisplayDecimals == 0 || leadingDisplayDigits <= 1) return "0";
-        var threshold = Math.Pow(10, leadingDisplayDigits - 1).ToString("0", CultureInfo.InvariantCulture);
-        return $"[>={threshold}]0;0.{new string('0', trailingDisplayDecimals)}";
-    }
+    private int displayTrailingZeroPlaces = 1, actualTrailingZeroPlaces = 3;
+    private string FormatVeDisplayValue(double value) => MagnitudeNumberFormatter.Format(value, leadingDisplayDigits, trailingDisplayDecimals, displayTrailingZeroPlaces);
+    private string VeExcelNumberFormat() => MagnitudeNumberFormatter.ExcelFormat(leadingDisplayDigits, trailingDisplayDecimals, displayTrailingZeroPlaces);
     private double idleBoundaryRpm, wotBoundaryMap;
     private int idleBoundaryCol, wotBoundaryRow;
     private (int Row, int Col)? start, end;
@@ -84,10 +82,13 @@ public sealed class FuelingPanel : Grid
         this.resizeMatrix = resizeMatrix; this.autoFillAxis = autoFillAxis; this.pasteAxis = pasteAxis; this.setRegionBoundaries = setRegionBoundaries; this.editAxis = editAxis;
         PreviewMouseDown += FuelingPanel_PreviewMouseDown;
         matrixXBox = MatrixSizeBox("31"); matrixYBox = MatrixSizeBox("31");
-        leadingPrecisionBox = PrecisionBox(1, 4, leadingDisplayDigits); trailingPrecisionBox = PrecisionBox(0, 3, trailingDisplayDecimals);
-        valueLeadingPrecisionBox = PrecisionBox(1, 4, leadingValueDigits); valueTrailingPrecisionBox = PrecisionBox(0, 3, trailingValueDecimals);
+        leadingPrecisionBox = PrecisionBox(1, 4, leadingDisplayDigits); trailingPrecisionBox = PrecisionBox(0, 4, trailingDisplayDecimals);
+        valueLeadingPrecisionBox = PrecisionBox(1, 4, leadingValueDigits); valueTrailingPrecisionBox = PrecisionBox(0, 4, trailingValueDecimals);
+        displayTrailingZeroesBox = TrailingZeroesBox(displayTrailingZeroPlaces, "Minimum decimal places shown by padding display values with trailing zeroes.");
+        actualTrailingZeroesBox = TrailingZeroesBox(actualTrailingZeroPlaces, "Minimum decimal places shown in actual-value text, clipboard data, and CSV exports.");
         leadingPrecisionBox.SelectionChanged += (_, _) => ApplyDisplayPrecision(); trailingPrecisionBox.SelectionChanged += (_, _) => ApplyDisplayPrecision();
         valueLeadingPrecisionBox.SelectionChanged += (_, _) => ApplyDisplayPrecision(); valueTrailingPrecisionBox.SelectionChanged += (_, _) => ApplyDisplayPrecision();
+        displayTrailingZeroesBox.SelectionChanged += (_, _) => ApplyDisplayPrecision(); actualTrailingZeroesBox.SelectionChanged += (_, _) => ApplyDisplayPrecision();
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition()); RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         mapUnitBox = CreateMapUnitBox();
         var heading = new Grid { Margin = new Thickness(4, 0, 0, 20) }; heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -142,8 +143,9 @@ public sealed class FuelingPanel : Grid
         SyncLearnApply();
         var count = LearnApply.ActiveCount;
         if (count == 0) return 0;
+        var original = (double[,])ve.Clone();
         var updated = LearnApplyMath.Apply(ve, LearnApply.SnapshotValues(), smooth, rpm, map);
-        PushUndo(); ve = updated; NormalizeStoredValues(); Save(); RefreshAll(); ClearFuelSelection();
+        PushUndo(); ve = updated; NormalizeChangedValues(original); Save(); RefreshAll(); ClearFuelSelection();
         status.Text = $"Transferred {count} learn offsets to VE{(smooth ? " and smoothed changed cells" : "")}";
         return count;
     }
@@ -644,7 +646,7 @@ public sealed class FuelingPanel : Grid
         var copiedValues = showFuelFlow ? DisplayValues() : ve;
         for (var row = top; row <= bottom; row++)
         {
-            for (var col = left; col <= right; col++) { if (col > left) text.Append('\t'); text.Append(copiedValues[row, col].ToString("0.###", CultureInfo.InvariantCulture)); }
+            for (var col = left; col <= right; col++) { if (col > left) text.Append('\t'); text.Append(showFuelFlow ? copiedValues[row, col].ToString("0.####", CultureInfo.InvariantCulture) : FormatStoredVeValue(copiedValues[row, col])); }
             if (row < bottom) text.AppendLine();
         }
         try { Clipboard.SetText(text.ToString()); ClearFuelSelection(); status.Text = $"Copied {right - left + 1} × {bottom - top + 1} fuel cells  •  selection cleared"; }
@@ -704,7 +706,8 @@ public sealed class FuelingPanel : Grid
     }
     private void ApplyAdvancedSmoothing(AdvancedSmoothingWindow dialog, IReadOnlyCollection<(int Row, int Col)> selected)
     {
-        advancedSmoothingOptions = dialog.Options; PushUndo(); ve = AdvancedSmoother.Apply(ve, selected, advancedSmoothingOptions, rpm, map); NormalizeStoredValues();
+        var original = (double[,])ve.Clone();
+        advancedSmoothingOptions = dialog.Options; PushUndo(); ve = AdvancedSmoother.Apply(ve, selected, advancedSmoothingOptions, rpm, map); NormalizeChangedValues(original);
         Save(); RefreshAll(); UpdateSelection(); status.Text = $"Smoothed {selected.Count} selected fuel cells  •  {advancedSmoothingOptions.Algorithm}  •  {advancedSmoothingOptions.Passes} passes";
     }
     private void DirectionalSmooth(object? sender, RoutedEventArgs e)
@@ -717,20 +720,22 @@ public sealed class FuelingPanel : Grid
     private void ApplyDirectional(DirectionalSmoothingWindow dialog, int top, int bottom, int left, int right)
     {
         directionalOuterToInner = dialog.OuterToInner; directionalStrength = dialog.Strength; directionalPasses = dialog.Passes;
+        var original = (double[,])ve.Clone();
         PushUndo();
-        ve = DirectionalSmoother.Apply(ve, top, bottom, left, right, dialog.OuterToInner, dialog.Strength, dialog.Passes); NormalizeStoredValues();
+        ve = DirectionalSmoother.Apply(ve, top, bottom, left, right, dialog.OuterToInner, dialog.Strength, dialog.Passes); NormalizeChangedValues(original);
         Save(); RefreshAll(); UpdateSelection(); status.Text = dialog.OuterToInner ? "Smoothed fuel selection from outer perimeter inward" : "Smoothed fuel selection from inner core outward";
     }
     private void Smooth(int top, int bottom, int left, int right, int passes, double strength)
     {
+        var original = (double[,])ve.Clone();
         PushUndo();
         var work = (double[,])ve.Clone();
         for (var pass = 0; pass < passes; pass++) { var next = (double[,])work.Clone(); for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) { double sum = 0, weight = 0; for (var dr = -1; dr <= 1; dr++) for (var dc = -1; dc <= 1; dc++) { var rr = row + dr; var cc = col + dc; if (rr < top || rr > bottom || cc < left || cc > right) continue; var w = (dr == 0 ? 2 : 1) * (dc == 0 ? 2 : 1); sum += work[rr, cc] * w; weight += w; } next[row, col] = work[row, col] + (sum / weight - work[row, col]) * strength; } work = next; }
-        ve = work; NormalizeStoredValues(); Save(); RefreshAll(); UpdateSelection(); status.Text = $"Smoothed {right - left + 1} × {bottom - top + 1} fuel cells";
+        ve = work; NormalizeChangedValues(original); Save(); RefreshAll(); UpdateSelection(); status.Text = $"Smoothed {right - left + 1} × {bottom - top + 1} fuel cells";
     }
 
-    private void SmoothColumns(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || b - t < 2) { Info("Select at least 3 rows."); return; } PushUndo(); for (var col = l; col <= r; col++) for (var row = t + 1; row < b; row++) { var x = (map[t] - map[row]) / (map[t] - map[b]); x = Ease(x); ve[row, col] = ve[t, col] + (ve[b, col] - ve[t, col]) * x; } NormalizeStoredValues(); Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Smoothed selected fuel columns  •  selection cleared"; }
-    private void SmoothRows(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || r - l < 2) { Info("Select at least 3 columns."); return; } PushUndo(); for (var row = t; row <= b; row++) for (var col = l + 1; col < r; col++) { var x = (rpm[col] - rpm[l]) / (rpm[r] - rpm[l]); x = Ease(x); ve[row, col] = ve[row, l] + (ve[row, r] - ve[row, l]) * x; } NormalizeStoredValues(); Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Smoothed selected fuel rows  •  selection cleared"; }
+    private void SmoothColumns(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || b - t < 2) { Info("Select at least 3 rows."); return; } var original = (double[,])ve.Clone(); PushUndo(); for (var col = l; col <= r; col++) for (var row = t + 1; row < b; row++) { var x = (map[t] - map[row]) / (map[t] - map[b]); x = Ease(x); ve[row, col] = ve[t, col] + (ve[b, col] - ve[t, col]) * x; } NormalizeChangedValues(original); Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Smoothed selected fuel columns  •  selection cleared"; }
+    private void SmoothRows(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || r - l < 2) { Info("Select at least 3 columns."); return; } var original = (double[,])ve.Clone(); PushUndo(); for (var row = t; row <= b; row++) for (var col = l + 1; col < r; col++) { var x = (rpm[col] - rpm[l]) / (rpm[r] - rpm[l]); x = Ease(x); ve[row, col] = ve[row, l] + (ve[row, r] - ve[row, l]) * x; } NormalizeChangedValues(original); Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Smoothed selected fuel rows  •  selection cleared"; }
     private double[,] CommitFuel3DSculpt(double[,] updated, IReadOnlyCollection<(int Row, int Col)> affected)
     {
         if (updated.GetLength(0) != ve.GetLength(0) || updated.GetLength(1) != ve.GetLength(1)) throw new ArgumentException("The sculpted VE surface does not match the fuel table.");
@@ -738,7 +743,7 @@ public sealed class FuelingPanel : Grid
         foreach (var (row, col) in affected)
         {
             if (row < 0 || row >= ve.GetLength(0) || col < 0 || col >= ve.GetLength(1)) throw new ArgumentException("A sculpted VE cell is outside the fuel table.");
-            candidate[row, col] = RoundEditableVe(updated[row, col]);
+            candidate[row, col] = RoundSmoothedVe(updated[row, col]);
             if (candidate[row, col] != ve[row, col]) changed++;
         }
         if (changed == 0) { status.Text = "Sculpt stroke rounded to the current VE values"; return (double[,])ve.Clone(); }
@@ -795,7 +800,7 @@ public sealed class FuelingPanel : Grid
         for (var row = 0; row < map.Length; row++)
         {
             csv.Append(FormatExactAxisValue(map[row]));
-            for (var col = 0; col < rpm.Length; col++) csv.Append(',').Append(ve[row, col].ToString("0.###", CultureInfo.InvariantCulture));
+            for (var col = 0; col < rpm.Length; col++) csv.Append(',').Append(FormatStoredVeValue(ve[row, col]));
             csv.AppendLine();
         }
         csv.Append("Engine RPM"); foreach (var value in rpm) csv.Append(',').Append(FormatExactAxisValue(value)); csv.AppendLine();
@@ -847,7 +852,7 @@ public sealed class FuelingPanel : Grid
         var endpoints = selectedCells.ToArray();
         var edited = TwoPointSurfaceEditor.Apply(ve, endpoints[0], endpoints[1], mode);
         var changes = edited.ChangedCells
-            .Select(point => (point.Row, point.Col, Value: RoundEditableVe(edited.Values[point.Row, point.Col])))
+            .Select(point => (point.Row, point.Col, Value: RoundSmoothedVe(edited.Values[point.Row, point.Col])))
             .Where(change => change.Value != ve[change.Row, change.Col]).ToArray();
         pinnedFuelSelection.Clear(); foreach (var point in edited.Path) pinnedFuelSelection.Add(point);
         start = end = null; selecting = false;
@@ -1089,17 +1094,23 @@ public sealed class FuelingPanel : Grid
     private static TextBlock FileNameTextBlock() => new() { Text = "Current file: Untitled", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, Margin = new Thickness(0, 3, 0, 0) };
     private Border DisplayPrecisionGroup()
     {
-        UIElement Field(string label, ComboBox box, string tip)
+        UIElement Field(string label, ComboBox box, string tip, double width = double.NaN)
         {
             var field = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 9, 0), ToolTip = tip };
-            field.Children.Add(new TextBlock { Text = label, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 10, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 5, 0) });
+            field.Children.Add(new TextBlock { Text = label, Width = width, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 10, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 5, 0) });
             field.Children.Add(box); return field;
         }
-        return ControlGroup("VE DECIMAL PRECISION",
-            Field("DISPLAY LEADING", leadingPrecisionBox, "Leading-digit threshold used only to display VE values."),
-            Field("DISPLAY TRAILING", trailingPrecisionBox, "Decimal places shown below the display leading-digit threshold."),
-            Field("ACTUAL LEADING", valueLeadingPrecisionBox, "Leading-digit threshold applied to stored VE values."),
-            Field("ACTUAL TRAILING", valueTrailingPrecisionBox, "Stored decimal places below the actual leading-digit threshold."));
+        StackPanel Row(string section, UIElement leading, UIElement trailing, UIElement zeroes)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, section == "DISPLAY" ? 5 : 0) };
+            row.Children.Add(new TextBlock { Text = section, Width = 58, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 10, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+            row.Children.Add(leading); row.Children.Add(trailing); row.Children.Add(zeroes); return row;
+        }
+        var content = new StackPanel();
+        content.Children.Add(new TextBlock { Text = "VE DECIMAL PRECISION", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) });
+        content.Children.Add(Row("DISPLAY", Field("LEADING", leadingPrecisionBox, "Leading-digit threshold used only to display VE values."), Field("TRAILING", trailingPrecisionBox, "Maximum decimal precision used for displayed values."), Field("ZEROES", displayTrailingZeroesBox, "Minimum decimal places shown by padding trailing zeroes.")));
+        content.Children.Add(Row("ACTUAL", Field("LEADING", valueLeadingPrecisionBox, "Leading-digit threshold applied to stored VE values."), Field("TRAILING", valueTrailingPrecisionBox, "Stored decimal precision."), Field("ZEROES", actualTrailingZeroesBox, "Minimum decimal places shown in actual-value text, clipboard data, and CSV output.")));
+        return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 7, 0), Child = content };
     }
     private static ComboBox PrecisionBox(int minimum, int maximum, int selected)
     {
@@ -1107,14 +1118,19 @@ public sealed class FuelingPanel : Grid
         for (var value = minimum; value <= maximum; value++) box.Items.Add(new ComboBoxItem { Content = value.ToString(CultureInfo.InvariantCulture), Tag = value, Foreground = Brushes.Black });
         box.SelectedIndex = Math.Clamp(selected - minimum, 0, box.Items.Count - 1); return box;
     }
+    private static ComboBox TrailingZeroesBox(int selected, string tip)
+    {
+        var box = PrecisionBox(0, 4, selected); box.ToolTip = tip; return box;
+    }
     private void ApplyDisplayPrecision()
     {
-        if (syncingDisplayPrecision || leadingPrecisionBox.SelectedItem is not ComboBoxItem { Tag: int displayLeading } || trailingPrecisionBox.SelectedItem is not ComboBoxItem { Tag: int displayTrailing } || valueLeadingPrecisionBox.SelectedItem is not ComboBoxItem { Tag: int actualLeading } || valueTrailingPrecisionBox.SelectedItem is not ComboBoxItem { Tag: int actualTrailing }) return;
+        if (syncingDisplayPrecision || leadingPrecisionBox.SelectedItem is not ComboBoxItem { Tag: int displayLeading } || trailingPrecisionBox.SelectedItem is not ComboBoxItem { Tag: int displayTrailing } || valueLeadingPrecisionBox.SelectedItem is not ComboBoxItem { Tag: int actualLeading } || valueTrailingPrecisionBox.SelectedItem is not ComboBoxItem { Tag: int actualTrailing } || displayTrailingZeroesBox.SelectedItem is not ComboBoxItem { Tag: int displayZeroes } || actualTrailingZeroesBox.SelectedItem is not ComboBoxItem { Tag: int actualZeroes }) return;
         var actualChanged = actualLeading != leadingValueDigits || actualTrailing != trailingValueDecimals;
         if (actualChanged && ve.Length > 0) PushUndo();
         leadingDisplayDigits = displayLeading; trailingDisplayDecimals = displayTrailing; leadingValueDigits = actualLeading; trailingValueDecimals = actualTrailing;
+        displayTrailingZeroPlaces = displayZeroes; actualTrailingZeroPlaces = actualZeroes;
         if (actualChanged) NormalizeStoredValues();
-        if (ve.Length > 0) { Save(); RefreshAll(); ApplyBoundaries(); status.Text = $"VE display {leadingDisplayDigits}/{trailingDisplayDecimals}  •  stored precision {leadingValueDigits}/{trailingValueDecimals}"; }
+        if (ve.Length > 0) { Save(); RefreshAll(); ApplyBoundaries(); status.Text = $"VE display {leadingDisplayDigits}/{trailingDisplayDecimals}  •  stored precision {leadingValueDigits}/{trailingValueDecimals}  •  trailing zeroes {displayTrailingZeroPlaces}/{actualTrailingZeroPlaces}"; }
     }
     private static Button Button(string text, RoutedEventHandler click, bool primary = false) { var button = new Button { Content = text, Padding = new Thickness(12, 7, 12, 7), Margin = new Thickness(0, 0, 7, 0), Background = new SolidColorBrush(primary ? Color.FromRgb(0, 103, 192) : Color.FromRgb(249, 249, 249)), Foreground = primary ? Brushes.White : new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(primary ? Color.FromRgb(0, 90, 170) : Color.FromRgb(190, 190, 190)), BorderThickness = new Thickness(1), FontWeight = FontWeights.SemiBold, FontFamily = new FontFamily("Segoe UI") }; button.Click += click; return button; }
     private static TextBox MatrixSizeBox(string text) => new() { Text = text, Width = 44, Padding = new Thickness(6), Margin = new Thickness(0, 0, 6, 0), TextAlignment = TextAlignment.Center, Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(Color.FromRgb(184, 184, 184)), BorderThickness = new Thickness(1) };
@@ -1142,7 +1158,8 @@ public sealed class FuelingPanel : Grid
                 SelectionOffsetAmount = selectionOffsetAmount, SelectionOffsetIsPercentage = selectionOffsetIsPercentage,
                 VeSetup = veSetupSettings, ShowFuelFlow = showFuelFlow,
                 LeadingDisplayDigits = leadingDisplayDigits, TrailingDisplayDecimals = trailingDisplayDecimals,
-                LeadingValueDigits = leadingValueDigits, TrailingValueDecimals = trailingValueDecimals
+                LeadingValueDigits = leadingValueDigits, TrailingValueDecimals = trailingValueDecimals,
+                DisplayTrailingZeroPlaces = displayTrailingZeroPlaces, ActualTrailingZeroPlaces = actualTrailingZeroPlaces
             };
             Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!);
             var json = JsonSerializer.Serialize(state); if (string.Equals(json, lastSavedJson, StringComparison.Ordinal)) return;
@@ -1174,9 +1191,10 @@ public sealed class FuelingPanel : Grid
             refinementStrength = state.RefinementStrength; refinementPasses = state.RefinementPasses; advancedSmoothingOptions = state.AdvancedOptions ?? advancedSmoothingOptions;
             selectionOffsetAmount = state.SelectionOffsetAmount; selectionOffsetIsPercentage = state.SelectionOffsetIsPercentage;
             veSetupSettings = state.VeSetup ?? veSetupSettings; showFuelFlow = state.ShowFuelFlow;
-            leadingDisplayDigits = Math.Clamp(state.LeadingDisplayDigits, 1, 4); trailingDisplayDecimals = Math.Clamp(state.TrailingDisplayDecimals, 0, 3);
-            leadingValueDigits = Math.Clamp(state.LeadingValueDigits, 1, 4); trailingValueDecimals = Math.Clamp(state.TrailingValueDecimals, 0, 3);
-            syncingDisplayPrecision = true; leadingPrecisionBox.SelectedIndex = leadingDisplayDigits - 1; trailingPrecisionBox.SelectedIndex = trailingDisplayDecimals; valueLeadingPrecisionBox.SelectedIndex = leadingValueDigits - 1; valueTrailingPrecisionBox.SelectedIndex = trailingValueDecimals; syncingDisplayPrecision = false;
+            leadingDisplayDigits = Math.Clamp(state.LeadingDisplayDigits, 1, 4); trailingDisplayDecimals = Math.Clamp(state.TrailingDisplayDecimals, 0, 4);
+            leadingValueDigits = Math.Clamp(state.LeadingValueDigits, 1, 4); trailingValueDecimals = Math.Clamp(state.TrailingValueDecimals, 0, 4);
+            displayTrailingZeroPlaces = Math.Clamp(state.DisplayTrailingZeroPlaces, 0, 4); actualTrailingZeroPlaces = Math.Clamp(state.ActualTrailingZeroPlaces, 0, 4);
+            syncingDisplayPrecision = true; leadingPrecisionBox.SelectedIndex = leadingDisplayDigits - 1; trailingPrecisionBox.SelectedIndex = trailingDisplayDecimals; valueLeadingPrecisionBox.SelectedIndex = leadingValueDigits - 1; valueTrailingPrecisionBox.SelectedIndex = trailingValueDecimals; displayTrailingZeroesBox.SelectedIndex = displayTrailingZeroPlaces; actualTrailingZeroesBox.SelectedIndex = actualTrailingZeroPlaces; syncingDisplayPrecision = false;
             syncingConversion = true; conversionViewBox.IsChecked = showFuelFlow; syncingConversion = false;
             fuelTableTitle.Text = showFuelFlow ? "Fuel Table — Estimated Fuel Flow (lb/hr)" : "Fuel Table — VE (%)";
             syncingLearnApply = true;
@@ -1221,11 +1239,27 @@ public sealed class FuelingPanel : Grid
         public int TrailingDisplayDecimals { get; set; } = 1;
         public int LeadingValueDigits { get; set; } = 4;
         public int TrailingValueDecimals { get; set; } = 3;
+        public int DisplayTrailingZeroPlaces { get; set; } = 1;
+        public int ActualTrailingZeroPlaces { get; set; } = 3;
     }
 
     private void NormalizeStoredValues()
     {
         for (var row = 0; row < ve.GetLength(0); row++) for (var col = 0; col < ve.GetLength(1); col++) ve[row, col] = RoundEditableVe(ve[row, col]);
+    }
+
+    private void NormalizeChangedValues(double[,] original)
+    {
+        if (original.GetLength(0) != ve.GetLength(0) || original.GetLength(1) != ve.GetLength(1))
+        {
+            NormalizeStoredValues();
+            return;
+        }
+
+        for (var row = 0; row < ve.GetLength(0); row++)
+        for (var col = 0; col < ve.GetLength(1); col++)
+            if (ve[row, col] != original[row, col])
+                ve[row, col] = RoundSmoothedVe(ve[row, col]);
     }
 
     private sealed record FuelHistorySnapshot(double[,] Values, int LeadingValueDigits, int TrailingValueDecimals);

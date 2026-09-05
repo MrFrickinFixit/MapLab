@@ -37,11 +37,13 @@
       "summary": "Control how values look separately from how values are stored.",
       "keywords": ["precision", "decimal", "leading", "trailing", "rounding", "stored value", "display"],
       "body": [
-        "Fueling, Ignition Timing, and Map Sandbox each provide Display Leading, Display Trailing, Actual Leading, and Actual Trailing controls.",
+        "Fueling, Ignition Timing, and Map Sandbox each provide Display Leading, Display Trailing, Actual Leading, and Actual Trailing controls. Both trailing controls support zero through four decimal places.",
+        "Display Zeroes selects zero through four minimum decimal places for table, tooltip, 3D, and Excel display text. Display Trailing remains the maximum calculated display precision unless the selected zero padding is higher.",
+        "Actual Zeroes selects zero through four minimum decimal places for focused-cell text, stored-value tooltip text, clipboard copies, and CSV output. It changes numeric text formatting only—the underlying value is unchanged.",
         "Display precision changes only how values appear. Actual precision controls the stored table values.",
         "With three actual leading digits and one actual trailing decimal, 85.47 becomes 85.5 while 105.47 becomes 105.",
         "Pasted table values are stored exactly as supplied and are not rounded during paste or autosave. Select or focus a cell to see its stored value.",
-        "Pasted values and direct single-cell or selected-group edits are stored exactly as entered. Calculated changes such as offsets, smoothing, generated values, and 3D edits use the selected actual precision.",
+        "Pasted values and direct single-cell or selected-group edits are stored exactly as entered. Calculated changes use the selected actual precision. Fueling, Timing, and Sandbox smoothing use the full stored values for their calculations, then round only changed results to Actual Trailing decimal places regardless of value magnitude; untouched cells and preserved boundary anchors retain their exact stored values.",
         "Changing either Actual control rounds the complete active table, including pasted and directly edited values, as one Undo step.",
         "The display format is also used by the 3D value scale, 3D tooltip, and Excel number formatting. Clipboard and CSV data retain stored precision."
       ]

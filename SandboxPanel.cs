@@ -18,6 +18,7 @@ public sealed class SandboxPanel : Grid
     private readonly TextBlock currentFileText = new() { Text = "Current file: Untitled", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, Margin = new Thickness(0, 3, 0, 0) };
     private readonly TextBox xSize = Box("31", 44), ySize = Box("31", 44);
     private readonly ComboBox unitBox, xUnitBox, leadingPrecisionBox, trailingPrecisionBox, valueLeadingPrecisionBox, valueTrailingPrecisionBox;
+    private readonly ComboBox displayTrailingZeroesBox, actualTrailingZeroesBox;
     private TextBox[,] cells = new TextBox[0, 0];
     private TextBox[] mapEditors = [], rpmEditors = [];
     private double[,] values = new double[0, 0];
@@ -41,6 +42,7 @@ public sealed class SandboxPanel : Grid
     private bool offsetPercent;
     private int leadingDisplayDigits = 3, trailingDisplayDecimals = 1;
     private int leadingValueDigits = 4, trailingValueDecimals = 3;
+    private int displayTrailingZeroPlaces = 1, actualTrailingZeroPlaces = 3;
     private bool syncingDisplayPrecision;
     private static string SavePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimingTableCalculator", "sandbox-autosave.json");
     private string? lastSavedJson;
@@ -53,9 +55,10 @@ public sealed class SandboxPanel : Grid
     private string XFormat => xUnit.Equals("RPM", StringComparison.OrdinalIgnoreCase) ? "0" : "0.###";
     private static string FormatExactAxisValue(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
     private string XAxisTitle => xUnit.Equals("Unitless", StringComparison.OrdinalIgnoreCase) ? "X AXIS" : $"X AXIS ({xUnit})";
-    private string FormatDisplayValue(double value) => MagnitudeNumberFormatter.Format(value, leadingDisplayDigits, trailingDisplayDecimals);
+    private string FormatDisplayValue(double value) => MagnitudeNumberFormatter.Format(value, leadingDisplayDigits, trailingDisplayDecimals, displayTrailingZeroPlaces);
     private double RoundEditableValue(double value) => Math.Round(value, MagnitudeNumberFormatter.DecimalPlaces(value, leadingValueDigits, trailingValueDecimals), MidpointRounding.AwayFromZero);
-    private static string FormatStoredValue(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+    private double RoundSmoothedValue(double value) => Math.Round(value, trailingValueDecimals, MidpointRounding.AwayFromZero);
+    private string FormatStoredValue(double value) => MagnitudeNumberFormatter.FormatActual(value, trailingValueDecimals, actualTrailingZeroPlaces);
 
     public SandboxPanel()
     {
@@ -72,13 +75,16 @@ public sealed class SandboxPanel : Grid
         RefreshXUnitItems();
         xUnitBox.SelectionChanged += (_, _) => { if (!syncingUnit) XUnitSelectionChanged(); };
         leadingPrecisionBox = PrecisionBox(1, 4, leadingDisplayDigits);
-        trailingPrecisionBox = PrecisionBox(0, 3, trailingDisplayDecimals);
+        trailingPrecisionBox = PrecisionBox(0, 4, trailingDisplayDecimals);
         valueLeadingPrecisionBox = PrecisionBox(1, 4, leadingValueDigits);
-        valueTrailingPrecisionBox = PrecisionBox(0, 3, trailingValueDecimals);
+        valueTrailingPrecisionBox = PrecisionBox(0, 4, trailingValueDecimals);
+        displayTrailingZeroesBox = TrailingZeroesBox(displayTrailingZeroPlaces, "Minimum decimal places shown by padding display values with trailing zeroes.");
+        actualTrailingZeroesBox = TrailingZeroesBox(actualTrailingZeroPlaces, "Minimum decimal places shown in actual-value text, clipboard data, and CSV exports.");
         leadingPrecisionBox.SelectionChanged += DisplayPrecisionChanged;
         trailingPrecisionBox.SelectionChanged += DisplayPrecisionChanged;
         valueLeadingPrecisionBox.SelectionChanged += DisplayPrecisionChanged;
         valueTrailingPrecisionBox.SelectionChanged += DisplayPrecisionChanged;
+        displayTrailingZeroesBox.SelectionChanged += DisplayPrecisionChanged; actualTrailingZeroesBox.SelectionChanged += DisplayPrecisionChanged;
 
         var heading = new Grid { Margin = new Thickness(4, 0, 0, 20) };
         heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -105,7 +111,7 @@ public sealed class SandboxPanel : Grid
         Grid.SetRow(commandBar, 1); Children.Add(commandBar);
 
         var bottomTools = new StackPanel { Orientation = Orientation.Horizontal };
-        bottomTools.Children.Add(Group("DECIMAL PRECISION", Label("DISPLAY LEADING"), leadingPrecisionBox, Label("DISPLAY TRAILING"), trailingPrecisionBox, Label("ACTUAL LEADING"), valueLeadingPrecisionBox, Label("ACTUAL TRAILING"), valueTrailingPrecisionBox));
+        bottomTools.Children.Add(PrecisionGroup());
         bottomTools.Children.Add(Group("VIEW & OUTPUT", Button("▦  3D Map", View3D), Button("⇩  Export CSV", ExportCsv), Button("▤  Export Excel", ExportExcel, true)));
         bottomTools.Children.Add(Group("HISTORY", Button("↶  Undo", (_, _) => Undo()), Button("↷  Redo", (_, _) => Redo())));
         var bottomCommandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = bottomTools, Margin = new Thickness(0, 10, 0, 0) };
@@ -305,9 +311,9 @@ public sealed class SandboxPanel : Grid
         Build(); Save(); status.Text = $"Sandbox resized to {cols} X × {rows} Y";
     }
 
-    private void AdvancedSmooth(object? sender, RoutedEventArgs e) { var selected = Selected(); if (selected.Count == 0) { Info("Select cells to smooth."); return; } ModelessWindowManager.ShowOrActivate("Sandbox.AdvancedSmoothing", () => new AdvancedSmoothingWindow(smoothing, dialog => WorkingRunner.Run(this, () => { smoothing = dialog.Options; PushUndo(); values = AdvancedSmoother.Apply(values, selected, smoothing, rpm, map); Changed($"Smoothed {selected.Count} sandbox cells"); })) { Owner = Window.GetWindow(this) }); }
-    private void SmoothColumns(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || b - t < 2) { Info("Select at least three rows."); return; } PushUndo(); for (var c = l; c <= r; c++) for (var row = t + 1; row < b; row++) { var x = (map[t] - map[row]) / (map[t] - map[b]); values[row, c] = values[t, c] + (values[b, c] - values[t, c]) * Ease(x); } Changed("Smoothed selected columns"); ClearCellSelection(); status.Text = "Smoothed selected sandbox columns  •  selection cleared"; }
-    private void SmoothRows(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || r - l < 2) { Info("Select at least three columns."); return; } PushUndo(); for (var row = t; row <= b; row++) for (var c = l + 1; c < r; c++) { var x = (rpm[c] - rpm[l]) / (rpm[r] - rpm[l]); values[row, c] = values[row, l] + (values[row, r] - values[row, l]) * Ease(x); } Changed("Smoothed selected rows"); ClearCellSelection(); status.Text = "Smoothed selected sandbox rows  •  selection cleared"; }
+    private void AdvancedSmooth(object? sender, RoutedEventArgs e) { var selected = Selected(); if (selected.Count == 0) { Info("Select cells to smooth."); return; } ModelessWindowManager.ShowOrActivate("Sandbox.AdvancedSmoothing", () => new AdvancedSmoothingWindow(smoothing, dialog => WorkingRunner.Run(this, () => { smoothing = dialog.Options; var original = (double[,])values.Clone(); PushUndo(); values = AdvancedSmoother.Apply(values, selected, smoothing, rpm, map); NormalizeChangedValues(original); Changed($"Smoothed {selected.Count} sandbox cells", normalize: false); })) { Owner = Window.GetWindow(this) }); }
+    private void SmoothColumns(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || b - t < 2) { Info("Select at least three rows."); return; } var original = (double[,])values.Clone(); PushUndo(); for (var c = l; c <= r; c++) for (var row = t + 1; row < b; row++) { var x = (map[t] - map[row]) / (map[t] - map[b]); values[row, c] = values[t, c] + (values[b, c] - values[t, c]) * Ease(x); } NormalizeChangedValues(original); Changed("Smoothed selected columns", normalize: false); ClearCellSelection(); status.Text = "Smoothed selected sandbox columns  •  selection cleared"; }
+    private void SmoothRows(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || r - l < 2) { Info("Select at least three columns."); return; } var original = (double[,])values.Clone(); PushUndo(); for (var row = t; row <= b; row++) for (var c = l + 1; c < r; c++) { var x = (rpm[c] - rpm[l]) / (rpm[r] - rpm[l]); values[row, c] = values[row, l] + (values[row, r] - values[row, l]) * Ease(x); } NormalizeChangedValues(original); Changed("Smoothed selected rows", normalize: false); ClearCellSelection(); status.Text = "Smoothed selected sandbox rows  •  selection cleared"; }
     private void Clear(object? sender, RoutedEventArgs e) { var selected = Selected(); if (selected.Count == 0) return; PushUndo(); foreach (var p in selected) values[p.Row, p.Col] = 0; Changed($"Cleared {selected.Count} sandbox cells"); }
     private void Offset(object? sender, RoutedEventArgs e) { var selected = Selected(); if (selected.Count == 0) return; ModelessWindowManager.ShowOrActivate("Sandbox.Offset", () => new OffsetSelectionWindow(offsetAmount, offsetPercent, (direction, amount, percent) => { offsetAmount = amount; offsetPercent = percent; PushUndo(); foreach (var p in selected) values[p.Row, p.Col] = percent ? values[p.Row, p.Col] * (1 + direction * amount / 100d) : values[p.Row, p.Col] + direction * amount; Changed($"Offset {selected.Count} sandbox cells"); }) { Owner = Window.GetWindow(this) }); }
 
@@ -360,7 +366,7 @@ public sealed class SandboxPanel : Grid
             case SurfaceSelectionAction.Offset: Offset(this, new RoutedEventArgs()); break;
             case SurfaceSelectionAction.Smooth: SmoothBasic(); Refresh3D(); break;
             case SurfaceSelectionAction.Advanced:
-                var exact = selected.ToArray(); ModelessWindowManager.ShowOrActivate("Sandbox.AdvancedSmoothing", () => new AdvancedSmoothingWindow(smoothing, dialog => WorkingRunner.Run(this, () => { smoothing = dialog.Options; PushUndo(); values = AdvancedSmoother.Apply(values, exact, smoothing, rpm, map); Changed($"Smoothed {exact.Length} sandbox cells"); Refresh3D(); })) { Owner = Window.GetWindow(this) }); break;
+                var exact = selected.ToArray(); ModelessWindowManager.ShowOrActivate("Sandbox.AdvancedSmoothing", () => new AdvancedSmoothingWindow(smoothing, dialog => WorkingRunner.Run(this, () => { smoothing = dialog.Options; var original = (double[,])values.Clone(); PushUndo(); values = AdvancedSmoother.Apply(values, exact, smoothing, rpm, map); NormalizeChangedValues(original); Changed($"Smoothed {exact.Length} sandbox cells", normalize: false); Refresh3D(); })) { Owner = Window.GetWindow(this) }); break;
             case SurfaceSelectionAction.SmoothRows: SmoothRows(this, new RoutedEventArgs()); Refresh3D(); break;
             case SurfaceSelectionAction.SmoothColumns: SmoothColumns(this, new RoutedEventArgs()); Refresh3D(); break;
             case SurfaceSelectionAction.Clear: Clear(this, new RoutedEventArgs()); Refresh3D(); break;
@@ -372,13 +378,13 @@ public sealed class SandboxPanel : Grid
         var endpoints = selected.ToArray();
         var edited = TwoPointSurfaceEditor.Apply(values, endpoints[0], endpoints[1], mode);
         var changes = edited.ChangedCells
-            .Select(point => (point.Row, point.Col, Value: RoundEditableValue(edited.Values[point.Row, point.Col])))
+            .Select(point => (point.Row, point.Col, Value: RoundSmoothedValue(edited.Values[point.Row, point.Col])))
             .Where(change => change.Value != values[change.Row, change.Col]).ToArray();
         pinned.Clear(); foreach (var point in edited.Path) pinned.Add(point);
         start = end = null; selecting = false;
         if (changes.Length == 0) { Refresh(); UpdateSelection(); status.Text = $"The selected sandbox path is already {mode.ToString().ToLowerInvariant()}"; return; }
         PushUndo(); foreach (var change in changes) values[change.Row, change.Col] = change.Value;
-        Changed($"{(mode == TwoPointSurfaceMode.Flatten ? "Flattened" : "Smoothed")} {changes.Length} sandbox cells between two fixed endpoints"); UpdateSelection();
+        Changed($"{(mode == TwoPointSurfaceMode.Flatten ? "Flattened" : "Smoothed")} {changes.Length} sandbox cells between two fixed endpoints", normalize: false); UpdateSelection();
     }
     private double[,] Commit3DSculpt(double[,] updated, IReadOnlyCollection<(int Row, int Col)> affected)
     {
@@ -387,19 +393,19 @@ public sealed class SandboxPanel : Grid
         foreach (var (row, col) in affected)
         {
             if (row < 0 || row >= values.GetLength(0) || col < 0 || col >= values.GetLength(1)) throw new ArgumentException("A sculpted sandbox cell is outside the table.");
-            candidate[row, col] = RoundEditableValue(updated[row, col]);
+            candidate[row, col] = RoundSmoothedValue(updated[row, col]);
             if (candidate[row, col] != values[row, col]) changed++;
         }
         if (changed == 0) { status.Text = "Sculpt stroke rounded to the current sandbox values"; return (double[,])values.Clone(); }
-        PushUndo(); values = candidate; Changed($"Committed a 3D sculpt stroke to {changed} sandbox cells");
+        PushUndo(); values = candidate; Changed($"Committed a 3D sculpt stroke to {changed} sandbox cells", normalize: false);
         return (double[,])values.Clone();
     }
-    private void SmoothBasic() { var selected = Selected(); if (selected.Count == 0) return; PushUndo(); values = AdvancedSmoother.Apply(values, selected, new AdvancedSmoothingOptions(AdvancedSmoothingAlgorithm.StandardWeighted, .65, 2, false, true, .5)); Changed($"Smoothed {selected.Count} sandbox cells"); }
+    private void SmoothBasic() { var selected = Selected(); if (selected.Count == 0) return; var original = (double[,])values.Clone(); PushUndo(); values = AdvancedSmoother.Apply(values, selected, new AdvancedSmoothingOptions(AdvancedSmoothingAlgorithm.StandardWeighted, .65, 2, false, true, .5)); NormalizeChangedValues(original); Changed($"Smoothed {selected.Count} sandbox cells", normalize: false); }
 
     private void Copy()
     {
         if (!Bounds(out var t, out var b, out var l, out var r)) return; var text = new StringBuilder();
-        for (var row = t; row <= b; row++) { for (var c = l; c <= r; c++) { if (c > l) text.Append('\t'); text.Append(values[row, c].ToString("0.###", CultureInfo.InvariantCulture)); } if (row < b) text.AppendLine(); }
+        for (var row = t; row <= b; row++) { for (var c = l; c <= r; c++) { if (c > l) text.Append('\t'); text.Append(FormatStoredValue(values[row, c])); } if (row < b) text.AppendLine(); }
         try { Clipboard.SetText(text.ToString()); ClearCellSelection(); status.Text = "Copied sandbox selection  •  selection cleared"; }
         catch { Info("The clipboard is currently unavailable."); }
     }
@@ -413,8 +419,8 @@ public sealed class SandboxPanel : Grid
         ClearCellSelection(); Changed($"Pasted {parsed[0].Length} × {parsed.Length} sandbox cells exactly as supplied", normalize: false);
     }
 
-    private void ExportCsv(object? sender, RoutedEventArgs e) { var dialog = new SaveFileDialog { Filter = "CSV file (*.csv)|*.csv", FileName = "map-sandbox.csv" }; if (dialog.ShowDialog(Window.GetWindow(this)) != true) return; var csv = new StringBuilder(); for (var r = 0; r < map.Length; r++) { csv.Append(FormatExactAxisValue(map[r])); for (var c = 0; c < rpm.Length; c++) csv.Append(',').Append(values[r, c].ToString("0.###", CultureInfo.InvariantCulture)); csv.AppendLine(); } csv.Append(XAxisTitle); foreach (var value in rpm) csv.Append(',').Append(FormatExactAxisValue(value)); File.WriteAllText(dialog.FileName, csv.ToString()); status.Text = $"Saved {Path.GetFileName(dialog.FileName)}"; }
-    private void ExportExcel(object? sender, RoutedEventArgs e) { var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "map-sandbox.xlsx" }; if (dialog.ShowDialog(Window.GetWindow(this)) != true) return; ExcelTimingExporter.Export(dialog.FileName, rpm, map, values, mapUnit, Colors.Red, Colors.Lime, Colors.Magenta, false, "Map Sandbox", "Custom Map", XAxisTitle, MagnitudeNumberFormatter.ExcelFormat(leadingDisplayDigits, trailingDisplayDecimals)); status.Text = $"Saved {Path.GetFileName(dialog.FileName)}"; }
+    private void ExportCsv(object? sender, RoutedEventArgs e) { var dialog = new SaveFileDialog { Filter = "CSV file (*.csv)|*.csv", FileName = "map-sandbox.csv" }; if (dialog.ShowDialog(Window.GetWindow(this)) != true) return; var csv = new StringBuilder(); for (var r = 0; r < map.Length; r++) { csv.Append(FormatExactAxisValue(map[r])); for (var c = 0; c < rpm.Length; c++) csv.Append(',').Append(FormatStoredValue(values[r, c])); csv.AppendLine(); } csv.Append(XAxisTitle); foreach (var value in rpm) csv.Append(',').Append(FormatExactAxisValue(value)); File.WriteAllText(dialog.FileName, csv.ToString()); status.Text = $"Saved {Path.GetFileName(dialog.FileName)}"; }
+    private void ExportExcel(object? sender, RoutedEventArgs e) { var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "map-sandbox.xlsx" }; if (dialog.ShowDialog(Window.GetWindow(this)) != true) return; ExcelTimingExporter.Export(dialog.FileName, rpm, map, values, mapUnit, Colors.Red, Colors.Lime, Colors.Magenta, false, "Map Sandbox", "Custom Map", XAxisTitle, MagnitudeNumberFormatter.ExcelFormat(leadingDisplayDigits, trailingDisplayDecimals, displayTrailingZeroPlaces)); status.Text = $"Saved {Path.GetFileName(dialog.FileName)}"; }
 
     private void RefreshUnitItems()
     {
@@ -480,24 +486,26 @@ public sealed class SandboxPanel : Grid
     private void PushUndo() { if (loading || values.Length == 0) return; undo.Push(Snapshot()); while (undo.Count > 50) { var keep = undo.Reverse().Skip(1).ToArray(); undo.Clear(); foreach (var item in keep) undo.Push(item); } redo.Clear(); }
     private void Undo() { if (undo.Count == 0) { status.Text = "Nothing to undo"; return; } WorkingRunner.Run(this, () => { redo.Push(Snapshot()); Restore(undo.Pop()); status.Text = "Sandbox change undone"; }); }
     private void Redo() { if (redo.Count == 0) { status.Text = "Nothing to redo"; return; } WorkingRunner.Run(this, () => { undo.Push(Snapshot()); Restore(redo.Pop()); status.Text = "Sandbox change redone"; }); }
-    private SandboxSnapshot Snapshot() => new(rpm.ToArray(), map.ToArray(), mapUnit, ToJagged(values), customUnits.ToArray(), xUnit, customXUnits.ToArray(), leadingDisplayDigits, trailingDisplayDecimals, leadingValueDigits, trailingValueDecimals);
-    private void Restore(SandboxSnapshot snapshot) { loading = true; rpm = snapshot.Rpm.ToArray(); map = snapshot.Map.ToArray(); mapUnit = snapshot.MapUnit; xUnit = snapshot.XUnit ?? "RPM"; values = FromJagged(snapshot.Values); customUnits.Clear(); customUnits.AddRange(snapshot.CustomUnits ?? []); customXUnits.Clear(); customXUnits.AddRange(snapshot.CustomXUnits ?? []); ApplyPrecision(snapshot.LeadingDisplayDigits, snapshot.TrailingDisplayDecimals, snapshot.LeadingValueDigits, snapshot.TrailingValueDecimals); RefreshUnitItems(); RefreshXUnitItems(); xSize.Text = rpm.Length.ToString(); ySize.Text = map.Length.ToString(); loading = false; Build(); Save(); }
+    private SandboxSnapshot Snapshot() => new(rpm.ToArray(), map.ToArray(), mapUnit, ToJagged(values), customUnits.ToArray(), xUnit, customXUnits.ToArray(), leadingDisplayDigits, trailingDisplayDecimals, leadingValueDigits, trailingValueDecimals, displayTrailingZeroPlaces, actualTrailingZeroPlaces);
+    private void Restore(SandboxSnapshot snapshot) { loading = true; rpm = snapshot.Rpm.ToArray(); map = snapshot.Map.ToArray(); mapUnit = snapshot.MapUnit; xUnit = snapshot.XUnit ?? "RPM"; values = FromJagged(snapshot.Values); customUnits.Clear(); customUnits.AddRange(snapshot.CustomUnits ?? []); customXUnits.Clear(); customXUnits.AddRange(snapshot.CustomXUnits ?? []); ApplyPrecision(snapshot.LeadingDisplayDigits, snapshot.TrailingDisplayDecimals, snapshot.LeadingValueDigits, snapshot.TrailingValueDecimals, snapshot.DisplayTrailingZeroPlaces, snapshot.ActualTrailingZeroPlaces); RefreshUnitItems(); RefreshXUnitItems(); xSize.Text = rpm.Length.ToString(); ySize.Text = map.Length.ToString(); loading = false; Build(); Save(); }
 
     private void Changed(string message, bool normalize = true) { if (normalize) NormalizeStoredValues(); Refresh(); UpdateSelection(); Save(); status.Text = message; }
-    private void DisplayPrecisionChanged(object sender, SelectionChangedEventArgs e)
+    private void DisplayPrecisionChanged(object sender, RoutedEventArgs e)
     {
-        if (syncingDisplayPrecision || leadingPrecisionBox.SelectedItem is not ComboBoxItem displayLeadingItem || trailingPrecisionBox.SelectedItem is not ComboBoxItem displayTrailingItem || valueLeadingPrecisionBox.SelectedItem is not ComboBoxItem valueLeadingItem || valueTrailingPrecisionBox.SelectedItem is not ComboBoxItem valueTrailingItem) return;
-        if (!int.TryParse(displayLeadingItem.Content?.ToString(), out var displayLeading) || !int.TryParse(displayTrailingItem.Content?.ToString(), out var displayTrailing) || !int.TryParse(valueLeadingItem.Content?.ToString(), out var actualLeading) || !int.TryParse(valueTrailingItem.Content?.ToString(), out var actualTrailing)) return;
+        if (syncingDisplayPrecision || leadingPrecisionBox.SelectedItem is not ComboBoxItem displayLeadingItem || trailingPrecisionBox.SelectedItem is not ComboBoxItem displayTrailingItem || valueLeadingPrecisionBox.SelectedItem is not ComboBoxItem valueLeadingItem || valueTrailingPrecisionBox.SelectedItem is not ComboBoxItem valueTrailingItem || displayTrailingZeroesBox.SelectedItem is not ComboBoxItem displayZeroesItem || actualTrailingZeroesBox.SelectedItem is not ComboBoxItem actualZeroesItem) return;
+        if (!int.TryParse(displayLeadingItem.Content?.ToString(), out var displayLeading) || !int.TryParse(displayTrailingItem.Content?.ToString(), out var displayTrailing) || !int.TryParse(valueLeadingItem.Content?.ToString(), out var actualLeading) || !int.TryParse(valueTrailingItem.Content?.ToString(), out var actualTrailing) || !int.TryParse(displayZeroesItem.Content?.ToString(), out var displayZeroes) || !int.TryParse(actualZeroesItem.Content?.ToString(), out var actualZeroes)) return;
         var actualChanged = actualLeading != leadingValueDigits || actualTrailing != trailingValueDecimals;
         if (actualChanged && values.Length > 0) PushUndo();
         leadingDisplayDigits = displayLeading; trailingDisplayDecimals = displayTrailing; leadingValueDigits = actualLeading; trailingValueDecimals = actualTrailing;
+        displayTrailingZeroPlaces = displayZeroes; actualTrailingZeroPlaces = actualZeroes;
         if (actualChanged) NormalizeStoredValues();
         Refresh(); Save(); status.Text = $"Sandbox display {leadingDisplayDigits}/{trailingDisplayDecimals}  •  stored precision {leadingValueDigits}/{trailingValueDecimals}";
     }
-    private void ApplyPrecision(int displayLeading, int displayTrailing, int actualLeading, int actualTrailing)
+    private void ApplyPrecision(int displayLeading, int displayTrailing, int actualLeading, int actualTrailing, int displayZeroes, int actualZeroes)
     {
-        leadingDisplayDigits = Math.Clamp(displayLeading, 1, 4); trailingDisplayDecimals = Math.Clamp(displayTrailing, 0, 3); leadingValueDigits = Math.Clamp(actualLeading, 1, 4); trailingValueDecimals = Math.Clamp(actualTrailing, 0, 3);
-        syncingDisplayPrecision = true; leadingPrecisionBox.SelectedIndex = leadingDisplayDigits - 1; trailingPrecisionBox.SelectedIndex = trailingDisplayDecimals; valueLeadingPrecisionBox.SelectedIndex = leadingValueDigits - 1; valueTrailingPrecisionBox.SelectedIndex = trailingValueDecimals; syncingDisplayPrecision = false;
+        leadingDisplayDigits = Math.Clamp(displayLeading, 1, 4); trailingDisplayDecimals = Math.Clamp(displayTrailing, 0, 4); leadingValueDigits = Math.Clamp(actualLeading, 1, 4); trailingValueDecimals = Math.Clamp(actualTrailing, 0, 4);
+        displayTrailingZeroPlaces = Math.Clamp(displayZeroes, 0, 4); actualTrailingZeroPlaces = Math.Clamp(actualZeroes, 0, 4);
+        syncingDisplayPrecision = true; leadingPrecisionBox.SelectedIndex = leadingDisplayDigits - 1; trailingPrecisionBox.SelectedIndex = trailingDisplayDecimals; valueLeadingPrecisionBox.SelectedIndex = leadingValueDigits - 1; valueTrailingPrecisionBox.SelectedIndex = trailingValueDecimals; displayTrailingZeroesBox.SelectedIndex = displayTrailingZeroPlaces; actualTrailingZeroesBox.SelectedIndex = actualTrailingZeroPlaces; syncingDisplayPrecision = false;
     }
     private void Refresh()
     {
@@ -511,7 +519,7 @@ public sealed class SandboxPanel : Grid
     private void UpdateCellToolTip(int row, int col)
     {
         if (row < 0 || row >= map.Length || col < 0 || col >= rpm.Length || row >= cells.GetLength(0) || col >= cells.GetLength(1) || cells[row, col] is null) return;
-        cells[row, col].ToolTip = $"{XAxisTitle}: {rpm[col].ToString(XFormat, CultureInfo.InvariantCulture)}  •  {YAxisTitle}: {map[row].ToString(MapFormat, CultureInfo.InvariantCulture)}  •  Value: {FormatDisplayValue(values[row, col])}";
+        cells[row, col].ToolTip = $"{XAxisTitle}: {rpm[col].ToString(XFormat, CultureInfo.InvariantCulture)}  •  {YAxisTitle}: {map[row].ToString(MapFormat, CultureInfo.InvariantCulture)}  •  Display: {FormatDisplayValue(values[row, col])}  •  Actual: {FormatStoredValue(values[row, col])}";
     }
     private HashSet<(int Row, int Col)> Selected() { var result = pinned.ToHashSet(); if (Bounds(out var t, out var b, out var l, out var r)) for (var row = t; row <= b; row++) for (var c = l; c <= r; c++) result.Add((row, c)); return result; }
     private bool Bounds(out int top, out int bottom, out int left, out int right) { top = bottom = left = right = 0; if (start is null || end is null) return false; top = Math.Min(start.Value.Row, end.Value.Row); bottom = Math.Max(start.Value.Row, end.Value.Row); left = Math.Min(start.Value.Col, end.Value.Col); right = Math.Max(start.Value.Col, end.Value.Col); return true; }
@@ -537,7 +545,7 @@ public sealed class SandboxPanel : Grid
 
     private void SandboxKeyDown(object sender, KeyEventArgs e) { if (Keyboard.Modifiers != ModifierKeys.Control) return; if (e.Key == Key.A) { pinned.Clear(); start = (0, 0); end = (map.Length - 1, rpm.Length - 1); UpdateSelection(); e.Handled = true; } else if (e.Key == Key.C) { Copy(); e.Handled = true; } else if (e.Key == Key.V) { Paste(); e.Handled = true; } else if (e.Key == Key.Z) { Undo(); e.Handled = true; } else if (e.Key == Key.Y) { Redo(); e.Handled = true; } }
     private void Save() { if (loading || values.Length == 0) return; try { var json = JsonSerializer.Serialize(Snapshot()); if (string.Equals(json, lastSavedJson, StringComparison.Ordinal)) return; Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!); File.WriteAllText(SavePath, json); lastSavedJson = json; } catch { } }
-    private bool Load() { try { if (!File.Exists(SavePath)) return false; var savedJson = File.ReadAllText(SavePath); var state = JsonSerializer.Deserialize<SandboxSnapshot>(savedJson); if (state is null || state.Rpm.Length is < 8 or > 64 || state.Map.Length is < 8 or > 64 || state.Values.Length != state.Map.Length || state.Values.Any(row => row.Length != state.Rpm.Length)) return false; rpm = state.Rpm; map = state.Map; mapUnit = state.MapUnit; xUnit = state.XUnit ?? "RPM"; values = FromJagged(state.Values); customUnits.Clear(); customUnits.AddRange(state.CustomUnits ?? []); customXUnits.Clear(); customXUnits.AddRange(state.CustomXUnits ?? []); ApplyPrecision(state.LeadingDisplayDigits, state.TrailingDisplayDecimals, state.LeadingValueDigits, state.TrailingValueDecimals); RefreshUnitItems(); RefreshXUnitItems(); xSize.Text = rpm.Length.ToString(); ySize.Text = map.Length.ToString(); lastSavedJson = savedJson; return true; } catch { return false; } }
+    private bool Load() { try { if (!File.Exists(SavePath)) return false; var savedJson = File.ReadAllText(SavePath); var state = JsonSerializer.Deserialize<SandboxSnapshot>(savedJson); if (state is null || state.Rpm.Length is < 8 or > 64 || state.Map.Length is < 8 or > 64 || state.Values.Length != state.Map.Length || state.Values.Any(row => row.Length != state.Rpm.Length)) return false; rpm = state.Rpm; map = state.Map; mapUnit = state.MapUnit; xUnit = state.XUnit ?? "RPM"; values = FromJagged(state.Values); customUnits.Clear(); customUnits.AddRange(state.CustomUnits ?? []); customXUnits.Clear(); customXUnits.AddRange(state.CustomXUnits ?? []); ApplyPrecision(state.LeadingDisplayDigits, state.TrailingDisplayDecimals, state.LeadingValueDigits, state.TrailingValueDecimals, state.DisplayTrailingZeroPlaces, state.ActualTrailingZeroPlaces); RefreshUnitItems(); RefreshXUnitItems(); xSize.Text = rpm.Length.ToString(); ySize.Text = map.Length.ToString(); lastSavedJson = savedJson; return true; } catch { return false; } }
     internal string ExportSettingsJson() { Save(); return !string.IsNullOrWhiteSpace(lastSavedJson) ? lastSavedJson : File.ReadAllText(SavePath); }
     internal bool CanImportSettingsJson(string json) { try { var state = JsonSerializer.Deserialize<SandboxSnapshot>(json); return state is not null && state.Rpm.Length is >= 8 and <= 64 && state.Map.Length is >= 8 and <= 64 && state.Values.Length == state.Map.Length && state.Values.All(row => row.Length == state.Rpm.Length); } catch { return false; } }
     internal bool ImportSettingsJson(string json) { if (!CanImportSettingsJson(json)) return false; Directory.CreateDirectory(Path.GetDirectoryName(SavePath)!); File.WriteAllText(SavePath, json); lastSavedJson = null; if (!Load()) return false; undo.Clear(); redo.Clear(); Build(); Save(); return true; }
@@ -558,10 +566,29 @@ public sealed class SandboxPanel : Grid
         for (var value = minimum; value <= maximum; value++) box.Items.Add(new ComboBoxItem { Content = value.ToString(CultureInfo.InvariantCulture), Foreground = Brushes.Black });
         box.SelectedIndex = Math.Clamp(selected - minimum, 0, maximum - minimum); return box;
     }
+    private static ComboBox TrailingZeroesBox(int selected, string tip) { var box = PrecisionBox(0, 4, selected); box.ToolTip = tip; return box; }
+    private Border PrecisionGroup()
+    {
+        StackPanel Row(string section, ComboBox leading, ComboBox trailing, ComboBox zeroes)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, section == "DISPLAY" ? 5 : 0) };
+            row.Children.Add(new TextBlock { Text = section, Width = 58, VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 10, FontWeight = FontWeights.SemiBold });
+            row.Children.Add(Label("LEADING")); row.Children.Add(leading);
+            row.Children.Add(Label("TRAILING")); row.Children.Add(trailing);
+            row.Children.Add(Label("ZEROES")); row.Children.Add(zeroes);
+            return row;
+        }
+        var content = new StackPanel();
+        content.Children.Add(new TextBlock { Text = "DECIMAL PRECISION", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) });
+        content.Children.Add(Row("DISPLAY", leadingPrecisionBox, trailingPrecisionBox, displayTrailingZeroesBox));
+        content.Children.Add(Row("ACTUAL", valueLeadingPrecisionBox, valueTrailingPrecisionBox, actualTrailingZeroesBox));
+        return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 7, 0), Child = content };
+    }
     private static Border Group(string title, params UIElement[] controls) { var content = new StackPanel(); content.Children.Add(new TextBlock { Text = title, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) }); var row = new StackPanel { Orientation = Orientation.Horizontal }; foreach (var control in controls) row.Children.Add(control); content.Children.Add(row); return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 7, 0), Child = content }; }
     private static Button Button(string text, RoutedEventHandler click, bool primary = false) { var button = new Button { Content = text, Padding = new Thickness(12, 7, 12, 7), Margin = new Thickness(0, 0, 7, 0), Background = new SolidColorBrush(primary ? Color.FromRgb(0, 103, 192) : Color.FromRgb(249, 249, 249)), Foreground = primary ? Brushes.White : new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(primary ? Color.FromRgb(0, 90, 170) : Color.FromRgb(190, 190, 190)), FontWeight = FontWeights.SemiBold }; button.Click += click; return button; }
     private static MenuItem Item(string header, RoutedEventHandler click) { var item = new MenuItem { Header = header }; item.Click += click; return item; }
     private static void Info(string message) => MessageBox.Show(message, "Map Sandbox", MessageBoxButton.OK, MessageBoxImage.Information);
     private void NormalizeStoredValues() { for (var row = 0; row < values.GetLength(0); row++) for (var col = 0; col < values.GetLength(1); col++) values[row, col] = RoundEditableValue(values[row, col]); }
-    private sealed record SandboxSnapshot(double[] Rpm, double[] Map, string MapUnit, double[][] Values, string[]? CustomUnits = null, string? XUnit = "RPM", string[]? CustomXUnits = null, int LeadingDisplayDigits = 3, int TrailingDisplayDecimals = 1, int LeadingValueDigits = 4, int TrailingValueDecimals = 3);
+    private void NormalizeChangedValues(double[,] original) { for (var row = 0; row < values.GetLength(0); row++) for (var col = 0; col < values.GetLength(1); col++) if (values[row, col] != original[row, col]) values[row, col] = RoundSmoothedValue(values[row, col]); }
+    private sealed record SandboxSnapshot(double[] Rpm, double[] Map, string MapUnit, double[][] Values, string[]? CustomUnits = null, string? XUnit = "RPM", string[]? CustomXUnits = null, int LeadingDisplayDigits = 3, int TrailingDisplayDecimals = 1, int LeadingValueDigits = 4, int TrailingValueDecimals = 3, int DisplayTrailingZeroPlaces = 1, int ActualTrailingZeroPlaces = 3);
 }

@@ -28,6 +28,7 @@ public partial class MainWindow : Window
     private double[,] timingValues = new double[31, 31];
     private int timingLeadingDisplayDigits = 3, timingTrailingDisplayDecimals = 1;
     private int timingLeadingValueDigits = 3, timingTrailingValueDecimals = 1;
+    private int timingDisplayTrailingZeroPlaces = 1, timingActualTrailingZeroPlaces = 1;
     private bool syncingTimingDisplayPrecision;
     private readonly Dictionary<TextBox, string> cellEditOriginalValues = [];
     private readonly HashSet<TextBox> groupCellEditsAwaitingEnter = [];
@@ -80,9 +81,10 @@ public partial class MainWindow : Window
     private string MapAxisFormat => mapUnitIndex == 1 ? "0.0" : "0";
     private double RoundMapValue(double value) => Math.Round(value / MapAxisIncrement) * MapAxisIncrement;
     private string FormatMap(double value) => value.ToString(MapAxisFormat, CultureInfo.InvariantCulture);
-    private string FormatTimingDisplayValue(double value) => MagnitudeNumberFormatter.Format(value, timingLeadingDisplayDigits, timingTrailingDisplayDecimals);
+    private string FormatTimingDisplayValue(double value) => MagnitudeNumberFormatter.Format(value, timingLeadingDisplayDigits, timingTrailingDisplayDecimals, timingDisplayTrailingZeroPlaces);
     private double RoundEditableTiming(double value) => Math.Round(value, MagnitudeNumberFormatter.DecimalPlaces(value, timingLeadingValueDigits, timingTrailingValueDecimals), MidpointRounding.AwayFromZero);
-    private static string FormatStoredTimingValue(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+    private double RoundSmoothedTiming(double value) => Math.Round(value, timingTrailingValueDecimals, MidpointRounding.AwayFromZero);
+    private string FormatStoredTimingValue(double value) => MagnitudeNumberFormatter.FormatActual(value, timingTrailingValueDecimals, timingActualTrailingZeroPlaces);
     private static string FormatExactAxisValue(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
     private double idleTransitionRpm = 1200, wotTransitionMap = 85;
     private RegionPointPick regionPointPick;
@@ -660,15 +662,18 @@ public partial class MainWindow : Window
         WorkingRunner.Run(this, () => ResizeMatrixCore(newColumns, newRows, oldRows, oldColumns, oldTiming, resizedRpm, resizedMap));
     }
 
-    private void TimingDisplayPrecision_Changed(object sender, SelectionChangedEventArgs e)
+    private void TimingDisplayPrecision_Changed(object sender, RoutedEventArgs e)
     {
-        if (syncingTimingDisplayPrecision || loadingState || TimingLeadingPrecisionBox is null || TimingTrailingPrecisionBox is null || TimingValueLeadingPrecisionBox is null || TimingValueTrailingPrecisionBox is null) return;
+        if (syncingTimingDisplayPrecision || loadingState || TimingLeadingPrecisionBox is null || TimingTrailingPrecisionBox is null || TimingValueLeadingPrecisionBox is null || TimingValueTrailingPrecisionBox is null || TimingDisplayTrailingZeroesBox is null || TimingActualTrailingZeroesBox is null) return;
         if (TimingLeadingPrecisionBox.SelectedItem is not ComboBoxItem displayLeadingItem || TimingTrailingPrecisionBox.SelectedItem is not ComboBoxItem displayTrailingItem || TimingValueLeadingPrecisionBox.SelectedItem is not ComboBoxItem valueLeadingItem || TimingValueTrailingPrecisionBox.SelectedItem is not ComboBoxItem valueTrailingItem) return;
-        if (!int.TryParse(displayLeadingItem.Content?.ToString(), out var displayLeading) || !int.TryParse(displayTrailingItem.Content?.ToString(), out var displayTrailing) || !int.TryParse(valueLeadingItem.Content?.ToString(), out var valueLeading) || !int.TryParse(valueTrailingItem.Content?.ToString(), out var valueTrailing)) return;
+        if (TimingDisplayTrailingZeroesBox.SelectedItem is not ComboBoxItem displayZeroesItem || TimingActualTrailingZeroesBox.SelectedItem is not ComboBoxItem actualZeroesItem) return;
+        if (!int.TryParse(displayLeadingItem.Content?.ToString(), out var displayLeading) || !int.TryParse(displayTrailingItem.Content?.ToString(), out var displayTrailing) || !int.TryParse(valueLeadingItem.Content?.ToString(), out var valueLeading) || !int.TryParse(valueTrailingItem.Content?.ToString(), out var valueTrailing) || !int.TryParse(displayZeroesItem.Content?.ToString(), out var displayZeroes) || !int.TryParse(actualZeroesItem.Content?.ToString(), out var actualZeroes)) return;
         var precisionChanged = valueLeading != timingLeadingValueDigits || valueTrailing != timingTrailingValueDecimals;
         if (precisionChanged && timingValues.Length > 0) PushUndo();
         timingLeadingDisplayDigits = displayLeading; timingTrailingDisplayDecimals = displayTrailing;
         timingLeadingValueDigits = valueLeading; timingTrailingValueDecimals = valueTrailing;
+        timingDisplayTrailingZeroPlaces = displayZeroes;
+        timingActualTrailingZeroPlaces = actualZeroes;
         for (var row = 0; row < valueCells.GetLength(0); row++)
             for (var col = 0; col < valueCells.GetLength(1); col++)
                 if (valueCells[row, col] is not null)
@@ -677,7 +682,7 @@ public partial class MainWindow : Window
                     else RefreshCellColor(valueCells[row, col]);
                 }
         SaveState();
-        if (StatusText is not null) StatusText.Text = $"Timing display {timingLeadingDisplayDigits}/{timingTrailingDisplayDecimals}  •  stored precision {timingLeadingValueDigits}/{timingTrailingValueDecimals}";
+        if (StatusText is not null) StatusText.Text = $"Timing display {timingLeadingDisplayDigits}/{timingTrailingDisplayDecimals}  •  stored precision {timingLeadingValueDigits}/{timingTrailingValueDecimals}  •  trailing zeroes {timingDisplayTrailingZeroPlaces}/{timingActualTrailingZeroPlaces}";
     }
 
     private void ResizeMatrixCore(int newColumns, int newRows, int oldRows, int oldColumns, double[,] oldTiming, double[] resizedRpm, double[] resizedMap)
@@ -759,7 +764,8 @@ public partial class MainWindow : Window
             }
             working = next;
         }
-        for (var r = top; r <= bottom; r++) for (var c = left; c <= right; c++) SetCellValue(r, c, working[r, c]);
+        for (var r = top; r <= bottom; r++) for (var c = left; c <= right; c++)
+            if (working[r, c] != timingValues[r, c]) SetSmoothedCellValue(r, c, working[r, c]);
         UpdateSelection(); StatusText.Text = "All selected values blended with isolated two-pass smoothing";
     }
 
@@ -779,13 +785,13 @@ public partial class MainWindow : Window
         foreach (var (row, col) in affected)
         {
             if (row < 0 || row >= RowCount || col < 0 || col >= ColumnCount) throw new ArgumentException("A sculpted timing cell is outside the table.");
-            candidate[row, col] = RoundEditableTiming(updated[row, col]);
+            candidate[row, col] = RoundSmoothedTiming(updated[row, col]);
             if (candidate[row, col] != timingValues[row, col]) changed++;
         }
         if (changed == 0) { StatusText.Text = "Sculpt stroke rounded to the current timing values"; return ReadTimingValues(); }
         PushUndo();
         foreach (var (row, col) in affected)
-            if (candidate[row, col] != timingValues[row, col]) SetCellValue(row, col, candidate[row, col]);
+            if (candidate[row, col] != timingValues[row, col]) SetSmoothedCellValue(row, col, candidate[row, col]);
         SaveState(); UpdateSelection(); StatusText.Text = $"Committed a 3D sculpt stroke to {changed} timing cells";
         return ReadTimingValues();
     }
@@ -828,12 +834,12 @@ public partial class MainWindow : Window
         var endpoints = selectedCells.ToArray();
         var edited = TwoPointSurfaceEditor.Apply(ReadTimingValues(), endpoints[0], endpoints[1], mode);
         var changes = edited.ChangedCells
-            .Select(point => (point.Row, point.Col, Value: RoundEditableTiming(edited.Values[point.Row, point.Col])))
+            .Select(point => (point.Row, point.Col, Value: RoundSmoothedTiming(edited.Values[point.Row, point.Col])))
             .Where(change => change.Value != timingValues[change.Row, change.Col]).ToArray();
         pinnedTimingSelection.Clear(); foreach (var point in edited.Path) pinnedTimingSelection.Add(point);
         selectionStart = selectionEnd = null; selecting = false;
         if (changes.Length == 0) { UpdateSelection(); StatusText.Text = $"The selected timing path is already {mode.ToString().ToLowerInvariant()}"; return; }
-        PushUndo(); foreach (var change in changes) SetCellValue(change.Row, change.Col, change.Value);
+        PushUndo(); foreach (var change in changes) SetSmoothedCellValue(change.Row, change.Col, change.Value);
         SaveState(); UpdateSelection(); StatusText.Text = $"{(mode == TwoPointSurfaceMode.Flatten ? "Flattened" : "Smoothed")} {changes.Length} timing cells between two fixed endpoints";
     }
 
@@ -863,7 +869,8 @@ public partial class MainWindow : Window
             }
             working = next;
         }
-        for (var row = top + 1; row < bottom; row++) for (var col = left + 1; col < right; col++) SetCellValue(row, col, working[row, col]);
+        for (var row = top + 1; row < bottom; row++) for (var col = left + 1; col < right; col++)
+            if (working[row, col] != timingValues[row, col]) SetSmoothedCellValue(row, col, working[row, col]);
         UpdateSelection(); SaveState();
         StatusText.Text = $"Selection refined  •  {refinementStrength * 100:0}% strength × {refinementPasses} passes  •  perimeter preserved";
     }
@@ -881,7 +888,8 @@ public partial class MainWindow : Window
     {
         advancedSmoothingOptions = dialog.Options; PushUndo();
         var result = AdvancedSmoother.Apply(ReadTimingValues(), selected, advancedSmoothingOptions, rpmAxis, mapAxis);
-        foreach (var cell in selected) SetCellValue(cell.Row, cell.Col, result[cell.Row, cell.Col]);
+        foreach (var cell in selected)
+            if (result[cell.Row, cell.Col] != timingValues[cell.Row, cell.Col]) SetSmoothedCellValue(cell.Row, cell.Col, result[cell.Row, cell.Col]);
         UpdateSelection(); SaveState(); StatusText.Text = $"Smoothed {selected.Count} selected timing cells  •  {advancedSmoothingOptions.Algorithm}  •  {advancedSmoothingOptions.Passes} passes";
     }
 
@@ -897,7 +905,8 @@ public partial class MainWindow : Window
     {
         directionalOuterToInner = dialog.OuterToInner; directionalStrength = dialog.Strength; directionalPasses = dialog.Passes;
         PushUndo(); var result = DirectionalSmoother.Apply(ReadTimingValues(), top, bottom, left, right, dialog.OuterToInner, dialog.Strength, dialog.Passes);
-        for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) SetCellValue(row, col, result[row, col]);
+        for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++)
+            if (result[row, col] != timingValues[row, col]) SetSmoothedCellValue(row, col, result[row, col]);
         UpdateSelection(); SaveState(); StatusText.Text = dialog.OuterToInner ? "Smoothed selected timing cells from outer perimeter inward" : "Smoothed selected timing cells from inner core outward";
     }
 
@@ -913,7 +922,7 @@ public partial class MainWindow : Window
             // Use real MAP spacing and an eased curve so the blend meets both anchors gradually.
             var fraction = (mapAxis[top] - mapAxis[row]) / (mapAxis[top] - mapAxis[bottom]);
             fraction = SmoothStep(fraction);
-            SetCellValue(row, col, source[top, col] + (source[bottom, col] - source[top, col]) * fraction);
+            SetSmoothedCellValue(row, col, source[top, col] + (source[bottom, col] - source[top, col]) * fraction);
         }
         SaveState(); ClearTimingSelection(); StatusText.Text = "Columns blended vertically between preserved top and bottom values  •  selection cleared";
     }
@@ -930,7 +939,7 @@ public partial class MainWindow : Window
             // Use real RPM spacing and an eased curve so the blend meets both anchors gradually.
             var fraction = (rpmAxis[col] - rpmAxis[left]) / (rpmAxis[right] - rpmAxis[left]);
             fraction = SmoothStep(fraction);
-            SetCellValue(row, col, source[row, left] + (source[row, right] - source[row, left]) * fraction);
+            SetSmoothedCellValue(row, col, source[row, left] + (source[row, right] - source[row, left]) * fraction);
         }
         SaveState(); ClearTimingSelection(); StatusText.Text = "Rows blended horizontally between preserved left and right values  •  selection cleared";
     }
@@ -1115,6 +1124,13 @@ public partial class MainWindow : Window
     private void SetCellValue(int row, int col, double value)
     {
         timingValues[row, col] = RoundEditableTiming(value);
+        valueCells[row, col].Text = FormatTimingDisplayValue(timingValues[row, col]);
+        RefreshCellColor(valueCells[row, col]);
+    }
+
+    private void SetSmoothedCellValue(int row, int col, double value)
+    {
+        timingValues[row, col] = RoundSmoothedTiming(value);
         valueCells[row, col].Text = FormatTimingDisplayValue(timingValues[row, col]);
         RefreshCellColor(valueCells[row, col]);
     }
@@ -1902,7 +1918,7 @@ public partial class MainWindow : Window
             : HslToColor(150, .96, .52);
         var highColor = useCustomHeatColors ? customHighColor : HslToColor(300, .96, .52);
 
-        ExcelTimingExporter.Export(dialog.FileName, rpmAxis, mapAxis, timing, MapUnit, lowColor, middleColor, highColor, useCustomHeatColors, valueNumberFormat: MagnitudeNumberFormatter.ExcelFormat(timingLeadingDisplayDigits, timingTrailingDisplayDecimals));
+        ExcelTimingExporter.Export(dialog.FileName, rpmAxis, mapAxis, timing, MapUnit, lowColor, middleColor, highColor, useCustomHeatColors, valueNumberFormat: MagnitudeNumberFormatter.ExcelFormat(timingLeadingDisplayDigits, timingTrailingDisplayDecimals, timingDisplayTrailingZeroPlaces));
         StatusText.Text = $"Saved {Path.GetFileName(dialog.FileName)} with heat-map formatting";
     }
 
@@ -2011,7 +2027,9 @@ public partial class MainWindow : Window
                 TimingLeadingDisplayDigits = timingLeadingDisplayDigits,
                 TimingTrailingDisplayDecimals = timingTrailingDisplayDecimals,
                 TimingLeadingValueDigits = timingLeadingValueDigits,
-                TimingTrailingValueDecimals = timingTrailingValueDecimals
+                TimingTrailingValueDecimals = timingTrailingValueDecimals,
+                TimingDisplayTrailingZeroPlaces = timingDisplayTrailingZeroPlaces,
+                TimingActualTrailingZeroPlaces = timingActualTrailingZeroPlaces
             };
             Directory.CreateDirectory(Path.GetDirectoryName(AutosavePath)!);
             var json = JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true });
@@ -2050,14 +2068,18 @@ public partial class MainWindow : Window
             verticalRegionSmoothCells = Math.Clamp(state.VerticalRegionSmoothCells, 3, 64);
             horizontalRegionSmoothCells = Math.Clamp(state.HorizontalRegionSmoothCells, 3, 64);
             timingLeadingDisplayDigits = Math.Clamp(state.TimingLeadingDisplayDigits, 1, 4);
-            timingTrailingDisplayDecimals = Math.Clamp(state.TimingTrailingDisplayDecimals, 0, 3);
+            timingTrailingDisplayDecimals = Math.Clamp(state.TimingTrailingDisplayDecimals, 0, 4);
             timingLeadingValueDigits = Math.Clamp(state.TimingLeadingValueDigits, 1, 4);
-            timingTrailingValueDecimals = Math.Clamp(state.TimingTrailingValueDecimals, 0, 3);
+            timingTrailingValueDecimals = Math.Clamp(state.TimingTrailingValueDecimals, 0, 4);
+            timingDisplayTrailingZeroPlaces = Math.Clamp(state.TimingDisplayTrailingZeroPlaces, 0, 4);
+            timingActualTrailingZeroPlaces = Math.Clamp(state.TimingActualTrailingZeroPlaces, 0, 4);
             syncingTimingDisplayPrecision = true;
             TimingLeadingPrecisionBox.SelectedIndex = timingLeadingDisplayDigits - 1;
             TimingTrailingPrecisionBox.SelectedIndex = timingTrailingDisplayDecimals;
             TimingValueLeadingPrecisionBox.SelectedIndex = timingLeadingValueDigits - 1;
             TimingValueTrailingPrecisionBox.SelectedIndex = timingTrailingValueDecimals;
+            TimingDisplayTrailingZeroesBox.SelectedIndex = timingDisplayTrailingZeroPlaces;
+            TimingActualTrailingZeroesBox.SelectedIndex = timingActualTrailingZeroPlaces;
             syncingTimingDisplayPrecision = false;
             IdleRpmBox.Text = state.IdleRpm; IdleMapBox.Text = state.IdleMap; WotRpmBox.Text = state.WotRpm; WotMapBox.Text = state.WotMap;
             rpmAxis = IsLegacyDefaultRpmAxis(state.RpmAxis) ? DefaultRpmAxis.ToArray() : state.RpmAxis;
@@ -2118,6 +2140,8 @@ public partial class MainWindow : Window
         public int TimingTrailingDisplayDecimals { get; set; } = 1;
         public int TimingLeadingValueDigits { get; set; } = 3;
         public int TimingTrailingValueDecimals { get; set; } = 1;
+        public int TimingDisplayTrailingZeroPlaces { get; set; } = 1;
+        public int TimingActualTrailingZeroPlaces { get; set; } = 1;
     }
 
     private enum RegionPointPick { None, IdleToCruise, CruiseToWot, Both }

@@ -81,7 +81,7 @@ To assign one value to a group, select the cells, edit any cell in that selectio
 
 ## Clipboard interoperability
 
-Map Lab accepts tab-, comma-, semicolon-, or whitespace-delimited numeric data. A complete copied table can be pasted into a selected block, while a single copied row or column can be pasted directly into a selected axis range. Pasted values and direct table-cell edits are retained exactly as entered and are not rounded by display formatting or autosave. Changing an Actual Precision control later explicitly rounds the corresponding table. PSI axes can use one decimal place, while kPa and RPM normally use whole-number formatting.
+Map Lab accepts tab-, comma-, semicolon-, or whitespace-delimited numeric data. A complete copied table can be pasted into a selected block, while a single copied row or column can be pasted directly into a selected axis range. Pasted values and direct table-cell edits are retained exactly as entered and are not rounded by display formatting or autosave. Changing an Actual Precision control later explicitly rounds the corresponding table. Display and Actual Trailing precision support up to four decimal places, with independent zero-through-four Display Zeroes and Actual Zeroes dropdowns for padding numeric text. Smoothing uses stored values and rounds only changed results to the selected Actual Trailing precision. PSI axes can use one decimal place, while kPa and RPM normally use whole-number formatting.
 
 The axis orientation used by Map Lab is:
 

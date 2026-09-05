@@ -75,8 +75,66 @@ try {
         throw 'Autosave changed the directly edited value.'
     }
 
+    $panel.GetType().GetField('leadingValueDigits', $flags).SetValue($panel, 3)
+    $panel.GetType().GetField('trailingValueDecimals', $flags).SetValue($panel, 1)
+    $values.SetValue(111.111, 2, 2); $values.SetValue(123.456, 2, 3); $values.SetValue(139.999, 2, 4)
+    $values.SetValue(147.777, 3, 2); $values.SetValue(198.111, 3, 3); $values.SetValue(166.666, 3, 4)
+    $values.SetValue(173.333, 4, 2); $values.SetValue(187.777, 4, 3); $values.SetValue(191.234, 4, 4)
+    [void]$panel.GetType().GetMethod('Smooth', $flags).Invoke($panel, @(2, 4, 2, 4, 2, 0.65))
+
+    $values = $panel.GetType().GetField('ve', $flags).GetValue($panel)
+    if ([Math]::Abs($values.GetValue(0, 1) - 102.375) -gt 1e-12) {
+        throw 'Smoothing rounded an unselected exact value.'
+    }
+    $smoothedCenter = [double]$values.GetValue(3, 3)
+    if ([Math]::Abs($smoothedCenter - [Math]::Round($smoothedCenter, 1, [MidpointRounding]::AwayFromZero)) -gt 1e-12) {
+        throw 'The changed smoothing result did not follow Actual Trailing precision.'
+    }
+    if ([Math]::Abs($smoothedCenter - [Math]::Round($smoothedCenter, 0, [MidpointRounding]::AwayFromZero)) -lt 1e-12) {
+        throw "A smoothed VE value above 100 was rounded to a whole number: $smoothedCenter"
+    }
+
+    $timing = [Runtime.CompilerServices.RuntimeHelpers]::GetUninitializedObject([TimingTableCalculator.MainWindow])
+    $timing.GetType().GetField('timingTrailingValueDecimals', $flags).SetValue($timing, 4)
+    $timingSmoothed = [double]$timing.GetType().GetMethod('RoundSmoothedTiming', $flags).Invoke($timing, @(123.45678))
+    if ([Math]::Abs($timingSmoothed - 123.4568) -gt 1e-12) {
+        throw "Timing smoothing did not retain four Actual Trailing places: $timingSmoothed"
+    }
+
+    $sandbox = [Runtime.CompilerServices.RuntimeHelpers]::GetUninitializedObject([TimingTableCalculator.SandboxPanel])
+    $sandbox.GetType().GetField('trailingValueDecimals', $flags).SetValue($sandbox, 4)
+    $sandboxSmoothed = [double]$sandbox.GetType().GetMethod('RoundSmoothedValue', $flags).Invoke($sandbox, @(123.45678))
+    if ([Math]::Abs($sandboxSmoothed - 123.4568) -gt 1e-12) {
+        throw "Sandbox smoothing did not retain four Actual Trailing places: $sandboxSmoothed"
+    }
+
+    $panel.GetType().GetField('trailingValueDecimals', $flags).SetValue($panel, 4)
+    $panel.GetType().GetField('actualTrailingZeroPlaces', $flags).SetValue($panel, 4)
+    $formatFuelActual = $panel.GetType().GetMethod('FormatStoredVeValue', $flags)
+    if ($formatFuelActual.Invoke($panel, @(12.3)) -ne '12.3000') { throw 'Fuel Actual Zeroes did not pad four places.' }
+    $panel.GetType().GetField('actualTrailingZeroPlaces', $flags).SetValue($panel, 0)
+    if ($formatFuelActual.Invoke($panel, @(12.3)) -ne '12.3') { throw 'Fuel Actual Zeroes did not suppress padding.' }
+
+    $timing.GetType().GetField('timingLeadingDisplayDigits', $flags).SetValue($timing, 4)
+    $timing.GetType().GetField('timingTrailingDisplayDecimals', $flags).SetValue($timing, 4)
+    $timing.GetType().GetField('timingDisplayTrailingZeroPlaces', $flags).SetValue($timing, 4)
+    $formatTimingDisplay = $timing.GetType().GetMethod('FormatTimingDisplayValue', $flags)
+    if ($formatTimingDisplay.Invoke($timing, @(12.3)) -ne '12.3000') { throw 'Timing Display Zeroes did not pad four places.' }
+    $timing.GetType().GetField('timingDisplayTrailingZeroPlaces', $flags).SetValue($timing, 0)
+    if ($formatTimingDisplay.Invoke($timing, @(12.3)) -ne '12.3') { throw 'Timing Display Zeroes did not suppress padding.' }
+
+    $sandbox.GetType().GetField('trailingValueDecimals', $flags).SetValue($sandbox, 4)
+    $sandbox.GetType().GetField('actualTrailingZeroPlaces', $flags).SetValue($sandbox, 4)
+    $formatSandboxActual = $sandbox.GetType().GetMethod('FormatStoredValue', $flags)
+    if ($formatSandboxActual.Invoke($sandbox, @(12.3)) -ne '12.3000') { throw 'Sandbox Actual Zeroes did not pad four places.' }
+    $sandbox.GetType().GetField('actualTrailingZeroPlaces', $flags).SetValue($sandbox, 0)
+    if ($formatSandboxActual.Invoke($sandbox, @(12.3)) -ne '12.3') { throw 'Sandbox Actual Zeroes did not suppress padding.' }
+
     "PASS Fuel paste preserved: $($actual -join ', ')"
     'PASS Fuel selected-group edit and autosave preserved: 73.987'
+    "PASS Fuel smoothing preserved unselected 102.375 and retained Actual Trailing precision above 100: $smoothedCenter"
+    "PASS Timing and Sandbox smoothing retained four Actual Trailing places: $timingSmoothed, $sandboxSmoothed"
+    'PASS Display Zeroes and Actual Zeroes counts independently pad zero through four trailing places'
 }
 finally {
     if ($hadClipboardText) { [System.Windows.Clipboard]::SetText($originalClipboardText) }
