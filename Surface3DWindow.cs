@@ -33,8 +33,8 @@ public sealed class Surface3DWindow : Window
     private readonly Transform3DGroup transforms = new();
     private GeometryModel3D surface = null!;
     private GeometryModel3D contourGrid = null!;
-    private readonly bool useCustomColors;
-    private readonly Color lowColor, highColor;
+    private bool useCustomColors;
+    private Color lowColor, highColor;
     private (int Row, int Col)? selectionStart, selectionEnd;
     private readonly HashSet<(int Row, int Col)> pinnedSurfaceSelection = [];
     private bool hideSelectionOverlay;
@@ -655,6 +655,12 @@ public sealed class Surface3DWindow : Window
         selectionStart = selectionEnd = null; pinnedSurfaceSelection.Clear(); selectingSurface = false;
         selectionVisual.Content = null; UpdateSelectionActionState(); UpdateSculptSelectionState();
         selectionStatus.Text = sculptMode is null ? "Selection cleared  •  left-drag selects  •  right-drag rotates" : $"Selection cleared  •  {sculptMode} sculpt ready";
+    }
+
+    internal void SetHeatColors(bool enabled, Color low, Color high)
+    {
+        useCustomColors = enabled; lowColor = low; highColor = high;
+        UpdateSurfaceValues(values, false);
     }
 
     private void BeginLeftPointer(Viewport3D viewport, MouseButtonEventArgs e)

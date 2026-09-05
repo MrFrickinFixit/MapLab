@@ -49,6 +49,9 @@ public sealed class FuelingPanel : Grid
     private int leadingDisplayDigits = 3, trailingDisplayDecimals = 1;
     private int leadingValueDigits = 4, trailingValueDecimals = 3;
     private int displayTrailingZeroPlaces = 1, actualTrailingZeroPlaces = 3;
+    private bool useCustomHeatColors;
+    private Color lowHeatColor = Color.FromRgb(255, 20, 20), highHeatColor = Color.FromRgb(255, 0, 235);
+    private Brush[] heatPalette = UiBrushCache.Spectrum;
     private string FormatVeDisplayValue(double value) => MagnitudeNumberFormatter.Format(value, leadingDisplayDigits, trailingDisplayDecimals, displayTrailingZeroPlaces);
     private string VeExcelNumberFormat() => MagnitudeNumberFormatter.ExcelFormat(leadingDisplayDigits, trailingDisplayDecimals, displayTrailingZeroPlaces);
     private double idleBoundaryRpm, wotBoundaryMap;
@@ -128,6 +131,13 @@ public sealed class FuelingPanel : Grid
     internal void SetCurrentFile(string displayName, string? fullPath)
     {
         currentFileText.Text = $"Current file: {displayName}"; currentFileText.ToolTip = fullPath;
+    }
+
+    internal void SetHeatColors(bool enabled, Color lowColor, Color highColor)
+    {
+        useCustomHeatColors = enabled; lowHeatColor = lowColor; highHeatColor = highColor;
+        heatPalette = enabled ? UiBrushCache.CreateLinearPalette(lowColor, highColor) : UiBrushCache.Spectrum;
+        RefreshAll();
     }
 
     private void SyncLearnApply()
@@ -593,15 +603,16 @@ public sealed class FuelingPanel : Grid
     private void OffsetSelection(object? sender, RoutedEventArgs e)
     {
         if (showFuelFlow) { Info("Offset works on VE percentages. Clear 'View as lb/hr' before applying an offset."); return; }
-        if (ModelessWindowManager.ActivateIfOpen("Fuel.Offset")) return;
         if (!Bounds(out var top, out var bottom, out var left, out var right)) return;
-        ModelessWindowManager.ShowOrActivate("Fuel.Offset", () => new OffsetSelectionWindow(selectionOffsetAmount, selectionOffsetIsPercentage, (direction, amount, percentage) => ApplyOffset(top, bottom, left, right, direction, amount, percentage)) { Owner = Window.GetWindow(this) });
+        void Apply(int direction, double amount, bool percentage) => ApplyOffset(top, bottom, left, right, direction, amount, percentage);
+        var dialog = ModelessWindowManager.ShowOrActivate("Fuel.Offset", () => new OffsetSelectionWindow(selectionOffsetAmount, selectionOffsetIsPercentage, Apply) { Owner = Window.GetWindow(this) });
+        dialog.Configure(selectionOffsetAmount, selectionOffsetIsPercentage, Apply);
     }
     private void ApplyOffset(int top, int bottom, int left, int right, int direction, double amount, bool percentage)
     {
         selectionOffsetAmount = amount; selectionOffsetIsPercentage = percentage; PushUndo(); var selected = SelectedFuelCells();
         if (selected.Count == 0) for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) selected.Add((row, col));
-        foreach (var cell in selected) ve[cell.Row, cell.Col] = RoundEditableVe(percentage ? ve[cell.Row, cell.Col] * (1 + direction * amount / 100) : ve[cell.Row, cell.Col] + direction * amount);
+        foreach (var cell in selected) ve[cell.Row, cell.Col] = RoundSmoothedVe(OffsetMath.Apply(ve[cell.Row, cell.Col], direction, amount, percentage));
         Save(); RefreshAll(); UpdateSelection(); status.Text = $"{selected.Count} fuel cells {(direction > 0 ? "increased" : "decreased")} by {amount:0.###}{(percentage ? "%" : "")}";
     }
     private void CellEdited(object sender, RoutedEventArgs e) { if (sender is TextBox cell) CompleteFuelCellEdit(cell); }
@@ -780,7 +791,7 @@ public sealed class FuelingPanel : Grid
         {
             var baseTitle = flowView ? "3D Fuel Flow Map" : "3D Volumetric Efficiency Map";
             var title = cropped ? $"{baseTitle} - Selected {region.ColumnCount} x {region.RowCount}" : baseTitle;
-            var created = new Surface3DWindow(viewValues, viewRpm, viewMap, mapUnit, false, Colors.Red, Colors.Magenta,
+            var created = new Surface3DWindow(viewValues, viewRpm, viewMap, mapUnit, useCustomHeatColors, lowHeatColor, highHeatColor,
                 SmoothRegion, title, flowView ? "FUEL FLOW (lb/hr)" : "VOLUMETRIC EFFICIENCY (%)", flowView ? null : HandleRegionAction, rpmFormat: "0.########", valueFormat: flowView ? "0.0" : "0", valueFormatter: flowView ? null : FormatVeDisplayValue, sculptCommit: flowView ? null : CommitRegionSculpt) { Owner = Window.GetWindow(this) };
             created.Closed += (_, _) =>
             {
@@ -811,7 +822,10 @@ public sealed class FuelingPanel : Grid
     {
         if (rpm.Length == 0 || map.Length == 0) return;
         var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "fuel-table.xlsx" }; if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
-        ExcelTimingExporter.Export(dialog.FileName, rpm, map, ve, mapUnit, Hsl(0, .96, .52), Hsl(150, .96, .52), Hsl(300, .96, .52), false, "Fuel Map", "Fueling Map", valueNumberFormat: VeExcelNumberFormat());
+        var middle = useCustomHeatColors
+            ? Color.FromRgb((byte)((lowHeatColor.R + highHeatColor.R) / 2), (byte)((lowHeatColor.G + highHeatColor.G) / 2), (byte)((lowHeatColor.B + highHeatColor.B) / 2))
+            : Hsl(150, .96, .52);
+        ExcelTimingExporter.Export(dialog.FileName, rpm, map, ve, mapUnit, useCustomHeatColors ? lowHeatColor : Hsl(0, .96, .52), middle, useCustomHeatColors ? highHeatColor : Hsl(300, .96, .52), useCustomHeatColors, "Fuel Map", "Fueling Map", valueNumberFormat: VeExcelNumberFormat());
         status.Text = $"Saved {Path.GetFileName(dialog.FileName)} with heat-map formatting";
     }
 
@@ -833,7 +847,11 @@ public sealed class FuelingPanel : Grid
             case SurfaceSelectionAction.Copy: CopySelection(); break;
             case SurfaceSelectionAction.Paste: PasteSelection(); Refresh(); break;
             case SurfaceSelectionAction.Offset:
-                ModelessWindowManager.ShowOrActivate("Fuel.Offset", () => new OffsetSelectionWindow(selectionOffsetAmount, selectionOffsetIsPercentage, (direction, amount, percentage) => { ApplyOffset(top, bottom, left, right, direction, amount, percentage); Refresh(); }) { Owner = Window.GetWindow(this) }); break;
+            {
+                void Apply(int direction, double amount, bool percentage) { ApplyOffset(top, bottom, left, right, direction, amount, percentage); Refresh(); }
+                var dialog = ModelessWindowManager.ShowOrActivate("Fuel.Offset", () => new OffsetSelectionWindow(selectionOffsetAmount, selectionOffsetIsPercentage, Apply) { Owner = Window.GetWindow(this) });
+                dialog.Configure(selectionOffsetAmount, selectionOffsetIsPercentage, Apply); break;
+            }
             case SurfaceSelectionAction.Smooth: SmoothSelection(this, new RoutedEventArgs()); Refresh(); break;
             case SurfaceSelectionAction.Refine:
                 ModelessWindowManager.ShowOrActivate("Fuel.Refinement", () => new SmoothRefinementWindow(refinementStrength, refinementPasses, dialog => WorkingRunner.Run(this, () => { ApplyRefinement(dialog, top, bottom, left, right); Refresh(); })) { Owner = Window.GetWindow(this) }); break;
@@ -900,7 +918,7 @@ public sealed class FuelingPanel : Grid
         for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++)
         {
             var value = displayed[row, col]; cells[row, col].Text = showFuelFlow ? value.ToString("0.0", CultureInfo.InvariantCulture) : FormatVeDisplayValue(value);
-            cells[row, col].IsReadOnly = showFuelFlow; cells[row, col].Background = UiBrushCache.SpectrumAt((value - min) / span);
+            cells[row, col].IsReadOnly = showFuelFlow; cells[row, col].Background = heatPalette[(int)Math.Round(Math.Clamp((value - min) / span, 0, 1) * (heatPalette.Length - 1))];
             UpdateFuelCellToolTip(row, col);
         }
         loading = false;
