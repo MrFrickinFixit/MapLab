@@ -7,14 +7,14 @@
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <InstallerPlatform>x64</InstallerPlatform>
-    <Version Condition="'$(Version)' == ''">1.0.3</Version>
+    <Version Condition="'$(Version)' == ''">1.0.3.1</Version>
     <OutputName>MapLab-$(Version)-beta-win-x64</OutputName>
     <DefineConstants>PublishDir=$(PublishDir);ProductVersion=$(Version);ProjectRoot=$(MSBuildProjectDirectory)\..</DefineConstants>
   </PropertyGroup>
 
   <Target Name="VerifyPublishedApplication" BeforeTargets="Build">
     <Error Condition="'$(PublishDir)' == ''" Text="PublishDir must point to the self-contained Map Lab publish directory." />
-    <Error Condition="!Exists('$(PublishDir)\MapLab-1.0.3-beta.exe')" Text="MapLab-1.0.3-beta.exe was not found in PublishDir. Run scripts\build-installer.ps1 from the repository root." />
+    <Error Condition="!Exists('$(PublishDir)\MapLab-1.0.3.1-beta.exe')" Text="MapLab-1.0.3.1-beta.exe was not found in PublishDir. Run scripts\build-installer.ps1 from the repository root." />
   </Target>
 
 </Project>

@@ -943,6 +943,13 @@ public partial class MainWindow : Window
     private void MainWindow_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         var modifiers = Keyboard.Modifiers;
+        if (e.Key == Key.F1)
+        {
+            HelpTab.IsSelected = true;
+            if (HelpHost.Content is HelpPanel help) help.FocusSearch();
+            e.Handled = true;
+            return;
+        }
         if ((modifiers & ModifierKeys.Control) != 0 && (modifiers & ModifierKeys.Shift) != 0 && e.Key == Key.S) { SaveMapFileAs(); e.Handled = true; return; }
         if (modifiers == ModifierKeys.Control && e.Key == Key.S) { SaveMapFile(); e.Handled = true; return; }
         if (modifiers == ModifierKeys.Control && e.Key == Key.O) { OpenMapFile(); e.Handled = true; return; }

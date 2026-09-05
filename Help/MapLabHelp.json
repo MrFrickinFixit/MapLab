@@ -1,0 +1,305 @@
+{
+  "title": "Map Lab Help",
+  "version": "1.0.3.1-beta",
+  "topics": [
+    {
+      "id": "quick-start",
+      "category": "Getting Started",
+      "title": "Quick Start",
+      "summary": "Create, edit, inspect, and save a map.",
+      "keywords": ["start", "workflow", "new map", "basics"],
+      "body": [
+        "Choose Fueling, Ignition Timing, or Map Sandbox.",
+        "Set the matrix size and edit or paste the X and Y axis breakpoints.",
+        "Drag across cells to select an area. Hold Ctrl while clicking or dragging to add another area.",
+        "Type into a selected cell and press Enter to apply that value to every selected cell. Clicking away cancels a pending group edit.",
+        "Smooth the selection and inspect the result in the 3D view.",
+        "Save the workspace as a .map file or export the active table to CSV or Excel."
+      ]
+    },
+    {
+      "id": "table-relationships",
+      "category": "Getting Started",
+      "title": "How the Tables Relate",
+      "summary": "Understand which dimensions, axes, values, and histories are shared or independent.",
+      "keywords": ["tables", "fuel", "timing", "sandbox", "independent", "history"],
+      "body": [
+        "Fueling and Ignition Timing keep separate MAP scales and MAP units.",
+        "Fueling and Ignition Timing use coordinated matrix dimensions and RPM scaling.",
+        "Map Sandbox is independent of both engine maps.",
+        "Timing, Fueling, Learn Apply, and Sandbox maintain their own Undo and Redo histories."
+      ]
+    },
+    {
+      "id": "precision",
+      "category": "Editing Tables",
+      "title": "Display and Actual Precision",
+      "summary": "Control how values look separately from how values are stored.",
+      "keywords": ["precision", "decimal", "leading", "trailing", "rounding", "stored value", "display"],
+      "body": [
+        "Fueling, Ignition Timing, and Map Sandbox each provide Display Leading, Display Trailing, Actual Leading, and Actual Trailing controls.",
+        "Display precision changes only how values appear. Actual precision controls the stored table values.",
+        "With three actual leading digits and one actual trailing decimal, 85.47 becomes 85.5 while 105.47 becomes 105.",
+        "Changing either Actual control rounds the complete active table as one Undo step.",
+        "Future edits, pastes, offsets, smoothing, generated values, and 3D changes use the selected actual precision.",
+        "The display format is also used by the 3D value scale, 3D tooltip, and Excel number formatting. Clipboard and CSV data retain stored precision."
+      ]
+    },
+    {
+      "id": "cell-selection",
+      "category": "Editing Tables",
+      "title": "Selecting and Editing Cells",
+      "summary": "Select rectangles, separated areas, complete tables, and transition rings.",
+      "keywords": ["select", "drag", "ctrl", "control", "multi-select", "ring", "region of interest", "group edit", "enter"],
+      "body": [
+        "Left-drag to select a rectangular area. Ctrl+click or Ctrl+drag adds separated cells or another area.",
+        "Click one unselected cell to replace the previous selection. Ctrl+A selects the complete active table.",
+        "With several cells selected, edit one selected cell and press Enter to apply the value to every selected cell. Clicking away cancels the pending group edit.",
+        "Right-click one solid rectangular selection and choose Select transition ring to select an adjustable-width perimeter band while leaving its center unselected.",
+        "Choose Highlight region of interest to retain a red rectangular outline after the normal selection is cleared.",
+        "Right-click a selection for Copy, Paste, Offset Selection, Interpolate, smoothing, and clear commands.",
+        "After pasting a complete table of cells, the selection is cleared."
+      ]
+    },
+    {
+      "id": "axes",
+      "category": "Editing Tables",
+      "title": "Editing X, RPM, Y, and MAP Axes",
+      "summary": "Edit, paste, auto-fill, and rescale axis breakpoints.",
+      "keywords": ["axis", "axes", "breakpoint", "rpm", "map", "x axis", "y axis", "auto-fill", "paste scale", "rescale"],
+      "body": [
+        "Click an axis breakpoint, enter a value, and press Enter. Breakpoints must remain ordered and unique.",
+        "Changing a minimum or maximum endpoint automatically rescales that axis.",
+        "Drag across axis values and right-click to Auto-fill or paste breakpoints.",
+        "Pasted X, RPM, Y, or MAP values are retained as entered; clicking back into the table commits the pasted scale.",
+        "MAP uses whole-number kPa values and one decimal place for PSI.",
+        "Fuel MAP changes never alter the Ignition Timing MAP scale, and Timing MAP changes never alter Fueling.",
+        "Sandbox X and Y units may be standard, Unitless, or custom. Unit changes relabel a Sandbox axis without converting values."
+      ]
+    },
+    {
+      "id": "basic-smoothing",
+      "category": "Smoothing",
+      "title": "Rows, Columns, and Smooth Selected",
+      "summary": "Choose the smoothing operation that matches the shape of the selection.",
+      "keywords": ["smooth", "rows", "columns", "smooth selected", "selection", "anchors", "interpolate"],
+      "body": [
+        "Smooth Rows reshapes every selected row between its left and right endpoints. It needs at least three columns and leaves the endpoint columns unchanged.",
+        "Smooth Columns reshapes every selected column between its top and bottom endpoints. It needs at least three rows and leaves the endpoint rows unchanged.",
+        "Smooth Selected opens Advanced Smoothing and operates on the exact selected cells, including separated Ctrl-selected areas.",
+        "Rows and Columns operate across the rectangular selection bounds; use Advanced Smoothing for irregular selections.",
+        "Interpolate replaces selected interior values with transitions derived from the selected outer values while preserving the applicable anchors.",
+        "All operations create an Undo step in the active table."
+      ]
+    },
+    {
+      "id": "advanced-smoothing",
+      "category": "Smoothing",
+      "title": "Advanced Smoothing Algorithms",
+      "summary": "Blend noise, spikes, edges, potholes, and transitions with selectable algorithms.",
+      "keywords": ["algorithm", "weighted", "constrained", "shape preserving", "median", "spike", "edge preserving", "pothole", "perimeter"],
+      "body": [
+        "Standard weighted smoothing averages nearby selected cells, giving more weight to the center and direct neighbors.",
+        "Constrained surface smoothing uses local weighted averaging with perimeter and overshoot constraints.",
+        "Shape-preserving interpolation blends toward horizontal and vertical trends from selected endpoints.",
+        "Spike removal uses a median-style target to reduce isolated peaks or dips.",
+        "Edge-preserving smoothing reduces the influence of neighbors whose values differ sharply.",
+        "Weighted center/perimeter combines local smoothing with the selection's overall and perimeter averages.",
+        "Strength controls movement toward the result; Passes repeats the operation. Preserve Selection Perimeter keeps boundary cells fixed, while Prevent Value Overshoot limits the result to the starting range."
+      ]
+    },
+    {
+      "id": "surroundings-smoothing",
+      "category": "Smoothing",
+      "title": "Smooth to Surroundings and Transition Rings",
+      "summary": "Blend a pothole, ridge, or narrow wrinkle without flattening the intended feature.",
+      "keywords": ["surroundings", "transition ring", "ring select", "pothole", "ridge", "wrinkle", "neighbor reach", "direction"],
+      "body": [
+        "For a pothole or raised feature, select a transition ring and choose Smooth to Surroundings. The unselected center remains a shape anchor.",
+        "Only selected cells change; surrounding unselected cells remain fixed references.",
+        "Across Columns samples left and right, Across Rows samples above and below, and Both Directions also includes diagonal neighbors.",
+        "Neighbor Reach is measured from every selected cell and uses actual X/Y breakpoint spacing when weighting samples.",
+        "For a two-cell-wide wrinkle, select only the two rows or columns, start with Reach 2, Strength 50%, and one pass, then inspect the 3D contour.",
+        "Use Undo between experiments so each adjustment starts from a known surface."
+      ]
+    },
+    {
+      "id": "timing-regions",
+      "category": "Ignition Timing",
+      "title": "Timing Regions and Boundaries",
+      "summary": "Divide the timing table into Idle, Cruise, Part Throttle, and WOT operating regions.",
+      "keywords": ["region", "boundary", "idle", "cruise", "part throttle", "wot", "profile"],
+      "body": [
+        "Choose Set Boundaries, hover over the table, and click the intersecting cell to lock both boundary lines.",
+        "The lower-left region is Idle Low MAP and the upper-left region is Idle High MAP.",
+        "The lower-right region is Cruise to Part Throttle and the upper-right region is Part Throttle to WOT.",
+        "Regional timing profiles can fill regions directly or blend across their boundaries.",
+        "Boundary lines are shared visually with Fueling, while each table retains its own values and MAP scale."
+      ]
+    },
+    {
+      "id": "boost-timing",
+      "category": "Ignition Timing",
+      "title": "Boost Timing Offset",
+      "summary": "Apply a signed timing change per PSI using each selected row's actual MAP breakpoint.",
+      "keywords": ["boost", "retard", "timing per pound", "degrees per psi", "forced induction", "nonlinear map", "offset"],
+      "body": [
+        "Boost Timing Offset is available when the Ignition Timing MAP scale uses PSI gauge.",
+        "Select the timing cells to change, enter a signed timing change per PSI, a Low MAP start, and a High MAP maximum.",
+        "A negative rate subtracts timing and a positive rate adds timing.",
+        "Every selected MAP row is calculated independently from its actual breakpoint: effective boost equals clamp(row PSI, Low MAP, High MAP) minus Low MAP; timing change equals effective boost multiplied by the signed rate.",
+        "Nonlinear or irregular PSI breakpoint spacing is respected. The calculation does not assume equal row spacing and does not distribute the total change by row count.",
+        "Rows at or below Low MAP receive no change. Rows above High MAP receive the same maximum clamped change."
+      ]
+    },
+    {
+      "id": "fueling-ve",
+      "category": "Fueling",
+      "title": "Fueling and VE Setup",
+      "summary": "Edit raw VE values or generate a starting table with the VE Setup wizard.",
+      "keywords": ["fuel", "fueling", "ve", "volumetric efficiency", "wizard", "lb/hr", "injector", "map sensor"],
+      "body": [
+        "Fuel cells store editable volumetric-efficiency percentages. View as lb/hr changes only the calculated display.",
+        "VE Setup uses engine information and VE targets to create a preview before values are committed.",
+        "Forced-induction setup displays MAP inputs in PSI and enables one-, two-, three-bar, or custom MAP sensor selection.",
+        "The selected sensor rating proposes an editable maximum boost range. Apply MAP Range rescales only the Fueling MAP breakpoints.",
+        "When enabled, final wizard smoothing runs Smooth Columns and Smooth Rows after all contour generation and before preview.",
+        "Always review generated values before applying them to an ECU."
+      ]
+    },
+    {
+      "id": "learn-apply",
+      "category": "Fueling",
+      "title": "Learn Apply Table",
+      "summary": "Paste signed percentage corrections and transfer them to Fueling.",
+      "keywords": ["learn", "apply", "correction", "percentage", "transfer", "holley", "terminator x"],
+      "body": [
+        "Learn Apply holds signed percentage corrections, not absolute VE values. Its dimensions, axes, MAP units, and display precision follow Fueling.",
+        "Paste a complete table or select an upper-left destination cell for a partial block. Blank fields leave values unchanged and zero means no correction.",
+        "Transfer uses new VE = current VE multiplied by (1 + correction / 100). For example, 80 VE with +10% becomes 88 VE.",
+        "Transfer and Smooth Changed Cells applies Smooth to Surroundings after the corrections. Only nonzero correction cells are smoothed.",
+        "A transfer and its optional smoothing form one Fueling Undo step. Learn Apply has separate Undo and Redo history.",
+        "Learn values autosave with Fueling and are included in .map workspace files."
+      ]
+    },
+    {
+      "id": "sandbox",
+      "category": "Map Sandbox",
+      "title": "Map Sandbox",
+      "summary": "Create an independent custom numeric table with configurable axes and units.",
+      "keywords": ["sandbox", "custom table", "custom unit", "unitless", "x size", "y size"],
+      "body": [
+        "Use Map Sandbox for custom numeric tables that do not need operating-region boundaries.",
+        "Set independent dimensions, breakpoints, and X/Y units. Choose Custom to add or remove unit names.",
+        "Sandbox includes selection editing, offsets, smoothing, 3D editing, history, autosave, CSV, and Excel export.",
+        "Sandbox changes never modify Fueling or Ignition Timing."
+      ]
+    },
+    {
+      "id": "three-d-view",
+      "category": "3D View",
+      "title": "3D Viewing, Selection, and Sculpting",
+      "summary": "Orbit, inspect, select, edit, and sculpt map surfaces.",
+      "keywords": ["3d", "orbit", "rotate", "zoom", "crosshair", "tooltip", "sculpt", "raise", "lower", "flatten", "surface"],
+      "body": [
+        "Right-drag to orbit, use the mouse wheel to zoom, and stationary right-click to open selected-cell tools.",
+        "The lower-left orientation widget is a miniature surface using the same values, colors, contours, and rotation.",
+        "Open 3D Map with no 2D selection to view the full table, or select one rectangular area of at least two rows by two columns to open a focused workspace.",
+        "Hover for the live X/Y/value tooltip and crosshair. Left-click or left-drag selects surface cells; hold Ctrl to add separated cells or areas.",
+        "Raise, Lower, Smooth, and Flatten sculpt while left-dragging. Radius follows actual breakpoint spacing and Strength controls blending.",
+        "Sculpt changes preview during the drag and commit on mouse-up as one source-table Undo step. Press Escape before mouse-up to cancel.",
+        "Clear Selection or Return to Rotation deselects the 3D cells. Closing the viewer clears the corresponding 2D selection.",
+        "3D Undo and Redo operate on the viewer's source table."
+      ]
+    },
+    {
+      "id": "two-point-path",
+      "category": "3D View",
+      "title": "Flatten and Smooth Between Two Points",
+      "summary": "Edit a horizontal, vertical, or diagonal path while preserving its endpoints.",
+      "keywords": ["two point", "path", "diagonal", "flatten path", "smooth path", "endpoints"],
+      "body": [
+        "Click the first surface cell and Ctrl+click the second to select two endpoints.",
+        "Flatten Path replaces only the interior path cells with a straight value ramp.",
+        "Smooth Path softens only the cells along the selected path.",
+        "Both endpoints remain unchanged, and horizontal, vertical, and diagonal paths are supported.",
+        "Each completed path operation creates one Undo step in the source table."
+      ]
+    },
+    {
+      "id": "clipboard-export",
+      "category": "Files and Export",
+      "title": "Copy, Paste, CSV, and Excel",
+      "summary": "Exchange cells and axes with tuning software and spreadsheet files.",
+      "keywords": ["copy", "paste", "clipboard", "csv", "excel", "xlsx", "export", "conditional formatting"],
+      "body": [
+        "Copied cells use tab-separated rows and can be moved between Map Lab tables and compatible tuning software.",
+        "Select an axis starting point before pasting a copied row or column of breakpoints.",
+        "CSV and Excel place the X or RPM scale at the bottom of the table.",
+        "Excel includes heat-map conditional formatting matching the application and does not add header filters.",
+        "Fueling, Ignition Timing, and Map Sandbox each provide their own CSV and Excel export commands."
+      ]
+    },
+    {
+      "id": "workspace-files",
+      "category": "Files and Export",
+      "title": "Open, Save, Save As, and Autosave",
+      "summary": "Save complete Map Lab workspaces in the .map format.",
+      "keywords": ["open", "save", "save as", ".map", "workspace", "autosave", "filename", "recovery"],
+      "body": [
+        "Save writes Timing, Fueling, Learn Apply, and Sandbox tables, axes, units, boundaries, colors, display preferences, precision, smoothing choices, and VE options to the current .map file.",
+        "The first Save asks for a filename. Save As creates or selects a different .map file.",
+        "Open validates the complete file before replacing the current workspaces and makes the opened file the current Save target.",
+        "The current filename appears in the application title and every 2D table view. Untitled means no manual Save target has been assigned.",
+        "When closing with unsaved changes, choose Yes to save, No to close without updating the file, or Cancel to keep working.",
+        "Timing, Fueling, Sandbox, and dialog settings autosave for recovery between sessions."
+      ]
+    },
+    {
+      "id": "undo-progress-dialogs",
+      "category": "Reference",
+      "title": "Undo, Progress, and Tool Dialogs",
+      "summary": "Understand independent histories, long operations, and persistent tool windows.",
+      "keywords": ["undo", "redo", "progress", "working", "dialog", "modeless", "restore"],
+      "body": [
+        "Timing, Fueling, Learn Apply, and Sandbox maintain separate Undo and Redo stacks.",
+        "Use Undo immediately after an unwanted edit, paste, offset, smoothing operation, resize, or axis change.",
+        "Large resizes, smoothing operations, and extensive Undo or Redo changes show a Working progress window.",
+        "Only one instance of each modeless tool dialog opens. Selecting its command again restores and activates the existing dialog.",
+        "Tool values remain available until changed or the workspace is replaced."
+      ]
+    },
+    {
+      "id": "keyboard-shortcuts",
+      "category": "Reference",
+      "title": "Keyboard Shortcuts",
+      "summary": "Common table-selection, editing, history, and file commands.",
+      "keywords": ["keyboard", "shortcut", "ctrl+a", "ctrl+c", "ctrl+v", "ctrl+z", "ctrl+y", "ctrl+s", "escape", "enter"],
+      "body": [
+        "Ctrl+A — Select every cell in the active table.",
+        "Ctrl+C — Copy selected cells.",
+        "Ctrl+V — Paste cells or focused axis values.",
+        "Ctrl+Z — Undo the active table's last change.",
+        "Ctrl+Y — Redo the active table's last undone change.",
+        "Ctrl+O — Open a .map workspace.",
+        "Ctrl+S — Save the current workspace.",
+        "Ctrl+Shift+S — Save As.",
+        "F1 — Open Help and focus the search box.",
+        "Enter — Commit a cell or axis edit.",
+        "Escape — Cancel an interactive boundary selection or an active 3D sculpt preview."
+      ]
+    },
+    {
+      "id": "calibration-safety",
+      "category": "Reference",
+      "title": "Calibration Safety",
+      "summary": "Verify generated and edited calibration data before using it on an engine.",
+      "keywords": ["safety", "warning", "calibration", "ecu", "engine", "verify"],
+      "body": [
+        "Map Lab is a calculation, editing, and visualization tool; it does not validate that a calibration is safe for a particular engine.",
+        "Verify exported values independently and use appropriate engine safeguards before applying a map to a vehicle.",
+        "Keep a known-good calibration backup and make controlled changes while monitoring the engine with suitable instrumentation."
+      ]
+    }
+  ]
+}
