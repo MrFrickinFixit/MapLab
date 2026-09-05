@@ -1,6 +1,6 @@
 {
   "title": "Map Lab Help",
-  "version": "1.0.3.3-beta",
+  "version": "1.0.3.4-beta",
   "topics": [
     {
       "id": "quick-start",
@@ -39,6 +39,7 @@
       "body": [
         "Fueling, Ignition Timing, and Map Sandbox each provide Display Leading, Display Trailing, Actual Leading, and Actual Trailing controls. Both trailing controls support zero through four decimal places.",
         "Display Zeroes selects zero through four minimum decimal places for table, tooltip, 3D, and Excel display text. Display Trailing remains the maximum calculated display precision unless the selected zero padding is higher.",
+        "The Display Leading threshold takes priority over Display Trailing and Display Zeroes. With Display Leading set to 3, values below 100 can show the selected decimal precision, while values with three or more leading digits are displayed as rounded whole numbers. This display-only rounding does not alter the actual stored value.",
         "Actual Zeroes selects zero through four minimum decimal places for focused-cell text, stored-value tooltip text, clipboard copies, and CSV output. It changes numeric text formatting only—the underlying value is unchanged.",
         "Display precision changes only how values appear. Actual precision controls the stored table values.",
         "With three actual leading digits and one actual trailing decimal, 85.47 becomes 85.5 while 105.47 becomes 105.",
@@ -61,6 +62,7 @@
         "Right-click one solid rectangular selection and choose Select transition ring to select an adjustable-width perimeter band while leaving its center unselected.",
         "Choose Highlight region of interest to retain a red rectangular outline after the normal selection is cleared.",
         "Right-click a selection for Copy, Paste, Offset Selection, Interpolate, smoothing, and clear commands.",
+        "Offset Selection uses Numerical mode to add or subtract the entered table units. Percentage of value multiplies every selected cell by 1 plus or minus the entered percentage; for example, increasing 80 by 10% produces 88, while increasing it numerically by 10 produces 90. Offset results use Actual Trailing precision regardless of the value's leading-digit count, and each arrow click applies another offset to the current values.",
         "After pasting a complete table of cells, the selection is cleared."
       ]
     },
@@ -240,6 +242,7 @@
         "Select an axis starting point before pasting a copied row or column of breakpoints.",
         "CSV and Excel place the X or RPM scale at the bottom of the table.",
         "Excel includes heat-map conditional formatting matching the application and does not add header filters.",
+        "Map Colors in Settings controls one global palette used by the Fueling, Ignition Timing, and Map Sandbox 2D tables, 3D viewers, and Excel exports. Each table independently scales that palette from its own lowest value to its highest value.",
         "Fueling, Ignition Timing, and Map Sandbox each provide their own CSV and Excel export commands."
       ]
     },
@@ -255,7 +258,7 @@
         "Open validates the complete file before replacing the current workspaces and makes the opened file the current Save target.",
         "The current filename appears in the application title and every 2D table view. Untitled means no manual Save target has been assigned.",
         "When closing with unsaved changes, choose Yes to save, No to close without updating the file, or Cancel to keep working.",
-        "Timing, Fueling, Sandbox, and dialog settings autosave for recovery between sessions."
+        "Timing, Fueling, Sandbox, global map colors, and dialog settings autosave for recovery between sessions."
       ]
     },
     {

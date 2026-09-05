@@ -7,6 +7,7 @@ internal static class MagnitudeNumberFormatter
     public static string Format(double value, int leadingDigits, int trailingDecimals, int trailingZeroPlaces = -1)
     {
         var decimalPlaces = DecimalPlaces(value, leadingDigits, trailingDecimals);
+        if (decimalPlaces == 0) return value.ToString("0", CultureInfo.InvariantCulture);
         trailingZeroPlaces = trailingZeroPlaces < 0 ? decimalPlaces : Math.Clamp(trailingZeroPlaces, 0, 4);
         var maximumPlaces = Math.Max(decimalPlaces, trailingZeroPlaces);
         var format = maximumPlaces > 0 ? "0." + new string('0', trailingZeroPlaces) + new string('#', maximumPlaces - trailingZeroPlaces) : "0";
@@ -34,11 +35,10 @@ internal static class MagnitudeNumberFormatter
     {
         trailingDecimals = Math.Clamp(trailingDecimals, 0, 4);
         trailingZeroPlaces = trailingZeroPlaces < 0 ? trailingDecimals : Math.Clamp(trailingZeroPlaces, 0, 4);
+        if (trailingDecimals <= 0 || leadingDigits <= 1) return "0";
         var maximumPlaces = Math.Max(trailingDecimals, trailingZeroPlaces);
         var padded = maximumPlaces > 0 ? "0." + new string('0', trailingZeroPlaces) + new string('#', maximumPlaces - trailingZeroPlaces) : "0";
-        if (leadingDigits <= 1) return padded;
         var threshold = Math.Pow(10, Math.Clamp(leadingDigits, 1, 4) - 1).ToString("0", CultureInfo.InvariantCulture);
-        var thresholdFormat = trailingZeroPlaces > 0 ? "0." + new string('0', trailingZeroPlaces) : "0";
-        return $"[>={threshold}]{thresholdFormat};[<=-{threshold}]{thresholdFormat};{padded}";
+        return $"[>={threshold}]0;[<=-{threshold}]0;{padded}";
     }
 }

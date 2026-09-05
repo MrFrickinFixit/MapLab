@@ -8,7 +8,7 @@ if ([Threading.Thread]::CurrentThread.ApartmentState -ne [Threading.ApartmentSta
 }
 
 $root = Split-Path -Parent $PSScriptRoot
-$assemblyPath = Join-Path $root 'bin\Release\net8.0-windows\MapLab-1.0.3.3-beta.dll'
+$assemblyPath = Join-Path $root 'bin\Release\net8.0-windows\MapLab-1.0.3.4-beta.dll'
 if (-not (Test-Path -LiteralPath $assemblyPath)) {
     throw "Build MapLab.slnx in Release configuration before running this test. Missing: $assemblyPath"
 }
@@ -120,6 +120,13 @@ try {
     $timing.GetType().GetField('timingDisplayTrailingZeroPlaces', $flags).SetValue($timing, 4)
     $formatTimingDisplay = $timing.GetType().GetMethod('FormatTimingDisplayValue', $flags)
     if ($formatTimingDisplay.Invoke($timing, @(12.3)) -ne '12.3000') { throw 'Timing Display Zeroes did not pad four places.' }
+    $timing.GetType().GetField('timingLeadingDisplayDigits', $flags).SetValue($timing, 3)
+    if ($formatTimingDisplay.Invoke($timing, @(105.525)) -ne '106') { throw 'Timing display did not round a three-leading-digit value to a whole number.' }
+    $timing.GetType().GetField('timingTrailingValueDecimals', $flags).SetValue($timing, 4)
+    $timing.GetType().GetField('timingActualTrailingZeroPlaces', $flags).SetValue($timing, 4)
+    $formatTimingActual = $timing.GetType().GetMethod('FormatStoredTimingValue', $flags)
+    if ($formatTimingActual.Invoke($timing, @(105.525)) -ne '105.5250') { throw 'Timing actual formatting was changed by the display leading-digit cutoff.' }
+    $timing.GetType().GetField('timingLeadingDisplayDigits', $flags).SetValue($timing, 4)
     $timing.GetType().GetField('timingDisplayTrailingZeroPlaces', $flags).SetValue($timing, 0)
     if ($formatTimingDisplay.Invoke($timing, @(12.3)) -ne '12.3') { throw 'Timing Display Zeroes did not suppress padding.' }
 
@@ -135,6 +142,7 @@ try {
     "PASS Fuel smoothing preserved unselected 102.375 and retained Actual Trailing precision above 100: $smoothedCenter"
     "PASS Timing and Sandbox smoothing retained four Actual Trailing places: $timingSmoothed, $sandboxSmoothed"
     'PASS Display Zeroes and Actual Zeroes counts independently pad zero through four trailing places'
+    'PASS Three-leading-digit display values round to whole numbers without changing actual-value precision'
 }
 finally {
     if ($hadClipboardText) { [System.Windows.Clipboard]::SetText($originalClipboardText) }

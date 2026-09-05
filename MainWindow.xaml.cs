@@ -47,6 +47,7 @@ public partial class MainWindow : Window
     private Color customLowColor = Color.FromRgb(255, 20, 20);
     private Color customHighColor = Color.FromRgb(255, 0, 235);
     private Brush[] timingHeatPalette = UiBrushCache.Spectrum;
+    private double timingHeatMinimum = 12, timingHeatMaximum = 46;
     private double boostRetardPerPsi = 1, boostRetardLowMap, boostRetardHighMap = 15;
     private double refinementStrength = .5;
     private int refinementPasses = 3;
@@ -96,7 +97,7 @@ public partial class MainWindow : Window
         fuelingPanel = new FuelingPanel(ResizeMatrixFromFuel, AutoFillAxisFromFuel, PasteAxisFromFuel, SetRegionBoundariesFromFuel, EditAxisFromFuel); FuelingHost.Content = fuelingPanel;
         learnApplyPanel = new LearnApplyPanel(fuelingPanel.LearnApply, fuelingPanel.TransferLearnOffsets); LearnApplyHost.Content = learnApplyPanel;
         sandboxPanel = new SandboxPanel(); SandboxHost.Content = sandboxPanel;
-        SettingsHost.Content = new SettingsPanel(OpenMapFile, SaveMapFile, SaveMapFileAs);
+        SettingsHost.Content = new SettingsPanel(OpenMapFile, SaveMapFile, SaveMapFileAs, OpenColorSettings);
         HelpHost.Content = new HelpPanel();
         AboutHost.Content = new AboutPanel();
         UpdateMapFilePresentation("Use Save or Ctrl+S to name this workspace.");
@@ -107,6 +108,7 @@ public partial class MainWindow : Window
             TableGrid.PreviewMouseLeftButtonUp += (_, _) => { selecting = false; axisSelecting = false; };
             TableGrid.PreviewMouseMove += AxisDrag_MouseMove;
             if (!LoadState()) GenerateTable();
+            ApplyGlobalHeatColors(refreshTiming: true);
             savedWorkspaceFingerprint = CaptureWorkspaceFingerprint();
             autosaveTimer.Tick += (_, _) => SaveState(); autosaveTimer.Start();
         };
@@ -114,8 +116,8 @@ public partial class MainWindow : Window
     }
     private void MainWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.OriginalSource is not DependencyObject source || ReferenceEquals(source, TableGrid) || TableGrid.IsAncestorOf(source) || UiInteraction.IsInsideButton(source)) return;
-        if (Keyboard.FocusedElement is TextBox { Tag: ValueTuple<int, int> } focusedCell && TableGrid.IsAncestorOf(focusedCell)) CompleteCellEdit(focusedCell);
+        if (e.OriginalSource is not DependencyObject source || UiInteraction.IsDescendantOf(source, TableGrid) || UiInteraction.IsInsideButton(source)) return;
+        if (Keyboard.FocusedElement is TextBox { Tag: ValueTuple<int, int> } focusedCell && UiInteraction.IsDescendantOf(focusedCell, TableGrid)) CompleteCellEdit(focusedCell);
         ClearTimingSelection();
     }
     private void RecalculateTiming_Click(object sender, RoutedEventArgs e) => RecalculateTimingValues();
@@ -194,6 +196,7 @@ public partial class MainWindow : Window
             if (MessageBox.Show(this, "Opening this file replaces the current Timing, Fueling, Learn Apply, and Sandbox tables. Your current work remains protected by autosave. Continue?", "Open Map Lab file", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
             if (!ImportTimingSettingsJson(timingJson) || !fuelingPanel.ImportSettingsJson(fuelingJson) || !sandboxPanel.ImportSettingsJson(sandboxJson))
                 throw new InvalidDataException("Map Lab could not apply all data from this file.");
+            ApplyGlobalHeatColors(refreshTiming: true);
             currentMapFilePath = Path.GetFullPath(dialog.FileName); StatusText.Text = $"Opened {Path.GetFileName(currentMapFilePath)}";
             savedWorkspaceFingerprint = CaptureWorkspaceFingerprint();
             UpdateMapFilePresentation($"Opened {Path.GetFileName(currentMapFilePath)}");
@@ -564,9 +567,10 @@ public partial class MainWindow : Window
 
     private void OffsetSelection_Click(object sender, RoutedEventArgs e)
     {
-        if (ModelessWindowManager.ActivateIfOpen("Timing.Offset")) return;
         if (!TryGetSelectionBounds(out var top, out var bottom, out var left, out var right)) return;
-        ModelessWindowManager.ShowOrActivate("Timing.Offset", () => new OffsetSelectionWindow(selectionOffsetAmount, selectionOffsetIsPercentage, (direction, amount, percentage) => ApplyTimingOffset(top, bottom, left, right, direction, amount, percentage)) { Owner = this });
+        void Apply(int direction, double amount, bool percentage) => ApplyTimingOffset(top, bottom, left, right, direction, amount, percentage);
+        var dialog = ModelessWindowManager.ShowOrActivate("Timing.Offset", () => new OffsetSelectionWindow(selectionOffsetAmount, selectionOffsetIsPercentage, Apply) { Owner = this });
+        dialog.Configure(selectionOffsetAmount, selectionOffsetIsPercentage, Apply);
     }
 
     private void ApplyTimingOffset(int top, int bottom, int left, int right, int direction, double amount, bool percentage)
@@ -576,7 +580,7 @@ public partial class MainWindow : Window
         foreach (var cell in selected)
         {
             var value = timingValues[cell.Row, cell.Col];
-            SetCellValue(cell.Row, cell.Col, percentage ? value * (1 + direction * amount / 100) : value + direction * amount);
+            SetSmoothedCellValue(cell.Row, cell.Col, OffsetMath.Apply(value, direction, amount, percentage));
         }
         UpdateSelection(); SaveState(); StatusText.Text = $"{selected.Count} timing cells {(direction > 0 ? "increased" : "decreased")} by {amount:0.###}{(percentage ? "%" : "°")}";
     }
@@ -815,7 +819,11 @@ public partial class MainWindow : Window
             case SurfaceSelectionAction.Copy: CopySelection(); break;
             case SurfaceSelectionAction.Paste: PasteSelection(); Refresh(); break;
             case SurfaceSelectionAction.Offset:
-                ModelessWindowManager.ShowOrActivate("Timing.Offset", () => new OffsetSelectionWindow(selectionOffsetAmount, selectionOffsetIsPercentage, (direction, amount, percentage) => { ApplyTimingOffset(top, bottom, left, right, direction, amount, percentage); Refresh(); }) { Owner = this }); break;
+            {
+                void Apply(int direction, double amount, bool percentage) { ApplyTimingOffset(top, bottom, left, right, direction, amount, percentage); Refresh(); }
+                var dialog = ModelessWindowManager.ShowOrActivate("Timing.Offset", () => new OffsetSelectionWindow(selectionOffsetAmount, selectionOffsetIsPercentage, Apply) { Owner = this });
+                dialog.Configure(selectionOffsetAmount, selectionOffsetIsPercentage, Apply); break;
+            }
             case SurfaceSelectionAction.Smooth: Smooth_Click(this, new RoutedEventArgs()); Refresh(); break;
             case SurfaceSelectionAction.Refine:
                 ModelessWindowManager.ShowOrActivate("Timing.Refinement", () => new SmoothRefinementWindow(refinementStrength, refinementPasses, dialog => WorkingRunner.Run(this, () => { ApplyRefinement(dialog, top, bottom, left, right); Refresh(); })) { Owner = this }); break;
@@ -1306,18 +1314,29 @@ public partial class MainWindow : Window
         window.SetTableContext(viewValues, cropped ? region.AllLocalCells() : Array.Empty<(int Row, int Col)>(), cropped);
     }
 
-    private void Colors_Click(object sender, RoutedEventArgs e)
+    private void OpenColorSettings()
     {
-        ModelessWindowManager.ShowOrActivate("Timing.Colors", () => new ColorCustomizerWindow(useCustomHeatColors, customLowColor, customHighColor, ApplyColors) { Owner = this });
+        ModelessWindowManager.ShowOrActivate("Settings.Colors", () => new ColorCustomizerWindow(useCustomHeatColors, customLowColor, customHighColor, ApplyColors) { Owner = this });
     }
 
     private void ApplyColors(ColorCustomizerWindow dialog)
     {
         useCustomHeatColors = dialog.UseCustomColors; customLowColor = dialog.LowColor; customHighColor = dialog.HighColor;
-        RefreshTimingHeatPalette();
-        for (var row = 0; row < RowCount; row++) for (var col = 0; col < ColumnCount; col++) RefreshCellColor(valueCells[row, col]);
-        StatusText.Text = useCustomHeatColors ? "Custom heat-map colors applied" : "Default spectrum heat map applied";
+        ApplyGlobalHeatColors(refreshTiming: true);
+        StatusText.Text = useCustomHeatColors ? "Global custom heat-map colors applied" : "Global spectrum heat map applied";
         SaveState();
+    }
+
+    private void ApplyGlobalHeatColors(bool refreshTiming)
+    {
+        RefreshTimingHeatPalette();
+        UpdateTimingHeatRange();
+        if (refreshTiming && valueCells.Length > 0)
+            for (var row = 0; row < valueCells.GetLength(0); row++) for (var col = 0; col < valueCells.GetLength(1); col++)
+                if (valueCells[row, col] is not null) RefreshCellColor(valueCells[row, col]);
+        fuelingPanel.SetHeatColors(useCustomHeatColors, customLowColor, customHighColor);
+        sandboxPanel.SetHeatColors(useCustomHeatColors, customLowColor, customHighColor);
+        foreach (var viewer in Application.Current.Windows.OfType<Surface3DWindow>()) viewer.SetHeatColors(useCustomHeatColors, customLowColor, customHighColor);
     }
 
     private void BoostRetard_Click(object sender, RoutedEventArgs e)
@@ -1510,8 +1529,29 @@ public partial class MainWindow : Window
 
     private Brush TimingBrush(double value)
     {
-        var t = Math.Clamp((value - 12) / 34, 0, 1);
+        var t = Math.Clamp((value - timingHeatMinimum) / Math.Max(.000000001, timingHeatMaximum - timingHeatMinimum), 0, 1);
         return timingHeatPalette[(int)Math.Round(t * (timingHeatPalette.Length - 1))];
+    }
+    private bool UpdateTimingHeatRange()
+    {
+        if (timingValues.Length == 0) return false;
+        var minimum = double.PositiveInfinity; var maximum = double.NegativeInfinity;
+        foreach (var value in timingValues)
+        {
+            if (!double.IsFinite(value)) continue;
+            if (value < minimum) minimum = value;
+            if (value > maximum) maximum = value;
+        }
+        if (!double.IsFinite(minimum) || !double.IsFinite(maximum)) return false;
+        if (Math.Abs(maximum - minimum) < .000000001) maximum = minimum + .000000001;
+        var changed = Math.Abs(minimum - timingHeatMinimum) > .000000001 || Math.Abs(maximum - timingHeatMaximum) > .000000001;
+        timingHeatMinimum = minimum; timingHeatMaximum = maximum; return changed;
+    }
+    private void RefreshTimingColorScaleIfChanged()
+    {
+        if (!UpdateTimingHeatRange() || valueCells.Length == 0) return;
+        for (var row = 0; row < valueCells.GetLength(0); row++) for (var col = 0; col < valueCells.GetLength(1); col++)
+            if (valueCells[row, col] is { } cell && !cell.IsKeyboardFocusWithin) cell.Background = TimingBrush(timingValues[row, col]);
     }
     private void RefreshTimingHeatPalette() => timingHeatPalette = useCustomHeatColors ? UiBrushCache.CreateLinearPalette(customLowColor, customHighColor) : UiBrushCache.Spectrum;
     private static Color HslToColor(double h, double s, double l)
@@ -2000,6 +2040,7 @@ public partial class MainWindow : Window
     private void SaveState()
     {
         if (!IsLoaded || loadingState || rpmAxis.Length != ColumnCount || mapAxis.Length != RowCount) return;
+        RefreshTimingColorScaleIfChanged();
         try
         {
             var timing = new double[RowCount][];

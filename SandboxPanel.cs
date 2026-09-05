@@ -43,6 +43,9 @@ public sealed class SandboxPanel : Grid
     private int leadingDisplayDigits = 3, trailingDisplayDecimals = 1;
     private int leadingValueDigits = 4, trailingValueDecimals = 3;
     private int displayTrailingZeroPlaces = 1, actualTrailingZeroPlaces = 3;
+    private bool useCustomHeatColors;
+    private Color lowHeatColor = Color.FromRgb(255, 20, 20), highHeatColor = Color.FromRgb(255, 0, 235);
+    private Brush[] heatPalette = UiBrushCache.Spectrum;
     private bool syncingDisplayPrecision;
     private static string SavePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimingTableCalculator", "sandbox-autosave.json");
     private string? lastSavedJson;
@@ -122,6 +125,13 @@ public sealed class SandboxPanel : Grid
         PreviewKeyDown += SandboxKeyDown;
         table.PreviewMouseLeftButtonUp += (_, _) => { selecting = false; axisSelecting = false; };
         if (!Load()) Initialize(31, 31); else Build();
+    }
+
+    internal void SetHeatColors(bool enabled, Color lowColor, Color highColor)
+    {
+        useCustomHeatColors = enabled; lowHeatColor = lowColor; highHeatColor = highColor;
+        heatPalette = enabled ? UiBrushCache.CreateLinearPalette(lowColor, highColor) : UiBrushCache.Spectrum;
+        Refresh();
     }
 
     internal void SetCurrentFile(string displayName, string? fullPath)
@@ -223,8 +233,8 @@ public sealed class SandboxPanel : Grid
 
     private void SandboxPanel_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.OriginalSource is not DependencyObject source || ReferenceEquals(source, table) || table.IsAncestorOf(source) || UiInteraction.IsInsideButton(source)) return;
-        if (Keyboard.FocusedElement is TextBox { Tag: ValueTuple<int, int> } focusedCell && table.IsAncestorOf(focusedCell)) CommitCell(focusedCell);
+        if (e.OriginalSource is not DependencyObject source || UiInteraction.IsDescendantOf(source, table) || UiInteraction.IsInsideButton(source)) return;
+        if (Keyboard.FocusedElement is TextBox { Tag: ValueTuple<int, int> } focusedCell && UiInteraction.IsDescendantOf(focusedCell, table)) CommitCell(focusedCell);
         ClearCellSelection();
     }
 
@@ -315,7 +325,7 @@ public sealed class SandboxPanel : Grid
     private void SmoothColumns(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || b - t < 2) { Info("Select at least three rows."); return; } var original = (double[,])values.Clone(); PushUndo(); for (var c = l; c <= r; c++) for (var row = t + 1; row < b; row++) { var x = (map[t] - map[row]) / (map[t] - map[b]); values[row, c] = values[t, c] + (values[b, c] - values[t, c]) * Ease(x); } NormalizeChangedValues(original); Changed("Smoothed selected columns", normalize: false); ClearCellSelection(); status.Text = "Smoothed selected sandbox columns  •  selection cleared"; }
     private void SmoothRows(object? sender, RoutedEventArgs e) { if (!Bounds(out var t, out var b, out var l, out var r) || r - l < 2) { Info("Select at least three columns."); return; } var original = (double[,])values.Clone(); PushUndo(); for (var row = t; row <= b; row++) for (var c = l + 1; c < r; c++) { var x = (rpm[c] - rpm[l]) / (rpm[r] - rpm[l]); values[row, c] = values[row, l] + (values[row, r] - values[row, l]) * Ease(x); } NormalizeChangedValues(original); Changed("Smoothed selected rows", normalize: false); ClearCellSelection(); status.Text = "Smoothed selected sandbox rows  •  selection cleared"; }
     private void Clear(object? sender, RoutedEventArgs e) { var selected = Selected(); if (selected.Count == 0) return; PushUndo(); foreach (var p in selected) values[p.Row, p.Col] = 0; Changed($"Cleared {selected.Count} sandbox cells"); }
-    private void Offset(object? sender, RoutedEventArgs e) { var selected = Selected(); if (selected.Count == 0) return; ModelessWindowManager.ShowOrActivate("Sandbox.Offset", () => new OffsetSelectionWindow(offsetAmount, offsetPercent, (direction, amount, percent) => { offsetAmount = amount; offsetPercent = percent; PushUndo(); foreach (var p in selected) values[p.Row, p.Col] = percent ? values[p.Row, p.Col] * (1 + direction * amount / 100d) : values[p.Row, p.Col] + direction * amount; Changed($"Offset {selected.Count} sandbox cells"); }) { Owner = Window.GetWindow(this) }); }
+    private void Offset(object? sender, RoutedEventArgs e) { var selected = Selected(); if (selected.Count == 0) return; void Apply(int direction, double amount, bool percent) { offsetAmount = amount; offsetPercent = percent; var original = (double[,])values.Clone(); PushUndo(); foreach (var p in selected) values[p.Row, p.Col] = OffsetMath.Apply(values[p.Row, p.Col], direction, amount, percent); NormalizeChangedValues(original); Changed($"Offset {selected.Count} sandbox cells", normalize: false); } var dialog = ModelessWindowManager.ShowOrActivate("Sandbox.Offset", () => new OffsetSelectionWindow(offsetAmount, offsetPercent, Apply) { Owner = Window.GetWindow(this) }); dialog.Configure(offsetAmount, offsetPercent, Apply); }
 
     private void View3D(object? sender, RoutedEventArgs e)
     {
@@ -342,7 +352,7 @@ public sealed class SandboxPanel : Grid
         var window = ModelessWindowManager.ShowOrActivate("Sandbox.3D", () =>
         {
             var title = cropped ? $"3D Map Sandbox - Selected {region.ColumnCount} x {region.RowCount}" : "3D Map Sandbox";
-            var created = new Surface3DWindow(viewValues, viewRpm, viewMap, mapUnit, false, Colors.Red, Colors.Magenta, SmoothRegion, title, "TABLE VALUE", HandleRegionAction, "Y AXIS", XAxisTitle, "0.########", valueFormatter: FormatDisplayValue, sculptCommit: CommitRegionSculpt) { Owner = Window.GetWindow(this) };
+            var created = new Surface3DWindow(viewValues, viewRpm, viewMap, mapUnit, useCustomHeatColors, lowHeatColor, highHeatColor, SmoothRegion, title, "TABLE VALUE", HandleRegionAction, "Y AXIS", XAxisTitle, "0.########", valueFormatter: FormatDisplayValue, sculptCommit: CommitRegionSculpt) { Owner = Window.GetWindow(this) };
             created.Closed += (_, _) => { ClearCellSelection(); status.Text = "3D sandbox closed  •  selection cleared"; }; return created;
         });
         window.SetTableContext(viewValues, cropped ? region.AllLocalCells() : Array.Empty<(int Row, int Col)>(), cropped);
@@ -420,7 +430,7 @@ public sealed class SandboxPanel : Grid
     }
 
     private void ExportCsv(object? sender, RoutedEventArgs e) { var dialog = new SaveFileDialog { Filter = "CSV file (*.csv)|*.csv", FileName = "map-sandbox.csv" }; if (dialog.ShowDialog(Window.GetWindow(this)) != true) return; var csv = new StringBuilder(); for (var r = 0; r < map.Length; r++) { csv.Append(FormatExactAxisValue(map[r])); for (var c = 0; c < rpm.Length; c++) csv.Append(',').Append(FormatStoredValue(values[r, c])); csv.AppendLine(); } csv.Append(XAxisTitle); foreach (var value in rpm) csv.Append(',').Append(FormatExactAxisValue(value)); File.WriteAllText(dialog.FileName, csv.ToString()); status.Text = $"Saved {Path.GetFileName(dialog.FileName)}"; }
-    private void ExportExcel(object? sender, RoutedEventArgs e) { var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "map-sandbox.xlsx" }; if (dialog.ShowDialog(Window.GetWindow(this)) != true) return; ExcelTimingExporter.Export(dialog.FileName, rpm, map, values, mapUnit, Colors.Red, Colors.Lime, Colors.Magenta, false, "Map Sandbox", "Custom Map", XAxisTitle, MagnitudeNumberFormatter.ExcelFormat(leadingDisplayDigits, trailingDisplayDecimals, displayTrailingZeroPlaces)); status.Text = $"Saved {Path.GetFileName(dialog.FileName)}"; }
+    private void ExportExcel(object? sender, RoutedEventArgs e) { var dialog = new SaveFileDialog { Filter = "Excel workbook (*.xlsx)|*.xlsx", FileName = "map-sandbox.xlsx" }; if (dialog.ShowDialog(Window.GetWindow(this)) != true) return; var middle = useCustomHeatColors ? Color.FromRgb((byte)((lowHeatColor.R + highHeatColor.R) / 2), (byte)((lowHeatColor.G + highHeatColor.G) / 2), (byte)((lowHeatColor.B + highHeatColor.B) / 2)) : Colors.Lime; ExcelTimingExporter.Export(dialog.FileName, rpm, map, values, mapUnit, useCustomHeatColors ? lowHeatColor : Colors.Red, middle, useCustomHeatColors ? highHeatColor : Colors.Magenta, useCustomHeatColors, "Map Sandbox", "Custom Map", XAxisTitle, MagnitudeNumberFormatter.ExcelFormat(leadingDisplayDigits, trailingDisplayDecimals, displayTrailingZeroPlaces)); status.Text = $"Saved {Path.GetFileName(dialog.FileName)}"; }
 
     private void RefreshUnitItems()
     {
@@ -513,7 +523,7 @@ public sealed class SandboxPanel : Grid
         loading = true; var min = double.PositiveInfinity; var max = double.NegativeInfinity;
         for (var r = 0; r < map.Length; r++) for (var c = 0; c < rpm.Length; c++) { var value = values[r, c]; if (value < min) min = value; if (value > max) max = value; }
         var span = Math.Max(.001, max - min);
-        for (var r = 0; r < map.Length; r++) for (var c = 0; c < rpm.Length; c++) { cells[r, c].Text = FormatDisplayValue(values[r, c]); cells[r, c].Background = UiBrushCache.SpectrumAt((values[r, c] - min) / span); UpdateCellToolTip(r, c); }
+        for (var r = 0; r < map.Length; r++) for (var c = 0; c < rpm.Length; c++) { cells[r, c].Text = FormatDisplayValue(values[r, c]); cells[r, c].Background = heatPalette[(int)Math.Round(Math.Clamp((values[r, c] - min) / span, 0, 1) * (heatPalette.Length - 1))]; UpdateCellToolTip(r, c); }
         loading = false;
     }
     private void UpdateCellToolTip(int row, int col)
