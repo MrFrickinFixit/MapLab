@@ -1,3 +1,4 @@
+[README.md](https://github.com/user-attachments/files/31862759/README.md)
 # Map Lab
 
 <p align="center">
@@ -140,6 +141,12 @@ Get-FileHash .\MapLab-<version>-beta-win-x64-setup.exe -Algorithm SHA256
 Press `F1` inside Map Lab for searchable instructions covering table editing, axes, smoothing, timing regions, boost offsets, VE setup, Learn Apply, 3D tools, saving, and exporting.
 
 For bugs or feature requests, use [GitHub Issues](https://github.com/MrFrickinFixit/MapLab/issues). When reporting a problem, include the Map Lab version, Windows version, steps to reproduce it, and the complete exception text when available. Do not attach proprietary calibration data unless you are authorized to share it.
+
+## Support Map Lab
+
+Map Lab is provided free of charge. If it has been useful to you, you may optionally [support its continued development through PayPal](https://www.paypal.com/paypalme/bdiffenbaugh).
+
+Contributions are voluntary, are not purchases, do not unlock features or change the Map Lab license, and do not guarantee technical support, calibration advice, or future development. They are not tax-deductible charitable donations.
 
 ## License
 

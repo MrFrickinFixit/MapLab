@@ -1,4 +1,5 @@
 using System.IO;
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows;
@@ -11,6 +12,7 @@ namespace TimingTableCalculator;
 
 public sealed class AboutPanel : Grid
 {
+    private const string SupportUrl = "https://www.paypal.com/paypalme/bdiffenbaugh";
     private static readonly SolidColorBrush Accent = new(Color.FromRgb(0, 103, 192));
     private static readonly SolidColorBrush Text = new(Color.FromRgb(32, 32, 32));
     private static readonly SolidColorBrush Muted = new(Color.FromRgb(94, 94, 94));
@@ -45,6 +47,27 @@ public sealed class AboutPanel : Grid
 
         var copy = Button("Copy system information"); copy.Margin = new Thickness(0, 16, 0, 0); copy.HorizontalAlignment = HorizontalAlignment.Left;
         copy.Click += (_, _) => { var info = $"Map Lab {version}{Environment.NewLine}{RuntimeInformation.FrameworkDescription}{Environment.NewLine}{RuntimeInformation.OSDescription}{Environment.NewLine}Architecture: {RuntimeInformation.ProcessArchitecture}{Environment.NewLine}Autosave: {dataPath}"; try { Clipboard.SetText(info); copy.Content = "Copied"; } catch { copy.Content = "Copy failed"; } }; content.Children.Add(copy);
+
+        var support = new StackPanel();
+        support.Children.Add(Paragraph("Map Lab is provided free of charge. If it has been useful to you, you may optionally support its continued development. Contributions are voluntary, are not purchases, do not unlock features or change the license, and do not guarantee support, calibration advice, or future development. They are not tax-deductible charitable donations."));
+        var supportButton = Button("Support Map Lab with PayPal");
+        supportButton.Margin = new Thickness(0, 14, 0, 0);
+        supportButton.HorizontalAlignment = HorizontalAlignment.Left;
+        supportButton.ToolTip = "Open the Map Lab PayPal support page in your default browser";
+        supportButton.Click += (_, _) =>
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(SupportUrl) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(Window.GetWindow(this), $"Map Lab could not open the support page.\n\n{ex.Message}", "Support Map Lab", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        };
+        support.Children.Add(supportButton);
+        content.Children.Add(Card("SUPPORT MAP LAB", support));
+
         content.Children.Add(new Border { Background = new SolidColorBrush(Color.FromRgb(255, 248, 225)), BorderBrush = new SolidColorBrush(Color.FromRgb(226, 190, 92)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(16), Margin = new Thickness(0, 24, 0, 0), Child = new TextBlock { Text = "Calibration safety: Engine calibration involves inherent risk. Map Lab is a calculation and visualization tool. Verify all values independently and use appropriate safeguards before applying changes to an engine or vehicle.", Foreground = new SolidColorBrush(Color.FromRgb(82, 62, 14)), TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold, LineHeight = 20 } });
         content.Children.Add(new TextBlock { Text = "Built with .NET and Windows Presentation Foundation.", Foreground = Muted, FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 22, 0, 0) });
     }
