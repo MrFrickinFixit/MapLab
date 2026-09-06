@@ -8,7 +8,7 @@ if ([Threading.Thread]::CurrentThread.ApartmentState -ne [Threading.ApartmentSta
 }
 
 $root = Split-Path -Parent $PSScriptRoot
-$assemblyPath = Join-Path $root 'bin\Release\net8.0-windows\MapLab-1.0.3.4-beta.dll'
+$assemblyPath = Join-Path $root 'bin\Release\net8.0-windows\MapLab-1.0.3.5-beta.dll'
 if (-not (Test-Path -LiteralPath $assemblyPath)) {
     throw "Build MapLab.slnx in Release configuration before running this test. Missing: $assemblyPath"
 }

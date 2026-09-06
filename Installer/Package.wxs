@@ -14,7 +14,7 @@
     <Property Id="ARPPRODUCTICON" Value="MapLabIcon.ico" />
     <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" Secure="yes" />
     <Property Id="INSTALLSTARTMENUSHORTCUT" Value="1" Secure="yes" />
-    <Property Id="WixAppFolder" Value="WixPerUserFolder" />
+
 
     <!-- The welcome dialog is overridden so setup always walks through scope,
          destination-folder, and shortcut-feature selection. -->

@@ -83,16 +83,12 @@ public sealed class SandboxPanel : Grid
         trailingPrecisionBox.SelectionChanged += DisplayPrecisionChanged;
         displayTrailingZeroesBox.SelectionChanged += DisplayPrecisionChanged;
 
-        var heading = new Grid { Margin = new Thickness(4, 0, 0, 20) };
-        heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var title = new StackPanel();
-        title.Children.Add(new TextBlock { Text = "MAP LAB", Foreground = new SolidColorBrush(Color.FromRgb(0, 103, 192)), FontSize = 12, FontWeight = FontWeights.Bold });
+        var title = new WrapPanel { VerticalAlignment = VerticalAlignment.Center };
         title.Children.Add(new TextBlock { Text = "Map Sandbox", Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), FontSize = 25, FontWeight = FontWeights.SemiBold });
-        title.Children.Add(new TextBlock { Text = "Build and reshape custom tables without operating-region boundaries.", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 12, Margin = new Thickness(0, 4, 0, 0) });
         title.Children.Add(currentFileText);
-        heading.Children.Add(title);
+        CompactTableHeading.Align(title); title.HorizontalAlignment = HorizontalAlignment.Left;
         var badge = new Border { Background = new SolidColorBrush(Color.FromRgb(17, 29, 39)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 64, 53)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(16), Padding = new Thickness(14, 8, 14, 8), VerticalAlignment = VerticalAlignment.Center, Child = status };
-        Grid.SetColumn(badge, 1); heading.Children.Add(badge); Children.Add(heading);
+        badge.Margin = new Thickness(16, 2, 0, 2); status.TextWrapping = TextWrapping.Wrap; status.MaxWidth = 320; title.Children.Add(badge);
 
         var tools = new StackPanel { Orientation = Orientation.Horizontal };
         var matrix = new StackPanel { Orientation = Orientation.Horizontal };
@@ -104,17 +100,19 @@ public sealed class SandboxPanel : Grid
         tools.Children.Add(Group("X AXIS UNITS", xUnits));
         tools.Children.Add(Group("CELL EDITING", Button("⧉  Copy", (_, _) => Copy()), Button("▣  Paste", (_, _) => Paste()), Button("×  Clear", Clear)));
         tools.Children.Add(Group("SMOOTHING", Button("⚙  Smooth Selected…", AdvancedSmooth, true), Button("↕  Columns", SmoothColumns), Button("↔  Rows", SmoothRows)));
-        var commandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = tools, Margin = new Thickness(0, 0, 0, 10) };
+        var secondaryTools = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        var toolRows = new StackPanel(); toolRows.Children.Add(tools); toolRows.Children.Add(secondaryTools);
+        var commandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = toolRows, Margin = new Thickness(0, 0, 0, 6) };
         Grid.SetRow(commandBar, 1); Children.Add(commandBar);
 
-        var bottomTools = new StackPanel { Orientation = Orientation.Horizontal };
-        bottomTools.Children.Add(PrecisionGroup());
-        bottomTools.Children.Add(Group("VIEW & OUTPUT", Button("▦  3D Map", View3D), Button("⇩  Export CSV", ExportCsv), Button("▤  Export Excel", ExportExcel, true)));
-        bottomTools.Children.Add(Group("HISTORY", Button("↶  Undo", (_, _) => Undo()), Button("↷  Redo", (_, _) => Redo())));
-        var bottomCommandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = bottomTools, Margin = new Thickness(0, 10, 0, 0) };
-        Grid.SetRow(bottomCommandBar, 3); Children.Add(bottomCommandBar);
 
-        var frame = new Border { Background = new SolidColorBrush(Color.FromRgb(8, 13, 20)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 50, 71)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(3), Child = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, CanContentScroll = false, Content = table } };
+        secondaryTools.Children.Add(PrecisionGroup());
+        secondaryTools.Children.Add(Group("VIEW & OUTPUT", Button("▦  3D Map", View3D), Button("⇩  Export CSV", ExportCsv), Button("▤  Export Excel", ExportExcel, true)));
+        secondaryTools.Children.Add(Group("HISTORY", Button("↶  Undo", (_, _) => Undo()), Button("↷  Redo", (_, _) => Redo())));
+        secondaryTools.Children.Add(title);
+
+
+        var frame = new Border { Background = new SolidColorBrush(Color.FromRgb(8, 13, 20)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 50, 71)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(3), Child = new TableViewport { Table = table } };
         Grid.SetRow(frame, 2); Children.Add(frame);
         PreviewKeyDown += SandboxKeyDown;
         table.PreviewMouseLeftButtonUp += (_, _) => { selecting = false; axisSelecting = false; };
@@ -579,11 +577,11 @@ public sealed class SandboxPanel : Grid
             return row;
         }
         var content = new StackPanel();
-        content.Children.Add(new TextBlock { Text = "DECIMAL PRECISION", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) });
+        content.Children.Add(new TextBlock { Text = "DECIMAL PRECISION", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 2) });
         content.Children.Add(Row("DISPLAY", leadingPrecisionBox, trailingPrecisionBox, displayTrailingZeroesBox));
-        return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 7, 0), Child = content };
+        return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(6, 4, 6, 4), Margin = new Thickness(0, 0, 7, 0), Child = content };
     }
-    private static Border Group(string title, params UIElement[] controls) { var content = new StackPanel(); content.Children.Add(new TextBlock { Text = title, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) }); var row = new StackPanel { Orientation = Orientation.Horizontal }; foreach (var control in controls) row.Children.Add(control); content.Children.Add(row); return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 7, 0), Child = content }; }
+    private static Border Group(string title, params UIElement[] controls) { var content = new StackPanel(); content.Children.Add(new TextBlock { Text = title, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 2) }); var row = new StackPanel { Orientation = Orientation.Horizontal }; foreach (var control in controls) row.Children.Add(control); content.Children.Add(row); return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(6, 4, 6, 4), Margin = new Thickness(0, 0, 7, 0), Child = content }; }
     private static Button Button(string text, RoutedEventHandler click, bool primary = false) { var button = new Button { Content = text, Padding = new Thickness(12, 7, 12, 7), Margin = new Thickness(0, 0, 7, 0), Background = new SolidColorBrush(primary ? Color.FromRgb(0, 103, 192) : Color.FromRgb(249, 249, 249)), Foreground = primary ? Brushes.White : new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(primary ? Color.FromRgb(0, 90, 170) : Color.FromRgb(190, 190, 190)), FontWeight = FontWeights.SemiBold }; button.Click += click; return button; }
     private static MenuItem Item(string header, RoutedEventHandler click) { var item = new MenuItem { Header = header }; item.Click += click; return item; }
     private static void Info(string message) => MessageBox.Show(message, "Map Sandbox", MessageBoxButton.OK, MessageBoxImage.Information);

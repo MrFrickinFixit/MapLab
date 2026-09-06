@@ -24,6 +24,7 @@ Map Lab combines spreadsheet-style 2D tables with interactive 3D surfaces. It su
 ## Highlights
 
 - Separate **Fueling**, **Ignition Timing**, **Learn Apply**, and **Map Sandbox** workspaces.
+- Tables automatically fit the available window space, including on smaller displays. Enable **Actual size (scroll to edit)** above a table for full-size cells and scrollbars.
 - Adjustable matrix dimensions with independently editable X/RPM and Y/MAP breakpoint scales.
 - MAP units in PSI gauge or kPa absolute, plus custom axis units in Map Sandbox.
 - Drag selection, Ctrl+click/Ctrl+drag additive selection, group editing, and clipboard transfer to and from tuning software.

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -6,20 +6,21 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <AssemblyName>MapLab-1.0.3.4-beta</AssemblyName>
+    <DefaultItemExcludes>$(DefaultItemExcludes);artifacts\**;Installer\obj\**;Installer\bin\**</DefaultItemExcludes>
+    <AssemblyName>MapLab-1.0.3.5-beta</AssemblyName>
     <RootNamespace>TimingTableCalculator</RootNamespace>
     <Title>Map Lab</Title>
     <Product>Map Lab</Product>
-    <Version>1.0.3.4</Version>
-    <FileVersion>1.0.3.4</FileVersion>
-    <AssemblyVersion>1.0.3.4</AssemblyVersion>
+    <Version>1.0.3.5</Version>
+    <FileVersion>1.0.3.5</FileVersion>
+    <AssemblyVersion>1.0.3.5</AssemblyVersion>
     <Authors>Brian Diffenbaugh</Authors>
     <Copyright>Copyright (c) 2026 Brian Diffenbaugh</Copyright>
     <Description>Engine ignition timing and fueling map editor.</Description>
     <ApplicationIcon>Assets\MapLab.ico</ApplicationIcon>
     <StartupObject>TimingTableCalculator.App</StartupObject>
     <PackageId></PackageId>
-    <AssemblyTitle>MapLab-1.0.3.4-beta</AssemblyTitle>
+    <AssemblyTitle>MapLab-1.0.3.5-beta</AssemblyTitle>
   </PropertyGroup>
 
   <ItemGroup>

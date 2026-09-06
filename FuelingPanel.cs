@@ -90,18 +90,18 @@ public sealed class FuelingPanel : Grid
         displayTrailingZeroesBox.SelectionChanged += (_, _) => ApplyDisplayPrecision();
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition()); RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         mapUnitBox = CreateMapUnitBox();
-        var heading = new Grid { Margin = new Thickness(4, 0, 0, 20) }; heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var title = new StackPanel(); title.Children.Add(new TextBlock { Text = "FUELING LAB", Foreground = new SolidColorBrush(Color.FromRgb(0, 103, 192)), FontSize = 12, FontWeight = FontWeights.Bold });
-        fuelTableTitle = new TextBlock { Text = "Fuel Table — VE (%)", Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), FontSize = 25, FontWeight = FontWeights.SemiBold }; title.Children.Add(fuelTableTitle); title.Children.Add(currentFileText); heading.Children.Add(title);
-        var viewOptions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 24, 0) };
+        var title = new WrapPanel { VerticalAlignment = VerticalAlignment.Center };
+        fuelTableTitle = new TextBlock { Text = "Fuel Table — VE (%)", Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), FontSize = 25, FontWeight = FontWeights.SemiBold }; title.Children.Add(fuelTableTitle); title.Children.Add(currentFileText); CompactTableHeading.Align(title); title.HorizontalAlignment = HorizontalAlignment.Left;
         conversionViewBox = new CheckBox { Content = "View as lb/hr", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(18, 0, 0, 0), FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)) };
-        conversionViewBox.Checked += (_, _) => { if (!syncingConversion) SetFuelFlowView(true); }; conversionViewBox.Unchecked += (_, _) => { if (!syncingConversion) SetFuelFlowView(false); }; viewOptions.Children.Add(conversionViewBox);
-        Grid.SetColumn(viewOptions, 1); heading.Children.Add(viewOptions);
+        conversionViewBox.Checked += (_, _) => { if (!syncingConversion) SetFuelFlowView(true); }; conversionViewBox.Unchecked += (_, _) => { if (!syncingConversion) SetFuelFlowView(false); };
+
         status.Text = "Fuel table ready"; status.Foreground = new SolidColorBrush(Color.FromRgb(169, 201, 192)); status.FontSize = 12; status.VerticalAlignment = VerticalAlignment.Center;
         var statusBadge = new Border { Background = new SolidColorBrush(Color.FromRgb(17, 29, 39)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 64, 53)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(16), Padding = new Thickness(14, 8, 14, 8), VerticalAlignment = VerticalAlignment.Center, Child = status };
-        Grid.SetColumn(statusBadge, 3); heading.Children.Add(statusBadge); Children.Add(heading);
+        statusBadge.Margin = new Thickness(16, 2, 0, 2); status.TextWrapping = TextWrapping.Wrap; status.MaxWidth = 320; title.Children.Add(statusBadge);
 
-        var frame = new Border { Background = new SolidColorBrush(Color.FromRgb(8, 13, 20)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 50, 71)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(3), Child = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, CanContentScroll = false, Content = table } };
+        var tableViewport = new TableViewport { Table = table };
+        tableViewport.AddViewOption(conversionViewBox);
+        var frame = new Border { Background = new SolidColorBrush(Color.FromRgb(8, 13, 20)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 50, 71)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(3), Child = tableViewport };
         Grid.SetRow(frame, 2); Children.Add(frame);
         var tools = new StackPanel { Orientation = Orientation.Horizontal };
         var fuelSetup = new StackPanel { Orientation = Orientation.Horizontal };
@@ -110,15 +110,21 @@ public sealed class FuelingPanel : Grid
         fuelSetup.Children.Add(mapUnitBox); tools.Children.Add(ControlGroup("FUEL SETUP TOOLS", fuelSetup));
         tools.Children.Add(MatrixAxisGroup());
         tools.Children.Add(ControlGroup("CELL EDITING", Button("⧉  Copy", (_, _) => CopySelection()), Button("▣  Paste", (_, _) => PasteSelection())));
-        tools.Children.Add(ControlGroup("SMOOTHING", Button("⚙  Smooth Selected…", AdvancedSmooth, true), Button("↕  Columns", SmoothColumns), Button("↔  Rows", SmoothRows)));
-        var commandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = tools, Margin = new Thickness(0, 0, 0, 10) };
+        var smoothingCard = ControlGroup("SMOOTHING", Button("⚙  Smooth Selected…", AdvancedSmooth, true), Button("↕  Columns", SmoothColumns), Button("↔  Rows", SmoothRows));
+        var secondaryTools = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        var toolRows = new Grid();
+        toolRows.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); toolRows.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        toolRows.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); toolRows.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        toolRows.Children.Add(tools); Grid.SetColumn(smoothingCard, 1); toolRows.Children.Add(smoothingCard);
+        Grid.SetRow(secondaryTools, 1); toolRows.Children.Add(secondaryTools); Grid.SetColumnSpan(secondaryTools, 2);
+        var commandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = toolRows, Margin = new Thickness(0, 0, 0, 6) };
         Grid.SetRow(commandBar, 1); Children.Add(commandBar);
-        var bottomTools = new StackPanel { Orientation = Orientation.Horizontal };
-        bottomTools.Children.Add(DisplayPrecisionGroup());
-        bottomTools.Children.Add(ControlGroup("VIEW & OUTPUT", Button("▦  3D Map", View3D), Button("⇩  Export CSV", ExportCsv), Button("▤  Export Excel", ExportExcel, true)));
-        bottomTools.Children.Add(ControlGroup("HISTORY", Button("↶  Undo", (_, _) => Undo()), Button("↷  Redo", (_, _) => Redo())));
-        var bottomCommandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = bottomTools, Margin = new Thickness(0, 10, 0, 0) };
-        Grid.SetRow(bottomCommandBar, 3); Children.Add(bottomCommandBar);
+
+        secondaryTools.Children.Add(DisplayPrecisionGroup());
+        secondaryTools.Children.Add(ControlGroup("VIEW & OUTPUT", Button("▦  3D Map", View3D), Button("⇩  Export CSV", ExportCsv), Button("▤  Export Excel", ExportExcel, true)));
+        secondaryTools.Children.Add(ControlGroup("HISTORY", Button("↶  Undo", (_, _) => Undo()), Button("↷  Redo", (_, _) => Redo())));
+        secondaryTools.Children.Add(title);
+
         PreviewKeyDown += FuelingPanel_PreviewKeyDown;
         table.PreviewMouseLeftButtonUp += (_, _) => { selecting = false; axisSelecting = false; };
         LearnApply.Changed += () => { if (!syncingLearnApply) Save(); };
@@ -1098,11 +1104,11 @@ public sealed class FuelingPanel : Grid
     private static Border ControlGroup(string title, params UIElement[] controls)
     {
         var content = new StackPanel();
-        content.Children.Add(new TextBlock { Text = title, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) });
+        content.Children.Add(new TextBlock { Text = title, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 2) });
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         foreach (var control in controls) row.Children.Add(control);
         content.Children.Add(row);
-        return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 7, 0), Child = content };
+        return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(6, 4, 6, 4), Margin = new Thickness(0, 0, 7, 0), Child = content };
     }
     private static TextBlock FileNameTextBlock() => new() { Text = "Current file: Untitled", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, Margin = new Thickness(0, 3, 0, 0) };
     private Border DisplayPrecisionGroup()
@@ -1120,9 +1126,9 @@ public sealed class FuelingPanel : Grid
             row.Children.Add(leading); row.Children.Add(trailing); row.Children.Add(zeroes); return row;
         }
         var content = new StackPanel();
-        content.Children.Add(new TextBlock { Text = "VE DECIMAL PRECISION", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) });
+        content.Children.Add(new TextBlock { Text = "VE DECIMAL PRECISION", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 2) });
         content.Children.Add(Row("DISPLAY", Field("LEADING", leadingPrecisionBox, "Leading-digit threshold used only to display VE values."), Field("TRAILING", trailingPrecisionBox, "Maximum decimal precision used for displayed values."), Field("ZEROES", displayTrailingZeroesBox, "Minimum decimal places shown by padding trailing zeroes.")));
-        return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 7, 0), Child = content };
+        return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(6, 4, 6, 4), Margin = new Thickness(0, 0, 7, 0), Child = content };
     }
     private static ComboBox PrecisionBox(int minimum, int maximum, int selected)
     {

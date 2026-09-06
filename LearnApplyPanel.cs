@@ -31,10 +31,10 @@ public sealed class LearnApplyPanel : Grid
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition());
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var heading = new Grid { Margin = new Thickness(4, 0, 0, 20) };
-        heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var title = new StackPanel(); title.Children.Add(new TextBlock { Text = "Learn Apply Table - VE Offset (%)", FontSize = 25, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap }); title.Children.Add(currentFileText); heading.Children.Add(title);
-        status.Margin = new Thickness(20, 0, 0, 0); Grid.SetColumn(status, 1); heading.Children.Add(status); Children.Add(heading);
+        var heading = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+        heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.ColumnDefinitions.Add(new ColumnDefinition());
+        var title = new WrapPanel { VerticalAlignment = VerticalAlignment.Center }; title.Children.Add(new TextBlock { Text = "Learn Apply Table - VE Offset (%)", FontSize = 25, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap }); title.Children.Add(currentFileText); CompactTableHeading.Align(title); Grid.SetColumn(title, 1); heading.Children.Add(title);
+        status.Margin = new Thickness(16, 2, 0, 2); title.Children.Add(status); Children.Add(heading);
 
         var tools = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
         tools.Children.Add(Command("Copy", 0xE8C8, Copy)); tools.Children.Add(Command("Paste", 0xE77F, Paste));
@@ -45,8 +45,10 @@ public sealed class LearnApplyPanel : Grid
         transferButton = Command("Transfer to Fueling", 0xE8B5, Transfer, true);
         transferButton.ToolTip = "Transfer all nonzero offsets on the current axes to Fueling VE, regardless of the Fueling display units.";
         tools.Children.Add(transferButton); Grid.SetRow(tools, 1); Children.Add(tools);
-        var frame = new Border { BorderBrush = UiBrushCache.GridLine, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(3), Background = new SolidColorBrush(Color.FromRgb(8, 13, 20)), Child = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, CanContentScroll = false, Content = table } };
-        Grid.SetRow(frame, 2); Children.Add(frame); Grid.SetRow(summary, 3); Children.Add(summary);
+        var frame = new Border { BorderBrush = UiBrushCache.GridLine, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(3), Background = new SolidColorBrush(Color.FromRgb(8, 13, 20)), Child = new TableViewport { Table = table } };
+        Grid.SetRow(frame, 2); Children.Add(frame); summary.Margin = new Thickness(16, 2, 0, 2); summary.TextAlignment = TextAlignment.Left; title.Children.Add(summary);
+        title.HorizontalAlignment = HorizontalAlignment.Left;
+        foreach (FrameworkElement item in title.Children) { item.VerticalAlignment = VerticalAlignment.Center; item.Margin = new Thickness(0, 2, 16, 2); if (item is TextBlock text) text.TextAlignment = TextAlignment.Left; }
         PreviewKeyDown += HandleKeys;
         table.PreviewMouseLeftButtonUp += (_, _) => selecting = false;
         model.Changed += Refresh;

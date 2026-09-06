@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 if ([Threading.Thread]::CurrentThread.ApartmentState -ne [Threading.ApartmentState]::STA) { throw 'Run this WPF test with pwsh -Sta.' }
 
 $root = Split-Path -Parent $PSScriptRoot
-$assemblyPath = Join-Path $root 'bin\Release\net8.0-windows\MapLab-1.0.3.4-beta.dll'
+$assemblyPath = Join-Path $root 'bin\Release\net8.0-windows\MapLab-1.0.3.5-beta.dll'
 if (-not (Test-Path -LiteralPath $assemblyPath)) { throw "Build the Release configuration first: $assemblyPath" }
 
 Add-Type -AssemblyName WindowsBase
