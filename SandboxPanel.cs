@@ -17,8 +17,7 @@ public sealed class SandboxPanel : Grid
     private readonly TextBlock status = new() { Text = "Sandbox ready", Foreground = new SolidColorBrush(Color.FromRgb(169, 201, 192)), FontSize = 12 };
     private readonly TextBlock currentFileText = new() { Text = "Current file: Untitled", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, Margin = new Thickness(0, 3, 0, 0) };
     private readonly TextBox xSize = Box("31", 44), ySize = Box("31", 44);
-    private readonly ComboBox unitBox, xUnitBox, leadingPrecisionBox, trailingPrecisionBox, valueLeadingPrecisionBox, valueTrailingPrecisionBox;
-    private readonly ComboBox displayTrailingZeroesBox, actualTrailingZeroesBox;
+    private readonly ComboBox unitBox, xUnitBox, leadingPrecisionBox, trailingPrecisionBox, displayTrailingZeroesBox;
     private TextBox[,] cells = new TextBox[0, 0];
     private TextBox[] mapEditors = [], rpmEditors = [];
     private double[,] values = new double[0, 0];
@@ -59,9 +58,9 @@ public sealed class SandboxPanel : Grid
     private static string FormatExactAxisValue(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
     private string XAxisTitle => xUnit.Equals("Unitless", StringComparison.OrdinalIgnoreCase) ? "X AXIS" : $"X AXIS ({xUnit})";
     private string FormatDisplayValue(double value) => MagnitudeNumberFormatter.Format(value, leadingDisplayDigits, trailingDisplayDecimals, displayTrailingZeroPlaces);
-    private double RoundEditableValue(double value) => Math.Round(value, MagnitudeNumberFormatter.DecimalPlaces(value, leadingValueDigits, trailingValueDecimals), MidpointRounding.AwayFromZero);
-    private double RoundSmoothedValue(double value) => Math.Round(value, trailingValueDecimals, MidpointRounding.AwayFromZero);
-    private string FormatStoredValue(double value) => MagnitudeNumberFormatter.FormatActual(value, trailingValueDecimals, actualTrailingZeroPlaces);
+    private double RoundEditableValue(double value) => value;
+    private double RoundSmoothedValue(double value) => value;
+    private string FormatStoredValue(double value) => MagnitudeNumberFormatter.FormatStored(value);
 
     public SandboxPanel()
     {
@@ -79,15 +78,10 @@ public sealed class SandboxPanel : Grid
         xUnitBox.SelectionChanged += (_, _) => { if (!syncingUnit) XUnitSelectionChanged(); };
         leadingPrecisionBox = PrecisionBox(1, 4, leadingDisplayDigits);
         trailingPrecisionBox = PrecisionBox(0, 4, trailingDisplayDecimals);
-        valueLeadingPrecisionBox = PrecisionBox(1, 4, leadingValueDigits);
-        valueTrailingPrecisionBox = PrecisionBox(0, 4, trailingValueDecimals);
         displayTrailingZeroesBox = TrailingZeroesBox(displayTrailingZeroPlaces, "Minimum decimal places shown by padding display values with trailing zeroes.");
-        actualTrailingZeroesBox = TrailingZeroesBox(actualTrailingZeroPlaces, "Minimum decimal places shown in actual-value text, clipboard data, and CSV exports.");
         leadingPrecisionBox.SelectionChanged += DisplayPrecisionChanged;
         trailingPrecisionBox.SelectionChanged += DisplayPrecisionChanged;
-        valueLeadingPrecisionBox.SelectionChanged += DisplayPrecisionChanged;
-        valueTrailingPrecisionBox.SelectionChanged += DisplayPrecisionChanged;
-        displayTrailingZeroesBox.SelectionChanged += DisplayPrecisionChanged; actualTrailingZeroesBox.SelectionChanged += DisplayPrecisionChanged;
+        displayTrailingZeroesBox.SelectionChanged += DisplayPrecisionChanged;
 
         var heading = new Grid { Margin = new Thickness(4, 0, 0, 20) };
         heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -502,20 +496,16 @@ public sealed class SandboxPanel : Grid
     private void Changed(string message, bool normalize = true) { if (normalize) NormalizeStoredValues(); Refresh(); UpdateSelection(); Save(); status.Text = message; }
     private void DisplayPrecisionChanged(object sender, RoutedEventArgs e)
     {
-        if (syncingDisplayPrecision || leadingPrecisionBox.SelectedItem is not ComboBoxItem displayLeadingItem || trailingPrecisionBox.SelectedItem is not ComboBoxItem displayTrailingItem || valueLeadingPrecisionBox.SelectedItem is not ComboBoxItem valueLeadingItem || valueTrailingPrecisionBox.SelectedItem is not ComboBoxItem valueTrailingItem || displayTrailingZeroesBox.SelectedItem is not ComboBoxItem displayZeroesItem || actualTrailingZeroesBox.SelectedItem is not ComboBoxItem actualZeroesItem) return;
-        if (!int.TryParse(displayLeadingItem.Content?.ToString(), out var displayLeading) || !int.TryParse(displayTrailingItem.Content?.ToString(), out var displayTrailing) || !int.TryParse(valueLeadingItem.Content?.ToString(), out var actualLeading) || !int.TryParse(valueTrailingItem.Content?.ToString(), out var actualTrailing) || !int.TryParse(displayZeroesItem.Content?.ToString(), out var displayZeroes) || !int.TryParse(actualZeroesItem.Content?.ToString(), out var actualZeroes)) return;
-        var actualChanged = actualLeading != leadingValueDigits || actualTrailing != trailingValueDecimals;
-        if (actualChanged && values.Length > 0) PushUndo();
-        leadingDisplayDigits = displayLeading; trailingDisplayDecimals = displayTrailing; leadingValueDigits = actualLeading; trailingValueDecimals = actualTrailing;
-        displayTrailingZeroPlaces = displayZeroes; actualTrailingZeroPlaces = actualZeroes;
-        if (actualChanged) NormalizeStoredValues();
-        Refresh(); Save(); status.Text = $"Sandbox display {leadingDisplayDigits}/{trailingDisplayDecimals}  •  stored precision {leadingValueDigits}/{trailingValueDecimals}";
+        if (syncingDisplayPrecision || leadingPrecisionBox.SelectedItem is not ComboBoxItem displayLeadingItem || trailingPrecisionBox.SelectedItem is not ComboBoxItem displayTrailingItem || displayTrailingZeroesBox.SelectedItem is not ComboBoxItem displayZeroesItem) return;
+        if (!int.TryParse(displayLeadingItem.Content?.ToString(), out var displayLeading) || !int.TryParse(displayTrailingItem.Content?.ToString(), out var displayTrailing) || !int.TryParse(displayZeroesItem.Content?.ToString(), out var displayZeroes)) return;
+        leadingDisplayDigits = displayLeading; trailingDisplayDecimals = displayTrailing; displayTrailingZeroPlaces = displayZeroes;
+        Refresh(); Save(); status.Text = $"Sandbox display {leadingDisplayDigits}/{trailingDisplayDecimals}  •  trailing zeroes {displayTrailingZeroPlaces}  •  stored values unchanged";
     }
     private void ApplyPrecision(int displayLeading, int displayTrailing, int actualLeading, int actualTrailing, int displayZeroes, int actualZeroes)
     {
         leadingDisplayDigits = Math.Clamp(displayLeading, 1, 4); trailingDisplayDecimals = Math.Clamp(displayTrailing, 0, 4); leadingValueDigits = Math.Clamp(actualLeading, 1, 4); trailingValueDecimals = Math.Clamp(actualTrailing, 0, 4);
         displayTrailingZeroPlaces = Math.Clamp(displayZeroes, 0, 4); actualTrailingZeroPlaces = Math.Clamp(actualZeroes, 0, 4);
-        syncingDisplayPrecision = true; leadingPrecisionBox.SelectedIndex = leadingDisplayDigits - 1; trailingPrecisionBox.SelectedIndex = trailingDisplayDecimals; valueLeadingPrecisionBox.SelectedIndex = leadingValueDigits - 1; valueTrailingPrecisionBox.SelectedIndex = trailingValueDecimals; displayTrailingZeroesBox.SelectedIndex = displayTrailingZeroPlaces; actualTrailingZeroesBox.SelectedIndex = actualTrailingZeroPlaces; syncingDisplayPrecision = false;
+        syncingDisplayPrecision = true; leadingPrecisionBox.SelectedIndex = leadingDisplayDigits - 1; trailingPrecisionBox.SelectedIndex = trailingDisplayDecimals; displayTrailingZeroesBox.SelectedIndex = displayTrailingZeroPlaces; syncingDisplayPrecision = false;
     }
     private void Refresh()
     {
@@ -591,7 +581,6 @@ public sealed class SandboxPanel : Grid
         var content = new StackPanel();
         content.Children.Add(new TextBlock { Text = "DECIMAL PRECISION", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) });
         content.Children.Add(Row("DISPLAY", leadingPrecisionBox, trailingPrecisionBox, displayTrailingZeroesBox));
-        content.Children.Add(Row("ACTUAL", valueLeadingPrecisionBox, valueTrailingPrecisionBox, actualTrailingZeroesBox));
         return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 7, 0), Child = content };
     }
     private static Border Group(string title, params UIElement[] controls) { var content = new StackPanel(); content.Children.Add(new TextBlock { Text = title, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 6) }); var row = new StackPanel { Orientation = Orientation.Horizontal }; foreach (var control in controls) row.Children.Add(control); content.Children.Add(row); return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(8), Margin = new Thickness(0, 0, 7, 0), Child = content }; }

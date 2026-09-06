@@ -76,4 +76,4 @@ finally {
 'PASS Numerical and percentage offsets use distinct, correct calculations'
 'PASS Offset dialog initializes and reconfigures its unit selection correctly'
 'PASS FuelingPanel applies 10% and numerical 10 as 88 and 90 respectively'
-'PASS Three-digit fuel values retain Actual Trailing precision for percentage and numerical offsets'
+'PASS Three-digit fuel values retain underlying precision for percentage and numerical offsets'

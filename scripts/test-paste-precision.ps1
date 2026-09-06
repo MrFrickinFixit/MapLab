@@ -57,6 +57,28 @@ try {
         throw 'Autosave changed the pasted value.'
     }
 
+    $displayTrailingBox = $panel.GetType().GetField('trailingPrecisionBox', $flags).GetValue($panel)
+    $displayZeroesBox = $panel.GetType().GetField('displayTrailingZeroesBox', $flags).GetValue($panel)
+    $displayTrailingBox.SelectedIndex = 1
+    $displayZeroesBox.SelectedIndex = 1
+    $values = $panel.GetType().GetField('ve', $flags).GetValue($panel)
+    if ([Math]::Abs($values.GetValue(0, 0) - 87.125) -gt 1e-12 -or [Math]::Abs($values.GetValue(0, 1) - 102.375) -gt 1e-12) {
+        throw 'Lowering Display precision rewrote pasted VE values.'
+    }
+    $savedValues = (Get-Content -LiteralPath $testAutosave -Raw | ConvertFrom-Json).Values
+    if ([Math]::Abs([double]$savedValues[0][0] - 87.125) -gt 1e-12 -or [Math]::Abs([double]$savedValues[0][1] - 102.375) -gt 1e-12) {
+        throw 'Lowering Display precision rewrote pasted VE values in autosave.'
+    }
+    $formatFuelDisplay = $panel.GetType().GetMethod('FormatVeDisplayValue', $flags)
+    if ($formatFuelDisplay.Invoke($panel, @(87.125)) -ne '87.1') { throw 'Lowered Fuel Display precision was not applied.' }
+    $displayTrailingBox.SelectedIndex = 3
+    $displayZeroesBox.SelectedIndex = 3
+    $values = $panel.GetType().GetField('ve', $flags).GetValue($panel)
+    $formatFuelActual = $panel.GetType().GetMethod('FormatStoredVeValue', $flags)
+    if ([Math]::Abs($values.GetValue(0, 0) - 87.125) -gt 1e-12 -or $formatFuelDisplay.Invoke($panel, @(87.125)) -ne '87.125' -or $formatFuelActual.Invoke($panel, @(87.125)) -ne '87.125') {
+        throw 'Restoring Display precision did not reveal the original pasted VE value.'
+    }
+
     $panel.GetType().GetField('start', $flags).SetValue($panel, [ValueTuple[int, int]]::new(2, 0))
     $panel.GetType().GetField('end', $flags).SetValue($panel, [ValueTuple[int, int]]::new(2, 1))
     $cells = $panel.GetType().GetField('cells', $flags).GetValue($panel)
@@ -75,8 +97,6 @@ try {
         throw 'Autosave changed the directly edited value.'
     }
 
-    $panel.GetType().GetField('leadingValueDigits', $flags).SetValue($panel, 3)
-    $panel.GetType().GetField('trailingValueDecimals', $flags).SetValue($panel, 1)
     $values.SetValue(111.111, 2, 2); $values.SetValue(123.456, 2, 3); $values.SetValue(139.999, 2, 4)
     $values.SetValue(147.777, 3, 2); $values.SetValue(198.111, 3, 3); $values.SetValue(166.666, 3, 4)
     $values.SetValue(173.333, 4, 2); $values.SetValue(187.777, 4, 3); $values.SetValue(191.234, 4, 4)
@@ -87,33 +107,26 @@ try {
         throw 'Smoothing rounded an unselected exact value.'
     }
     $smoothedCenter = [double]$values.GetValue(3, 3)
-    if ([Math]::Abs($smoothedCenter - [Math]::Round($smoothedCenter, 1, [MidpointRounding]::AwayFromZero)) -gt 1e-12) {
-        throw 'The changed smoothing result did not follow Actual Trailing precision.'
-    }
     if ([Math]::Abs($smoothedCenter - [Math]::Round($smoothedCenter, 0, [MidpointRounding]::AwayFromZero)) -lt 1e-12) {
         throw "A smoothed VE value above 100 was rounded to a whole number: $smoothedCenter"
     }
 
+    $fuelSmoothed = [double]$panel.GetType().GetMethod('RoundSmoothedVe', $flags).Invoke($panel, @(123.45678))
+    if ([Math]::Abs($fuelSmoothed - 123.45678) -gt 1e-12) { throw "Fuel smoothing rounded the stored result: $fuelSmoothed" }
+
     $timing = [Runtime.CompilerServices.RuntimeHelpers]::GetUninitializedObject([TimingTableCalculator.MainWindow])
-    $timing.GetType().GetField('timingTrailingValueDecimals', $flags).SetValue($timing, 4)
     $timingSmoothed = [double]$timing.GetType().GetMethod('RoundSmoothedTiming', $flags).Invoke($timing, @(123.45678))
-    if ([Math]::Abs($timingSmoothed - 123.4568) -gt 1e-12) {
-        throw "Timing smoothing did not retain four Actual Trailing places: $timingSmoothed"
+    if ([Math]::Abs($timingSmoothed - 123.45678) -gt 1e-12) {
+        throw "Timing smoothing rounded the stored result: $timingSmoothed"
     }
 
     $sandbox = [Runtime.CompilerServices.RuntimeHelpers]::GetUninitializedObject([TimingTableCalculator.SandboxPanel])
-    $sandbox.GetType().GetField('trailingValueDecimals', $flags).SetValue($sandbox, 4)
     $sandboxSmoothed = [double]$sandbox.GetType().GetMethod('RoundSmoothedValue', $flags).Invoke($sandbox, @(123.45678))
-    if ([Math]::Abs($sandboxSmoothed - 123.4568) -gt 1e-12) {
-        throw "Sandbox smoothing did not retain four Actual Trailing places: $sandboxSmoothed"
+    if ([Math]::Abs($sandboxSmoothed - 123.45678) -gt 1e-12) {
+        throw "Sandbox smoothing rounded the stored result: $sandboxSmoothed"
     }
 
-    $panel.GetType().GetField('trailingValueDecimals', $flags).SetValue($panel, 4)
-    $panel.GetType().GetField('actualTrailingZeroPlaces', $flags).SetValue($panel, 4)
-    $formatFuelActual = $panel.GetType().GetMethod('FormatStoredVeValue', $flags)
-    if ($formatFuelActual.Invoke($panel, @(12.3)) -ne '12.3000') { throw 'Fuel Actual Zeroes did not pad four places.' }
-    $panel.GetType().GetField('actualTrailingZeroPlaces', $flags).SetValue($panel, 0)
-    if ($formatFuelActual.Invoke($panel, @(12.3)) -ne '12.3') { throw 'Fuel Actual Zeroes did not suppress padding.' }
+    if ($formatFuelActual.Invoke($panel, @(12.3)) -ne '12.3') { throw 'Fuel stored-value formatting changed the underlying value text.' }
 
     $timing.GetType().GetField('timingLeadingDisplayDigits', $flags).SetValue($timing, 4)
     $timing.GetType().GetField('timingTrailingDisplayDecimals', $flags).SetValue($timing, 4)
@@ -122,27 +135,22 @@ try {
     if ($formatTimingDisplay.Invoke($timing, @(12.3)) -ne '12.3000') { throw 'Timing Display Zeroes did not pad four places.' }
     $timing.GetType().GetField('timingLeadingDisplayDigits', $flags).SetValue($timing, 3)
     if ($formatTimingDisplay.Invoke($timing, @(105.525)) -ne '106') { throw 'Timing display did not round a three-leading-digit value to a whole number.' }
-    $timing.GetType().GetField('timingTrailingValueDecimals', $flags).SetValue($timing, 4)
-    $timing.GetType().GetField('timingActualTrailingZeroPlaces', $flags).SetValue($timing, 4)
     $formatTimingActual = $timing.GetType().GetMethod('FormatStoredTimingValue', $flags)
-    if ($formatTimingActual.Invoke($timing, @(105.525)) -ne '105.5250') { throw 'Timing actual formatting was changed by the display leading-digit cutoff.' }
+    if ($formatTimingActual.Invoke($timing, @(105.525)) -ne '105.525') { throw 'Timing stored-value formatting was changed by the display leading-digit cutoff.' }
     $timing.GetType().GetField('timingLeadingDisplayDigits', $flags).SetValue($timing, 4)
     $timing.GetType().GetField('timingDisplayTrailingZeroPlaces', $flags).SetValue($timing, 0)
     if ($formatTimingDisplay.Invoke($timing, @(12.3)) -ne '12.3') { throw 'Timing Display Zeroes did not suppress padding.' }
 
-    $sandbox.GetType().GetField('trailingValueDecimals', $flags).SetValue($sandbox, 4)
-    $sandbox.GetType().GetField('actualTrailingZeroPlaces', $flags).SetValue($sandbox, 4)
     $formatSandboxActual = $sandbox.GetType().GetMethod('FormatStoredValue', $flags)
-    if ($formatSandboxActual.Invoke($sandbox, @(12.3)) -ne '12.3000') { throw 'Sandbox Actual Zeroes did not pad four places.' }
-    $sandbox.GetType().GetField('actualTrailingZeroPlaces', $flags).SetValue($sandbox, 0)
-    if ($formatSandboxActual.Invoke($sandbox, @(12.3)) -ne '12.3') { throw 'Sandbox Actual Zeroes did not suppress padding.' }
+    if ($formatSandboxActual.Invoke($sandbox, @(12.3)) -ne '12.3') { throw 'Sandbox stored-value formatting changed the underlying value text.' }
 
     "PASS Fuel paste preserved: $($actual -join ', ')"
+    'PASS Display precision changes preserved pasted values and restored their original decimal text'
     'PASS Fuel selected-group edit and autosave preserved: 73.987'
-    "PASS Fuel smoothing preserved unselected 102.375 and retained Actual Trailing precision above 100: $smoothedCenter"
-    "PASS Timing and Sandbox smoothing retained four Actual Trailing places: $timingSmoothed, $sandboxSmoothed"
-    'PASS Display Zeroes and Actual Zeroes counts independently pad zero through four trailing places'
-    'PASS Three-leading-digit display values round to whole numbers without changing actual-value precision'
+    "PASS Fuel smoothing preserved unselected 102.375 and retained the complete calculated result: $smoothedCenter"
+    "PASS Fuel, Timing, and Sandbox smoothing do not round stored results: $fuelSmoothed, $timingSmoothed, $sandboxSmoothed"
+    'PASS Display Zeroes pads display text without changing stored-value text'
+    'PASS Three-leading-digit display values round to whole numbers without changing stored values'
 }
 finally {
     if ($hadClipboardText) { [System.Windows.Clipboard]::SetText($originalClipboardText) }

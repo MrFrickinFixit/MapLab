@@ -83,9 +83,9 @@ public partial class MainWindow : Window
     private double RoundMapValue(double value) => Math.Round(value / MapAxisIncrement) * MapAxisIncrement;
     private string FormatMap(double value) => value.ToString(MapAxisFormat, CultureInfo.InvariantCulture);
     private string FormatTimingDisplayValue(double value) => MagnitudeNumberFormatter.Format(value, timingLeadingDisplayDigits, timingTrailingDisplayDecimals, timingDisplayTrailingZeroPlaces);
-    private double RoundEditableTiming(double value) => Math.Round(value, MagnitudeNumberFormatter.DecimalPlaces(value, timingLeadingValueDigits, timingTrailingValueDecimals), MidpointRounding.AwayFromZero);
-    private double RoundSmoothedTiming(double value) => Math.Round(value, timingTrailingValueDecimals, MidpointRounding.AwayFromZero);
-    private string FormatStoredTimingValue(double value) => MagnitudeNumberFormatter.FormatActual(value, timingTrailingValueDecimals, timingActualTrailingZeroPlaces);
+    private double RoundEditableTiming(double value) => value;
+    private double RoundSmoothedTiming(double value) => value;
+    private string FormatStoredTimingValue(double value) => MagnitudeNumberFormatter.FormatStored(value);
     private static string FormatExactAxisValue(double value) => value.ToString("0.########", CultureInfo.InvariantCulture);
     private double idleTransitionRpm = 1200, wotTransitionMap = 85;
     private RegionPointPick regionPointPick;
@@ -668,25 +668,17 @@ public partial class MainWindow : Window
 
     private void TimingDisplayPrecision_Changed(object sender, RoutedEventArgs e)
     {
-        if (syncingTimingDisplayPrecision || loadingState || TimingLeadingPrecisionBox is null || TimingTrailingPrecisionBox is null || TimingValueLeadingPrecisionBox is null || TimingValueTrailingPrecisionBox is null || TimingDisplayTrailingZeroesBox is null || TimingActualTrailingZeroesBox is null) return;
-        if (TimingLeadingPrecisionBox.SelectedItem is not ComboBoxItem displayLeadingItem || TimingTrailingPrecisionBox.SelectedItem is not ComboBoxItem displayTrailingItem || TimingValueLeadingPrecisionBox.SelectedItem is not ComboBoxItem valueLeadingItem || TimingValueTrailingPrecisionBox.SelectedItem is not ComboBoxItem valueTrailingItem) return;
-        if (TimingDisplayTrailingZeroesBox.SelectedItem is not ComboBoxItem displayZeroesItem || TimingActualTrailingZeroesBox.SelectedItem is not ComboBoxItem actualZeroesItem) return;
-        if (!int.TryParse(displayLeadingItem.Content?.ToString(), out var displayLeading) || !int.TryParse(displayTrailingItem.Content?.ToString(), out var displayTrailing) || !int.TryParse(valueLeadingItem.Content?.ToString(), out var valueLeading) || !int.TryParse(valueTrailingItem.Content?.ToString(), out var valueTrailing) || !int.TryParse(displayZeroesItem.Content?.ToString(), out var displayZeroes) || !int.TryParse(actualZeroesItem.Content?.ToString(), out var actualZeroes)) return;
-        var precisionChanged = valueLeading != timingLeadingValueDigits || valueTrailing != timingTrailingValueDecimals;
-        if (precisionChanged && timingValues.Length > 0) PushUndo();
+        if (syncingTimingDisplayPrecision || loadingState || TimingLeadingPrecisionBox is null || TimingTrailingPrecisionBox is null || TimingDisplayTrailingZeroesBox is null) return;
+        if (TimingLeadingPrecisionBox.SelectedItem is not ComboBoxItem displayLeadingItem || TimingTrailingPrecisionBox.SelectedItem is not ComboBoxItem displayTrailingItem || TimingDisplayTrailingZeroesBox.SelectedItem is not ComboBoxItem displayZeroesItem) return;
+        if (!int.TryParse(displayLeadingItem.Content?.ToString(), out var displayLeading) || !int.TryParse(displayTrailingItem.Content?.ToString(), out var displayTrailing) || !int.TryParse(displayZeroesItem.Content?.ToString(), out var displayZeroes)) return;
         timingLeadingDisplayDigits = displayLeading; timingTrailingDisplayDecimals = displayTrailing;
-        timingLeadingValueDigits = valueLeading; timingTrailingValueDecimals = valueTrailing;
         timingDisplayTrailingZeroPlaces = displayZeroes;
-        timingActualTrailingZeroPlaces = actualZeroes;
         for (var row = 0; row < valueCells.GetLength(0); row++)
             for (var col = 0; col < valueCells.GetLength(1); col++)
                 if (valueCells[row, col] is not null)
-                {
-                    if (precisionChanged) SetCellValue(row, col, timingValues[row, col]);
-                    else RefreshCellColor(valueCells[row, col]);
-                }
+                    RefreshCellColor(valueCells[row, col]);
         SaveState();
-        if (StatusText is not null) StatusText.Text = $"Timing display {timingLeadingDisplayDigits}/{timingTrailingDisplayDecimals}  •  stored precision {timingLeadingValueDigits}/{timingTrailingValueDecimals}  •  trailing zeroes {timingDisplayTrailingZeroPlaces}/{timingActualTrailingZeroPlaces}";
+        if (StatusText is not null) StatusText.Text = $"Timing display {timingLeadingDisplayDigits}/{timingTrailingDisplayDecimals}  •  trailing zeroes {timingDisplayTrailingZeroPlaces}  •  stored values unchanged";
     }
 
     private void ResizeMatrixCore(int newColumns, int newRows, int oldRows, int oldColumns, double[,] oldTiming, double[] resizedRpm, double[] resizedMap)
@@ -2022,8 +2014,6 @@ public partial class MainWindow : Window
             syncingTimingDisplayPrecision = true;
             TimingLeadingPrecisionBox.SelectedIndex = Math.Clamp(timingLeadingDisplayDigits - 1, 0, TimingLeadingPrecisionBox.Items.Count - 1);
             TimingTrailingPrecisionBox.SelectedIndex = Math.Clamp(timingTrailingDisplayDecimals, 0, TimingTrailingPrecisionBox.Items.Count - 1);
-            TimingValueLeadingPrecisionBox.SelectedIndex = Math.Clamp(timingLeadingValueDigits - 1, 0, TimingValueLeadingPrecisionBox.Items.Count - 1);
-            TimingValueTrailingPrecisionBox.SelectedIndex = Math.Clamp(timingTrailingValueDecimals, 0, TimingValueTrailingPrecisionBox.Items.Count - 1);
             syncingTimingDisplayPrecision = false;
             var low = double.TryParse(snapshot.LowTiming, NumberStyles.Float, CultureInfo.InvariantCulture, out var lowValue) ? lowValue : 42;
             var high = double.TryParse(snapshot.HighTiming, NumberStyles.Float, CultureInfo.InvariantCulture, out var highValue) ? highValue : 12;
@@ -2117,10 +2107,7 @@ public partial class MainWindow : Window
             syncingTimingDisplayPrecision = true;
             TimingLeadingPrecisionBox.SelectedIndex = timingLeadingDisplayDigits - 1;
             TimingTrailingPrecisionBox.SelectedIndex = timingTrailingDisplayDecimals;
-            TimingValueLeadingPrecisionBox.SelectedIndex = timingLeadingValueDigits - 1;
-            TimingValueTrailingPrecisionBox.SelectedIndex = timingTrailingValueDecimals;
             TimingDisplayTrailingZeroesBox.SelectedIndex = timingDisplayTrailingZeroPlaces;
-            TimingActualTrailingZeroesBox.SelectedIndex = timingActualTrailingZeroPlaces;
             syncingTimingDisplayPrecision = false;
             IdleRpmBox.Text = state.IdleRpm; IdleMapBox.Text = state.IdleMap; WotRpmBox.Text = state.WotRpm; WotMapBox.Text = state.WotMap;
             rpmAxis = IsLegacyDefaultRpmAxis(state.RpmAxis) ? DefaultRpmAxis.ToArray() : state.RpmAxis;

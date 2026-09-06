@@ -23,6 +23,8 @@ internal static class MagnitudeNumberFormatter
         return value.ToString(format, CultureInfo.InvariantCulture);
     }
 
+    public static string FormatStored(double value) => value.ToString("R", CultureInfo.InvariantCulture);
+
     public static int DecimalPlaces(double value, int leadingDigits, int trailingDecimals)
     {
         leadingDigits = Math.Clamp(leadingDigits, 1, 4); trailingDecimals = Math.Clamp(trailingDecimals, 0, 4);
