@@ -31,6 +31,21 @@
       ]
     },
     {
+      "id": "map-colors",
+      "category": "Getting Started",
+      "title": "Map Colors and Heat-Map Scaling",
+      "summary": "Choose a global palette while scaling each table to its own value range.",
+      "keywords": ["colors", "colour", "heat map", "palette", "minimum", "maximum", "scale", "settings", "terminator x"],
+      "body": [
+        "Open Settings and choose Adjust Map Colors to enable custom low and high colors or return to the default spectrum.",
+        "The selected palette is global: Fueling, Ignition Timing, and Map Sandbox use the same palette in their 2D tables, 3D viewers, and Excel exports.",
+        "Color normalization is independent for each table. The lowest value in a table receives the low end of the palette, the highest value receives the high end, and intermediate values are positioned proportionally between them.",
+        "Changing one table's values can shift that table's color distribution without changing the colors assigned to the other tables.",
+        "An already-open 3D viewer refreshes when the global palette changes.",
+        "Global map colors are retained by autosave and included in .map workspace files."
+      ]
+    },
+    {
       "id": "precision",
       "category": "Editing Tables",
       "title": "Display and Actual Precision",
@@ -104,13 +119,24 @@
       "summary": "Blend noise, spikes, edges, potholes, and transitions with selectable algorithms.",
       "keywords": ["algorithm", "weighted", "constrained", "shape preserving", "median", "spike", "edge preserving", "pothole", "perimeter"],
       "body": [
-        "Standard weighted smoothing averages nearby selected cells, giving more weight to the center and direct neighbors.",
-        "Constrained surface smoothing uses local weighted averaging with perimeter and overshoot constraints.",
-        "Shape-preserving interpolation blends toward horizontal and vertical trends from selected endpoints.",
-        "Spike removal uses a median-style target to reduce isolated peaks or dips.",
-        "Edge-preserving smoothing reduces the influence of neighbors whose values differ sharply.",
-        "Weighted center/perimeter combines local smoothing with the selection's overall and perimeter averages.",
-        "Strength controls movement toward the result; Passes repeats the operation. Preserve Selection Perimeter keeps boundary cells fixed, while Prevent Value Overshoot limits the result to the starting range."
+        "Standard weighted smoothing — Best general-purpose choice for a noisy or slightly lumpy area. It averages each selected value with nearby selected cells, weighting the current cell and direct neighbors more strongly than diagonals.",
+        "Standard weighted scenario — Use it after pasting or hand-editing a broad block whose intended overall shape is already correct but whose cell-to-cell changes are uneven. Start near 40–60% strength with one or two passes.",
+        "Constrained surface smoothing — Best for softening an irregular patch while keeping its outside shape controlled. It uses local neighboring values; combine it with Preserve Selection Perimeter when the selected edge must remain an anchor and Prevent Value Overshoot when new peaks or dips are not acceptable.",
+        "Constrained surface scenario — Select a rough area that already joins the surrounding map correctly at its boundary, preserve the perimeter, and smooth only the interior roughness.",
+        "Shape-preserving interpolation — Best when the selection should follow a continuous ramp or slope between its horizontal and vertical endpoints. It blends toward trends derived from the outer selected values instead of merely averaging local noise.",
+        "Shape-preserving scenario — Use it on a diagonal transition, sloped timing ramp, or VE area that should progress steadily between known low and high edges. Preserve the perimeter when those endpoints must not move.",
+        "Spike removal (median) — Best for isolated single-cell or small-cluster peaks and pits that are probably editing artifacts. A median-style target rejects an extreme value more strongly than a normal average.",
+        "Spike removal scenario — Select an area around one accidental timing spike or VE hole, use moderate strength and one pass, then inspect the result before repeating. Do not use it when the sharp peak or pothole is intentional.",
+        "Edge-preserving smoothing — Best for reducing noise without washing across a deliberate step, ridge, plateau, or sharp load transition. Neighbors with values very different from the current cell contribute less.",
+        "Edge-preserving scenario — Use it where a boosted region or other intentional feature has a distinct edge but the surfaces on either side are noisy. It is usually safer than general averaging near that edge.",
+        "Weighted center / perimeter — Best for reshaping the interior of a broad selection relative to its outside ring. Center Influence controls whether the result is pulled more toward the perimeter average or toward the selection's center average.",
+        "Weighted center / perimeter scenario — Use a low Center Influence to blend a raised or lowered interior toward its surrounding boundary; use a higher influence to retain more of a broad center plateau while smoothing its transition to the edge.",
+        "Smooth to Surroundings — Best when selected transition cells should blend with nearby unselected cells. The selection is the write area while both selected and fixed surrounding cells participate in the calculation.",
+        "Smooth to Surroundings scenario — For an intentional pothole or ridge, select only a transition ring around the feature so the unselected center remains intact. Choose a direction that crosses the wrinkle and increase Neighbor Reach only far enough to sample the stable surrounding surface.",
+        "Quick choice — General roughness: Standard Weighted. Anchored interior: Constrained Surface. Predictable ramp: Shape Preserving. Accidental outlier: Spike Removal. Intentional sharp feature: Edge Preserving. Broad center-to-edge contour: Weighted Center / Perimeter. Blend a ring or narrow strip to fixed neighbors: Smooth to Surroundings.",
+        "Strength controls how far values move toward the calculated result; Passes repeats the operation. Begin conservatively, inspect the 3D contour, and use Undo before trying a stronger setting.",
+        "Preserve Selection Perimeter keeps selected boundary cells fixed. Prevent Value Overshoot restricts results to the starting selected range, or to the sampled neighborhood range when using Smooth to Surroundings.",
+        "All smoothing calculations use actual stored values rather than rounded display text. Only changed results are rounded according to the active table's Actual Trailing precision."
       ]
     },
     {
@@ -293,6 +319,20 @@
         "F1 — Open Help and focus the search box.",
         "Enter — Commit a cell or axis edit.",
         "Escape — Cancel an interactive boundary selection or an active 3D sculpt preview."
+      ]
+    },
+    {
+      "id": "help-navigation",
+      "category": "Reference",
+      "title": "Using Help Contents, Index, and Search",
+      "summary": "Find instructions by category, indexed term, or a full-text search.",
+      "keywords": ["help", "contents", "index", "topics", "search", "f1", "instructions"],
+      "body": [
+        "Contents groups Help topics by feature area. Expand a category and select a topic to read it.",
+        "Index lists topic titles and keywords alphabetically. Selecting any index entry opens its associated topic.",
+        "Search matches words across titles, summaries, keywords, and instructions. Every entered word must occur in a topic for it to appear in the results.",
+        "Press F1 anywhere in Map Lab to open Help and focus the search field.",
+        "Use the Clear button or press Escape in the search field to remove the current query."
       ]
     },
     {
