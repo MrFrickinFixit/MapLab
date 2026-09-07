@@ -301,16 +301,17 @@ public sealed class FuelingPanel : Grid
         return map.ToArray();
     }
 
-    private void AutoFillFuelMapAxis(int[] selected)
+    private bool AutoFillFuelMapAxis(int[] selected)
     {
         var minimum = selected.Min(index => map[index]); var maximum = selected.Max(index => map[index]);
         var values = BuildMapAxis(minimum, maximum, selected.Length);
-        if (values is null) { Info("The selected MAP range is too narrow for the number of fuel breakpoints."); return; }
+        if (values is null) { Info("The selected MAP range is too narrow for the number of fuel breakpoints."); return false; }
         var candidate = map.ToArray(); for (var position = 0; position < selected.Length; position++) candidate[selected[position]] = values[position];
         if (Enumerable.Range(1, candidate.Length - 1).Any(index => candidate[index] >= candidate[index - 1]))
-        { Info("That fill would cross an unselected neighboring fuel MAP value."); return; }
+        { Info("That fill would cross an unselected neighboring fuel MAP value."); return false; }
         map = candidate; wotBoundaryMap = map[Math.Clamp(wotBoundaryRow, 0, map.Length - 1)]; RefreshFuelMapAxisEditors(); ApplyBoundaries(); Save();
         veSetupWizard?.UpdateBoundaryMapValues(map, new VeRegionBoundary(idleBoundaryCol, wotBoundaryRow));
+        return true;
     }
 
     private void PasteFuelMapAxis(int focusedIndex, int[] selected)
@@ -560,9 +561,15 @@ public sealed class FuelingPanel : Grid
     private void CellRightClick(object sender, MouseButtonEventArgs e) { if (sender is not TextBox { Tag: ValueTuple<int, int> p }) return; if (!IsFuelCellSelected(p.Item1, p.Item2)) { pinnedFuelSelection.Clear(); start = end = p; selecting = false; UpdateSelection(); } }
     private ContextMenu CreateContextMenu()
     {
-        var menu = new ContextMenu(); menu.Items.Add(Item("Copy selected", (_, _) => CopySelection())); menu.Items.Add(Item("Paste", (_, _) => PasteSelection())); menu.Items.Add(Item("Offset selection…", OffsetSelection)); menu.Items.Add(Item("Select transition ring…", SelectTransitionRing)); menu.Items.Add(Item("Highlight region of interest", HighlightRegionOfInterest)); menu.Items.Add(Item("Clear region of interest", ClearRegionOfInterest)); menu.Items.Add(new Separator());
+        var menu = new ContextMenu(); menu.Items.Add(Item("Copy selected", (_, _) => CopySelection())); menu.Items.Add(Item("Paste", (_, _) => PasteSelection())); menu.Items.Add(Item("Offset selection…", OffsetSelection)); menu.Items.Add(Item("Auto-populate selected cells", AutoPopulateFuelCells)); menu.Items.Add(Item("Select transition ring…", SelectTransitionRing)); menu.Items.Add(Item("Highlight region of interest", HighlightRegionOfInterest)); menu.Items.Add(Item("Clear region of interest", ClearRegionOfInterest)); menu.Items.Add(new Separator());
         menu.Items.Add(Item("Smooth selected…", AdvancedSmooth)); menu.Items.Add(Item("Smooth rows", SmoothRows)); menu.Items.Add(Item("Smooth columns", SmoothColumns));
         menu.Items.Add(new Separator()); menu.Items.Add(Item("Clear selected", ClearSelected)); return menu;
+    }
+    private void AutoPopulateFuelCells(object? sender, RoutedEventArgs e)
+    {
+        var selected = SelectedFuelCells(); var populated = TableAutoPopulate.Apply(ve, selected, rpm, map);
+        if (populated is null) { Info("Select one solid row, column, or rectangular block containing at least two fuel cells."); return; }
+        PushUndo(); ve = populated; Save(); RefreshAll(); UpdateSelection(); status.Text = $"Auto-populated {selected.Count} fuel cells from the selection endpoints";
     }
     private static MenuItem Item(string header, RoutedEventHandler click) { var item = new MenuItem { Header = header }; item.Click += click; return item; }
     private void HighlightRegionOfInterest(object? sender, RoutedEventArgs e)
@@ -981,7 +988,9 @@ public sealed class FuelingPanel : Grid
         editor.PreviewMouseRightButtonDown += AxisEditorRightClick;
         var menu = new ContextMenu();
         var paste = new MenuItem { Header = "Paste axis values" }; paste.Click += (_, _) => PasteSelectedAxis(isMap, index); menu.Items.Add(paste);
-        var autoFill = new MenuItem { Header = "Auto-fill selected axis values" }; autoFill.Click += (_, _) => AutoFillSelectedAxis(isMap); menu.Items.Add(autoFill); editor.ContextMenu = menu;
+        var autoFill = new MenuItem { Header = "Auto-populate selected range" }; autoFill.Click += (_, _) => AutoFillSelectedAxis(isMap); menu.Items.Add(autoFill);
+        menu.Items.Add(new Separator());
+        var selectAll = new MenuItem { Header = $"Select all {(isMap ? "MAP" : "RPM")} values" }; selectAll.Click += (_, _) => SelectEntireAxis(isMap); menu.Items.Add(selectAll); editor.ContextMenu = menu;
         editor.LostKeyboardFocus += AxisEditorEdited;
         editor.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Keyboard.ClearFocus(); e.Handled = true; } };
         if (isMap) mapAxisCells[index] = editor; else rpmAxisCells[index] = editor;
@@ -1030,10 +1039,22 @@ public sealed class FuelingPanel : Grid
 
     private void AutoFillSelectedAxis(bool isMap)
     {
-        var selected = (isMap ? selectedMapAxis : selectedRpmAxis).OrderBy(i => i).ToArray();
-        if (selected.Length < 2) { Info("Select at least two MAP or RPM scale values before using Auto-fill."); return; }
-        if (isMap) AutoFillFuelMapAxis(selected); else autoFillAxis(false, selected);
-        status.Text = $"Auto-filled {selected.Length} {(isMap ? "fuel MAP" : "shared RPM")} breakpoints";
+        var selectedSet = isMap ? selectedMapAxis : selectedRpmAxis;
+        var selected = selectedSet.OrderBy(i => i).ToArray();
+        if (selected.Length < 2) { Info("Select at least two MAP or RPM scale values before using Auto-populate."); return; }
+        selected = Enumerable.Range(selected[0], selected[^1] - selected[0] + 1).ToArray();
+        if (isMap && !AutoFillFuelMapAxis(selected)) return;
+        if (!isMap) autoFillAxis(false, selected);
+        selectedSet.Clear(); foreach (var selectedIndex in selected) selectedSet.Add(selectedIndex); UpdateAxisSelectionVisuals();
+        status.Text = $"Auto-populated {selected.Length} {(isMap ? "fuel MAP" : "shared RPM")} breakpoints from the selected beginning and ending values";
+    }
+
+    private void SelectEntireAxis(bool isMap)
+    {
+        ClearFuelSelection(); selectedMapAxis.Clear(); selectedRpmAxis.Clear();
+        var selected = isMap ? selectedMapAxis : selectedRpmAxis; var count = isMap ? map.Length : rpm.Length;
+        for (var index = 0; index < count; index++) selected.Add(index);
+        UpdateAxisSelectionVisuals(); status.Text = $"Selected all {count} {(isMap ? "fuel MAP" : "shared RPM")} breakpoints";
     }
 
     private void PasteSelectedAxis(bool isMap, int focusedIndex)

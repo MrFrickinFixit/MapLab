@@ -175,7 +175,7 @@ public sealed class SandboxPanel : Grid
         editor.PreviewMouseLeftButtonDown += AxisDown; editor.MouseEnter += AxisEnter;
         editor.GotKeyboardFocus += (_, _) => { ClearCellSelection(); var current = isMap ? map[index] : rpm[index]; axisEditOriginalValues[editor] = current; editor.Text = FormatExactAxisValue(current); editor.SelectAll(); };
         editor.LostKeyboardFocus += (_, _) => CommitAxis(editor); editor.KeyDown += (_, e) => { if (e.Key == Key.Enter) { CommitAxis(editor); Keyboard.ClearFocus(); e.Handled = true; } };
-        var menu = new ContextMenu(); menu.Items.Add(Item("Paste axis values", (_, _) => PasteAxis(isMap, index))); menu.Items.Add(Item("Auto-fill selected axis values", (_, _) => AutoFillAxis(isMap))); editor.ContextMenu = menu;
+        var menu = new ContextMenu(); menu.Items.Add(Item("Paste axis values", (_, _) => PasteAxis(isMap, index))); menu.Items.Add(Item("Auto-populate selected range", (_, _) => AutoFillAxis(isMap))); menu.Items.Add(new Separator()); menu.Items.Add(Item($"Select all {(isMap ? "Y-axis" : "X-axis")} values", (_, _) => SelectEntireAxis(isMap))); editor.ContextMenu = menu;
         if (isMap) mapEditors[index] = editor; else rpmEditors[index] = editor;
         Grid.SetRow(editor, row); Grid.SetColumn(editor, column); table.Children.Add(editor);
     }
@@ -189,7 +189,14 @@ public sealed class SandboxPanel : Grid
     }
     private void CellEnter(object sender, MouseEventArgs e) { if (selecting && e.LeftButton == MouseButtonState.Pressed && sender is TextBox { Tag: ValueTuple<int, int> p }) { end = p; UpdateSelection(); } }
     private void CellRight(object sender, MouseButtonEventArgs e) { if (sender is TextBox { Tag: ValueTuple<int, int> p } && !IsSelected(p.Item1, p.Item2)) { pinned.Clear(); start = end = p; UpdateSelection(); } }
-    private ContextMenu CellMenu() { var menu = new ContextMenu(); menu.Items.Add(Item("Copy selected", (_, _) => Copy())); menu.Items.Add(Item("Paste", (_, _) => Paste())); menu.Items.Add(Item("Offset selection…", Offset)); menu.Items.Add(Item("Select transition ring…", SelectTransitionRing)); menu.Items.Add(Item("Highlight region of interest", HighlightRegionOfInterest)); menu.Items.Add(Item("Clear region of interest", ClearRegionOfInterest)); menu.Items.Add(new Separator()); menu.Items.Add(Item("Smooth selected…", AdvancedSmooth)); menu.Items.Add(Item("Smooth rows", SmoothRows)); menu.Items.Add(Item("Smooth columns", SmoothColumns)); menu.Items.Add(new Separator()); menu.Items.Add(Item("Clear selected", Clear)); return menu; }
+    private ContextMenu CellMenu() { var menu = new ContextMenu(); menu.Items.Add(Item("Copy selected", (_, _) => Copy())); menu.Items.Add(Item("Paste", (_, _) => Paste())); menu.Items.Add(Item("Offset selection…", Offset)); menu.Items.Add(Item("Auto-populate selected cells", AutoPopulateCells)); menu.Items.Add(Item("Select transition ring…", SelectTransitionRing)); menu.Items.Add(Item("Highlight region of interest", HighlightRegionOfInterest)); menu.Items.Add(Item("Clear region of interest", ClearRegionOfInterest)); menu.Items.Add(new Separator()); menu.Items.Add(Item("Smooth selected…", AdvancedSmooth)); menu.Items.Add(Item("Smooth rows", SmoothRows)); menu.Items.Add(Item("Smooth columns", SmoothColumns)); menu.Items.Add(new Separator()); menu.Items.Add(Item("Clear selected", Clear)); return menu; }
+
+    private void AutoPopulateCells(object? sender, RoutedEventArgs e)
+    {
+        var selected = Selected(); var populated = TableAutoPopulate.Apply(values, selected, rpm, map);
+        if (populated is null) { Info("Select one solid row, column, or rectangular block containing at least two sandbox cells."); return; }
+        PushUndo(); values = populated; Changed($"Auto-populated {selected.Count} sandbox cells from the selection endpoints", normalize: false); UpdateSelection();
+    }
 
     private void HighlightRegionOfInterest(object? sender, RoutedEventArgs e)
     {
@@ -278,12 +285,21 @@ public sealed class SandboxPanel : Grid
 
     private void AutoFillAxis(bool isMap)
     {
-        var selected = (isMap ? selectedMap : selectedRpm).OrderBy(i => i).ToArray(); if (selected.Length < 2) { Info("Select at least two axis breakpoints."); return; }
+        var selectedSet = isMap ? selectedMap : selectedRpm;
+        var selected = selectedSet.OrderBy(i => i).ToArray(); if (selected.Length < 2) { Info("Select at least two axis breakpoints."); return; }
+        selected = Enumerable.Range(selected[0], selected[^1] - selected[0] + 1).ToArray();
         var axis = isMap ? map : rpm; var candidate = axis.ToArray(); var filled = BuildAxis(selected.Min(i => axis[i]), selected.Max(i => axis[i]), selected.Length, isMap, isMap ? MapIncrement : XIncrement);
         if (filled is null) { Info("The selected range is too narrow."); return; }
         for (var i = 0; i < selected.Length; i++) candidate[selected[i]] = filled[i];
         if (!Ordered(candidate, isMap)) { Info("The fill would cross an unselected neighboring value."); return; }
-        PushUndo(); if (isMap) map = candidate; else rpm = candidate; RefreshAxisEditors(); Save();
+        PushUndo(); if (isMap) map = candidate; else rpm = candidate; selectedSet.Clear(); foreach (var index in selected) selectedSet.Add(index); RefreshAxisEditors(); UpdateAxisVisuals(); Save(); status.Text = $"Auto-populated {selected.Length} {(isMap ? "Y-axis" : "X-axis")} breakpoints from the selected beginning and ending values";
+    }
+
+    private void SelectEntireAxis(bool isMap)
+    {
+        ClearCellSelection(); selectedMap.Clear(); selectedRpm.Clear(); var selected = isMap ? selectedMap : selectedRpm; var count = isMap ? map.Length : rpm.Length;
+        for (var index = 0; index < count; index++) selected.Add(index);
+        UpdateAxisVisuals(); status.Text = $"Selected all {count} {(isMap ? "Y-axis" : "X-axis")} breakpoints";
     }
 
     private void PasteAxis(bool isMap, int focused)

@@ -67,6 +67,10 @@ The installer contains a self-contained 64-bit Windows build, so a separate .NET
 
 To assign one value to a group, select the cells, edit any cell in that selection, and press **Enter**. Clicking away cancels a pending group edit. After a successful table paste, the selection is cleared.
 
+Inside Timing, Fueling, Learn Apply, or Sandbox tables, right-click a solid selected row, column, or rectangle and choose **Auto-populate selected cells**. A row fills between its left and right endpoints, a column fills between its top and bottom endpoints, and a rectangle forms a corner-anchored interpolated surface. The calculation follows the actual X/RPM and Y/MAP breakpoint spacing.
+
+For axis setup, select a continuous range or Ctrl-click its beginning and ending breakpoints. Right-click an axis value and choose **Auto-populate selected range** to fill every breakpoint between those anchored values. The same menu provides **Select all** for the active MAP, RPM, X, or Y scale.
+
 ### Keyboard shortcuts
 
 | Shortcut | Action |

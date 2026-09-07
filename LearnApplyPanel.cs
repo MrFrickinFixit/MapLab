@@ -86,7 +86,7 @@ public sealed class LearnApplyPanel : Grid
                 cell.GotKeyboardFocus += (_, _) => { var point = ((int Row, int Col))cell.Tag; pendingCell = cell; pendingOriginal = Editable(model.GetValue(point.Row, point.Col)); cell.Text = pendingOriginal; cell.SelectAll(); };
                 cell.LostKeyboardFocus += (_, _) => { if (ReferenceEquals(pendingCell, cell)) CommitPending(); };
                 var menu = new ContextMenu();
-                foreach (var (name, action) in new (string, Action)[] { ("Copy selected", Copy), ("Paste", Paste), ("Clear selected", ClearSelected), ("Transfer all offsets to Fueling", Transfer) })
+                foreach (var (name, action) in new (string, Action)[] { ("Copy selected", Copy), ("Paste", Paste), ("Auto-populate selected cells", AutoPopulateCells), ("Clear selected", ClearSelected), ("Transfer all offsets to Fueling", Transfer) })
                 { var item = new MenuItem { Header = name }; item.Click += (_, _) => action(); menu.Items.Add(item); }
                 cell.ContextMenu = menu; cells[row, col] = cell; Grid.SetRow(cell, row); Grid.SetColumn(cell, col + 2); table.Children.Add(cell);
             }
@@ -193,6 +193,13 @@ public sealed class LearnApplyPanel : Grid
         if (!CommitPending()) return;
         if (selected.Count == 0) { Info("Select cells to clear."); return; }
         model.SetCells(selected.Select(point => (point.Row, point.Col, 0d))); Deselect(); status.Text = "Selected offsets cleared";
+    }
+    private void AutoPopulateCells()
+    {
+        if (!CommitPending()) return;
+        var source = model.SnapshotValues(); var populated = TableAutoPopulate.Apply(source, selected, model.Rpm, model.Map);
+        if (populated is null) { Info("Select one solid row, column, or rectangular block containing at least two Learn Apply cells."); return; }
+        model.SetCells(selected.Select(point => (point.Row, point.Col, populated[point.Row, point.Col]))); Refresh(); status.Text = $"Auto-populated {selected.Count} Learn Apply cells from the selection endpoints";
     }
     private void ClearTable()
     {

@@ -532,12 +532,22 @@ public partial class MainWindow : Window
         var menu = new ContextMenu();
         menu.Items.Add(ContextItem("Copy selected", (_, _) => CopySelection())); menu.Items.Add(ContextItem("Paste", (_, _) => PasteSelection()));
         menu.Items.Add(ContextItem("Offset selection…", OffsetSelection_Click));
+        menu.Items.Add(ContextItem("Auto-populate selected cells", AutoPopulateTimingCells));
         menu.Items.Add(ContextItem("Select transition ring…", SelectTimingTransitionRing));
         menu.Items.Add(ContextItem("Highlight region of interest", HighlightTimingRegionOfInterest));
         menu.Items.Add(ContextItem("Clear region of interest", ClearTimingRegionOfInterest));
         menu.Items.Add(new Separator()); menu.Items.Add(ContextItem("Smooth selected…", AdvancedSmooth_Click));
         menu.Items.Add(ContextItem("Smooth rows", SmoothRows_Click)); menu.Items.Add(ContextItem("Smooth columns", SmoothColumns_Click));
         menu.Items.Add(new Separator()); menu.Items.Add(ContextItem("Clear selected", ClearSelectedTiming)); return menu;
+    }
+
+    private void AutoPopulateTimingCells(object sender, RoutedEventArgs e)
+    {
+        var selected = SelectedTimingCells();
+        var populated = TableAutoPopulate.Apply(timingValues, selected, rpmAxis, mapAxis);
+        if (populated is null) { MessageBox.Show(this, "Select one solid row, column, or rectangular block containing at least two cells.", "Auto-populate cells", MessageBoxButton.OK, MessageBoxImage.Information); return; }
+        PushUndo(); foreach (var cell in selected) SetCellValue(cell.Row, cell.Col, populated[cell.Row, cell.Col]);
+        SaveState(); UpdateSelection(); StatusText.Text = $"Auto-populated {selected.Count} timing cells from the selection endpoints";
     }
 
     private static MenuItem ContextItem(string header, RoutedEventHandler click) { var item = new MenuItem { Header = header }; item.Click += click; return item; }
@@ -1641,7 +1651,9 @@ public partial class MainWindow : Window
         editor.PreviewMouseRightButtonDown += AxisEditor_RightClick;
         var axisMenu = new ContextMenu();
         axisMenu.Items.Add(ContextItem("Paste axis values", (_, _) => PasteAxisValues(isMap, index)));
-        axisMenu.Items.Add(ContextItem("Auto-fill selected axis values", AutoFillAxis_Click)); editor.ContextMenu = axisMenu;
+        axisMenu.Items.Add(ContextItem("Auto-populate selected range", (_, _) => AutoPopulateAxis(isMap)));
+        axisMenu.Items.Add(new Separator());
+        axisMenu.Items.Add(ContextItem($"Select all {(isMap ? "MAP" : "RPM")} values", (_, _) => SelectEntireAxis(isMap))); editor.ContextMenu = axisMenu;
         editor.LostKeyboardFocus += AxisEditor_LostFocus;
         editor.KeyDown += (_, e) =>
         {
@@ -1761,10 +1773,17 @@ public partial class MainWindow : Window
     private void AutoFillAxis_Click(object sender, RoutedEventArgs e)
     {
         if (activeAxisIsMap is null) { MessageBox.Show("Select MAP or RPM breakpoints first.", "Select an axis", MessageBoxButton.OK, MessageBoxImage.Information); return; }
-        var isMap = activeAxisIsMap.Value; var selected = (isMap ? selectedMapAxis : selectedRpmAxis).OrderBy(i => i).ToArray();
+        AutoPopulateAxis(activeAxisIsMap.Value);
+    }
+
+    private void AutoPopulateAxis(bool isMap)
+    {
+        var selectedSet = isMap ? selectedMapAxis : selectedRpmAxis;
+        var selected = selectedSet.OrderBy(i => i).ToArray();
         if (selected.Length < 2) { MessageBox.Show("Select at least two axis values. Ctrl-click individual values or Shift-click a range.", "Select more values", MessageBoxButton.OK, MessageBoxImage.Information); return; }
+        selected = Enumerable.Range(selected[0], selected[^1] - selected[0] + 1).ToArray();
         var axis = isMap ? mapAxis : rpmAxis; var candidate = (double[])axis.Clone();
-        var minimum = selected.Min(i => axis[i]); var maximum = selected.Max(i => axis[i]);
+        var minimum = Math.Min(axis[selected[0]], axis[selected[^1]]); var maximum = Math.Max(axis[selected[0]], axis[selected[^1]]);
         var wholeValues = BuildWholeNumberAxis(minimum, maximum, selected.Length, !isMap, isMap, isMap ? MapAxisIncrement : 1);
         if (wholeValues is null)
         {
@@ -1781,9 +1800,10 @@ public partial class MainWindow : Window
         PushUndo();
         var editors = isMap ? mapAxisCells : rpmAxisCells;
         foreach (var index in selected) { axis[index] = candidate[index]; editors[index].Text = axis[index].ToString(isMap ? MapAxisFormat : "0", CultureInfo.InvariantCulture); }
+        selectedSet.Clear(); foreach (var index in selected) selectedSet.Add(index);
         UpdateAxisSelectionVisuals(); ApplyRegionVisualization();
         SyncFuelingAxes();
-        StatusText.Text = $"Auto-filled {selected.Length} {(isMap ? "MAP" : "RPM")} breakpoints from {minimum:0.0} to {maximum:0.0}";
+        StatusText.Text = $"Auto-populated {selected.Length} {(isMap ? "MAP" : "RPM")} breakpoints from the selected beginning and ending values";
     }
 
     private void AutoFillAxisFromFuel(bool isMap, int[] selectedIndices)

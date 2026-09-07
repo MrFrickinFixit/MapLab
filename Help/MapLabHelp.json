@@ -91,7 +91,8 @@
         "With several cells selected, edit one selected cell and press Enter to apply the value to every selected cell. Clicking away cancels the pending group edit.",
         "Right-click one solid rectangular selection and choose Select transition ring to select an adjustable-width perimeter band while leaving its center unselected.",
         "Choose Highlight region of interest to retain a red rectangular outline after the normal selection is cleared.",
-        "Right-click a selection for Copy, Paste, Offset Selection, Interpolate, smoothing, and clear commands.",
+        "In Timing, Fueling, Learn Apply, or Sandbox, right-click a solid selected row, column, or rectangular block and choose Auto-populate selected cells. Rows interpolate between their left and right endpoints, columns interpolate between their top and bottom endpoints, and rectangular blocks create a surface anchored by their four corner values. Physical X/RPM and Y/MAP breakpoint spacing is respected.",
+        "Right-click a selection for Copy, Paste, Offset Selection, Auto-populate, smoothing, and clear commands.",
         "Offset Selection uses Numerical mode to add or subtract the entered table units. Percentage of value multiplies every selected cell by 1 plus or minus the entered percentage; for example, increasing 80 by 10% produces 88, while increasing it numerically by 10 produces 90. Offset results retain their underlying precision regardless of the Display settings, and each arrow click applies another offset to the current values.",
         "After pasting a complete table of cells, the selection is cleared."
       ]
@@ -100,12 +101,13 @@
       "id": "axes",
       "category": "Editing Tables",
       "title": "Editing X, RPM, Y, and MAP Axes",
-      "summary": "Edit, paste, auto-fill, and rescale axis breakpoints.",
-      "keywords": ["axis", "axes", "breakpoint", "rpm", "map", "x axis", "y axis", "auto-fill", "paste scale", "rescale"],
+      "summary": "Edit, paste, auto-populate, and rescale axis breakpoints.",
+      "keywords": ["axis", "axes", "breakpoint", "rpm", "map", "x axis", "y axis", "auto-fill", "auto-populate", "select all", "paste scale", "rescale"],
       "body": [
         "Click an axis breakpoint, enter a value, and press Enter. Breakpoints must remain ordered and unique.",
         "Changing a minimum or maximum endpoint automatically rescales that axis.",
-        "Drag across axis values and right-click to Auto-fill or paste breakpoints.",
+        "Drag across axis values, or Ctrl-click two separate values, then right-click and choose Auto-populate selected range. Map Lab preserves the beginning and ending breakpoint values and fills every position between them.",
+        "Right-click an editable axis value and choose Select all MAP, RPM, X-axis, or Y-axis values when the complete scale should be selected before Auto-populate or Paste.",
         "Pasted X, RPM, Y, or MAP values are retained as entered; clicking back into the table commits the pasted scale.",
         "MAP uses whole-number kPa values and one decimal place for PSI.",
         "Fuel MAP changes never alter the Ignition Timing MAP scale, and Timing MAP changes never alter Fueling.",
