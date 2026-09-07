@@ -70,10 +70,10 @@ public sealed class SandboxPanel : Grid
         RowDefinitions.Add(new RowDefinition());
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        unitBox = new ComboBox { Width = 112, Height = 32, Background = Brushes.White, Foreground = Brushes.Black, Padding = new Thickness(6, 3, 6, 3), SelectedIndex = 0 };
+        unitBox = new ComboBox { Width = 112, Height = 28, Background = Brushes.White, Foreground = Brushes.Black, Padding = new Thickness(6, 2, 6, 2), SelectedIndex = 0 };
         RefreshUnitItems();
         unitBox.SelectionChanged += (_, _) => { if (!syncingUnit) UnitSelectionChanged(); };
-        xUnitBox = new ComboBox { Width = 112, Height = 32, Background = Brushes.White, Foreground = Brushes.Black, Padding = new Thickness(6, 3, 6, 3), SelectedIndex = 0 };
+        xUnitBox = new ComboBox { Width = 112, Height = 28, Background = Brushes.White, Foreground = Brushes.Black, Padding = new Thickness(6, 2, 6, 2), SelectedIndex = 0 };
         RefreshXUnitItems();
         xUnitBox.SelectionChanged += (_, _) => { if (!syncingUnit) XUnitSelectionChanged(); };
         leadingPrecisionBox = PrecisionBox(1, 4, leadingDisplayDigits);
@@ -87,7 +87,7 @@ public sealed class SandboxPanel : Grid
         title.Children.Add(new TextBlock { Text = "Map Sandbox", Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), FontSize = 25, FontWeight = FontWeights.SemiBold });
         title.Children.Add(currentFileText);
         CompactTableHeading.Align(title); title.HorizontalAlignment = HorizontalAlignment.Left;
-        var badge = new Border { Background = new SolidColorBrush(Color.FromRgb(17, 29, 39)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 64, 53)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(16), Padding = new Thickness(14, 8, 14, 8), VerticalAlignment = VerticalAlignment.Center, Child = status };
+        var badge = new Border { Background = new SolidColorBrush(Color.FromRgb(17, 29, 39)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 64, 53)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(14), Padding = new Thickness(12, 6, 12, 6), VerticalAlignment = VerticalAlignment.Center, Child = status };
         badge.Margin = new Thickness(16, 2, 0, 2); status.TextWrapping = TextWrapping.Wrap; status.MaxWidth = 320; title.Children.Add(badge);
 
         var tools = new StackPanel { Orientation = Orientation.Horizontal };
@@ -100,9 +100,9 @@ public sealed class SandboxPanel : Grid
         tools.Children.Add(Group("X AXIS UNITS", xUnits));
         tools.Children.Add(Group("CELL EDITING", Button("⧉  Copy", (_, _) => Copy()), Button("▣  Paste", (_, _) => Paste()), Button("×  Clear", Clear)));
         tools.Children.Add(Group("SMOOTHING", Button("⚙  Smooth Selected…", AdvancedSmooth, true), Button("↕  Columns", SmoothColumns), Button("↔  Rows", SmoothRows)));
-        var secondaryTools = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        var secondaryTools = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
         var toolRows = new StackPanel(); toolRows.Children.Add(tools); toolRows.Children.Add(secondaryTools);
-        var commandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = toolRows, Margin = new Thickness(0, 0, 0, 6) };
+        var commandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = toolRows, Margin = new Thickness(0, 0, 0, 4) };
         Grid.SetRow(commandBar, 1); Children.Add(commandBar);
 
 
@@ -557,10 +557,10 @@ public sealed class SandboxPanel : Grid
     private static double Ease(double value) { var x = Math.Clamp(value, 0, 1); return x * x * (3 - 2 * x); }
     private static Color Heat(double t) { var h = Math.Clamp(t, 0, 1) * 300; var c = .96 * (1 - Math.Abs(2 * .52 - 1)); var x = c * (1 - Math.Abs(h / 60 % 2 - 1)); var m = .52 - c / 2; var (r, g, b) = h switch { < 60 => (c, x, 0d), < 120 => (x, c, 0d), < 180 => (0d, c, x), < 240 => (0d, x, c), < 300 => (x, 0d, c), _ => (c, 0d, x) }; return Color.FromRgb((byte)((r + m) * 255), (byte)((g + m) * 255), (byte)((b + m) * 255)); }
     private static TextBlock Label(string text) => new() { Text = text, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0), Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)) };
-    private static TextBox Box(string text, double width) => new() { Text = text, Width = width, Padding = new Thickness(6), Margin = new Thickness(0, 0, 6, 0), TextAlignment = TextAlignment.Center, Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(Color.FromRgb(184, 184, 184)) };
+    private static TextBox Box(string text, double width) => new() { Text = text, Width = width, Height = 28, Padding = new Thickness(6, 3, 6, 3), Margin = new Thickness(0, 0, 6, 0), TextAlignment = TextAlignment.Center, Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(Color.FromRgb(184, 184, 184)) };
     private static ComboBox PrecisionBox(int minimum, int maximum, int selected)
     {
-        var box = new ComboBox { Width = 48, Height = 30, Background = Brushes.White, Foreground = Brushes.Black, Margin = new Thickness(0, 0, 7, 0) };
+        var box = new ComboBox { Width = 48, Height = 28, Background = Brushes.White, Foreground = Brushes.Black, Margin = new Thickness(0, 0, 7, 0) };
         for (var value = minimum; value <= maximum; value++) box.Items.Add(new ComboBoxItem { Content = value.ToString(CultureInfo.InvariantCulture), Foreground = Brushes.Black });
         box.SelectedIndex = Math.Clamp(selected - minimum, 0, maximum - minimum); return box;
     }
@@ -569,7 +569,7 @@ public sealed class SandboxPanel : Grid
     {
         StackPanel Row(string section, ComboBox leading, ComboBox trailing, ComboBox zeroes)
         {
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, section == "DISPLAY" ? 5 : 0) };
+            var row = new StackPanel { Orientation = Orientation.Horizontal };
             row.Children.Add(new TextBlock { Text = section, Width = 58, VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 10, FontWeight = FontWeights.SemiBold });
             row.Children.Add(Label("LEADING")); row.Children.Add(leading);
             row.Children.Add(Label("TRAILING")); row.Children.Add(trailing);
@@ -579,10 +579,10 @@ public sealed class SandboxPanel : Grid
         var content = new StackPanel();
         content.Children.Add(new TextBlock { Text = "DECIMAL PRECISION", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 2) });
         content.Children.Add(Row("DISPLAY", leadingPrecisionBox, trailingPrecisionBox, displayTrailingZeroesBox));
-        return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(6, 4, 6, 4), Margin = new Thickness(0, 0, 7, 0), Child = content };
+        return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(6, 3, 6, 3), Margin = new Thickness(0, 0, 7, 0), Child = content };
     }
-    private static Border Group(string title, params UIElement[] controls) { var content = new StackPanel(); content.Children.Add(new TextBlock { Text = title, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 2) }); var row = new StackPanel { Orientation = Orientation.Horizontal }; foreach (var control in controls) row.Children.Add(control); content.Children.Add(row); return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(6, 4, 6, 4), Margin = new Thickness(0, 0, 7, 0), Child = content }; }
-    private static Button Button(string text, RoutedEventHandler click, bool primary = false) { var button = new Button { Content = text, Padding = new Thickness(12, 7, 12, 7), Margin = new Thickness(0, 0, 7, 0), Background = new SolidColorBrush(primary ? Color.FromRgb(0, 103, 192) : Color.FromRgb(249, 249, 249)), Foreground = primary ? Brushes.White : new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(primary ? Color.FromRgb(0, 90, 170) : Color.FromRgb(190, 190, 190)), FontWeight = FontWeights.SemiBold }; button.Click += click; return button; }
+    private static Border Group(string title, params UIElement[] controls) { var content = new StackPanel(); content.Children.Add(new TextBlock { Text = title, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 2) }); var row = new StackPanel { Orientation = Orientation.Horizontal }; foreach (var control in controls) row.Children.Add(control); content.Children.Add(row); return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(6, 3, 6, 3), Margin = new Thickness(0, 0, 7, 0), Child = content }; }
+    private static Button Button(string text, RoutedEventHandler click, bool primary = false) { var button = new Button { Content = text, Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(0, 0, 7, 0), Background = new SolidColorBrush(primary ? Color.FromRgb(0, 103, 192) : Color.FromRgb(249, 249, 249)), Foreground = primary ? Brushes.White : new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(primary ? Color.FromRgb(0, 90, 170) : Color.FromRgb(190, 190, 190)), FontWeight = FontWeights.SemiBold }; button.Click += click; return button; }
     private static MenuItem Item(string header, RoutedEventHandler click) { var item = new MenuItem { Header = header }; item.Click += click; return item; }
     private static void Info(string message) => MessageBox.Show(message, "Map Sandbox", MessageBoxButton.OK, MessageBoxImage.Information);
     private void NormalizeStoredValues() { for (var row = 0; row < values.GetLength(0); row++) for (var col = 0; col < values.GetLength(1); col++) values[row, col] = RoundEditableValue(values[row, col]); }

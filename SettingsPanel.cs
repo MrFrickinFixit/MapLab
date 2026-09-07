@@ -31,8 +31,8 @@ public sealed class SettingsPanel : Grid
         content.Children.Add(new TextBlock { Text = "MAP COLORS", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 8) });
         content.Children.Add(new TextBlock { Text = "Choose one heat-map palette for the Fueling, Ignition Timing, and Map Sandbox tables, 3D viewers, and Excel exports.", TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), FontSize = 13, LineHeight = 20, Margin = new Thickness(0, 0, 0, 12) });
         content.Children.Add(MakeButton("◉  Adjust map colors…", (_, _) => openColors(), false));
-        content.Children.Add(new Border { Background = new SolidColorBrush(Color.FromRgb(255, 248, 225)), BorderBrush = new SolidColorBrush(Color.FromRgb(226, 190, 92)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Padding = new Thickness(12), Margin = new Thickness(0, 18, 0, 0), Child = new TextBlock { Text = "Open replaces all current workspaces, including Learn Apply offsets. Map Lab validates the complete file and asks for confirmation first. Autosave remains active independently of manual .map files.", TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(82, 62, 14)) } });
-        var card = new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(7), Padding = new Thickness(22), VerticalAlignment = VerticalAlignment.Top, Child = content }; Grid.SetRow(card, 1); Children.Add(card);
+        content.Children.Add(new Border { Background = new SolidColorBrush(Color.FromRgb(255, 248, 225)), BorderBrush = new SolidColorBrush(Color.FromRgb(226, 190, 92)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(5), Padding = new Thickness(10, 8, 10, 8), Margin = new Thickness(0, 12, 0, 0), Child = new TextBlock { Text = "Open replaces all current workspaces, including Learn Apply offsets. Map Lab validates the complete file and asks for confirmation first. Autosave remains active independently of manual .map files.", TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.FromRgb(82, 62, 14)) } });
+        var card = new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(7), Padding = new Thickness(18, 14, 18, 14), VerticalAlignment = VerticalAlignment.Top, Child = content }; Grid.SetRow(card, 1); Children.Add(card);
     }
 
     public void SetCurrentFile(string? path, string message)
@@ -42,7 +42,7 @@ public sealed class SettingsPanel : Grid
     }
     private static Button MakeButton(string text, RoutedEventHandler click, bool primary)
     {
-        var button = new Button { Content = text, Padding = new Thickness(15, 9, 15, 9), Margin = new Thickness(0, 0, 8, 0), Background = new SolidColorBrush(primary ? Color.FromRgb(0, 103, 192) : Color.FromRgb(249, 249, 249)), Foreground = primary ? Brushes.White : new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(primary ? Color.FromRgb(0, 90, 170) : Color.FromRgb(190, 190, 190)), BorderThickness = new Thickness(1), FontWeight = FontWeights.SemiBold };
+        var button = new Button { Content = text, Padding = new Thickness(14, 6, 14, 6), Margin = new Thickness(0, 0, 8, 0), Background = new SolidColorBrush(primary ? Color.FromRgb(0, 103, 192) : Color.FromRgb(249, 249, 249)), Foreground = primary ? Brushes.White : new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(primary ? Color.FromRgb(0, 90, 170) : Color.FromRgb(190, 190, 190)), BorderThickness = new Thickness(1), FontWeight = FontWeights.SemiBold };
         button.Click += click; return button;
     }
 }

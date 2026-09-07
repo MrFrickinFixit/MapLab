@@ -1,6 +1,6 @@
 {
   "title": "Map Lab Help",
-  "version": "1.0.3.5-beta",
+  "version": "1.0.3.6-beta",
   "topics": [
     {
       "id": "quick-start",
@@ -10,7 +10,9 @@
       "keywords": ["start", "workflow", "new map", "basics"],
       "body": [
         "Choose Fueling, Ignition Timing, or Map Sandbox.",
-        "Set the matrix size and edit or paste the X and Y axis breakpoints.",
+        "New engine and sandbox maps start with a 31 by 31 matrix matching the Holley Terminator table layout. Set another matrix size when a different calibration requires it.",
+        "Tables fit the available window by default. Enable Manual size for native-size editing, hold Ctrl while using the mouse wheel to zoom, or drag the blue lower-right resize grip. Normal mouse-wheel scrolling remains available.",
+        "Edit or paste the X and Y axis breakpoints.",
         "Drag across cells to select an area. Hold Ctrl while clicking or dragging to add another area.",
         "Type into a selected cell and press Enter to apply that value to every selected cell. Clicking away cancels a pending group edit.",
         "Smooth the selection and inspect the result in the 3D view.",
@@ -279,6 +281,7 @@
         "Save writes Timing, Fueling, Learn Apply, and Sandbox tables, axes, units, boundaries, colors, display preferences, precision, smoothing choices, and VE options to the current .map file.",
         "The first Save asks for a filename. Save As creates or selects a different .map file.",
         "Open validates the complete file before replacing the current workspaces and makes the opened file the current Save target.",
+        "At startup, Map Lab automatically reopens the most recently opened or saved .map file when it is still available and valid. If it was moved, deleted, or cannot be read, Map Lab quietly falls back to recovery autosave or a new table.",
         "The current filename appears in the application title and every 2D table view. Untitled means no manual Save target has been assigned.",
         "When closing with unsaved changes, choose Yes to save, No to close without updating the file, or Cancel to keep working.",
         "Timing, Fueling, Sandbox, global map colors, and dialog settings autosave for recovery between sessions."
