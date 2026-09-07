@@ -18,11 +18,12 @@ $fitProperty = $viewport.GetType().GetProperty('IsFitToWindow',$flags)
 $setZoom.Invoke($viewport,@([double]1.25))
 if ($fitProperty.GetValue($viewport) -or [Math]::Abs($zoomProperty.GetValue($viewport) - 1.25) -gt .0001) { throw 'Manual table zoom was not applied.' }
 if ($table.LayoutTransform.ScaleX -ne 1.25 -or $table.LayoutTransform.ScaleY -ne 1.25) { throw 'Table layout transform does not match the zoom level.' }
+$manualSize = $viewport.GetType().GetField('manualSize',$flags).GetValue($viewport)
+if ([Math]::Abs($manualSize.Margin.Left - 37.5) -gt .0001) { throw 'Manual size control is not aligned to the scaled Y-axis cells.' }
 $setZoom.Invoke($viewport,@([double]10))
 if ($zoomProperty.GetValue($viewport) -ne 2.5) { throw 'Maximum table zoom was not clamped.' }
 $setZoom.Invoke($viewport,@([double].01))
 if ($zoomProperty.GetValue($viewport) -ne .3) { throw 'Minimum table zoom was not clamped.' }
-$manualSize = $viewport.GetType().GetField('manualSize',$flags).GetValue($viewport)
 $manualSize.IsChecked = $false
 if (-not $fitProperty.GetValue($viewport) -or $table.LayoutTransform.Value -ne [Windows.Media.Matrix]::Identity) { throw 'Fit-to-window mode was not restored.' }
 'Table viewport tests passed.'

@@ -24,11 +24,13 @@ Map Lab combines spreadsheet-style 2D tables with interactive 3D surfaces. It su
 ## Highlights
 
 - Separate **Fueling**, **Ignition Timing**, **Learn Apply**, and **Map Sandbox** workspaces.
-- The 31×31 default tables automatically fit the available window. Use **Manual size**, Ctrl+mouse wheel, or the lower-right resize grip to zoom while retaining horizontal and vertical scrollbars.
+- Compact 31×31 tables match the Holley Terminator layout by default. Value cells and Y-axis breakpoints share a narrow 36 px width, data rows use an 18 px height, and the slightly taller 20 px X-axis row keeps RPM values readable.
+- Tables automatically fit the available window. Use **Manual size**, Ctrl+mouse wheel, or the lower-right resize grip to zoom while retaining horizontal and vertical scrollbars; the Manual size control stays aligned with the Y-axis scale while zooming.
 - Adjustable matrix dimensions with independently editable X/RPM and Y/MAP breakpoint scales.
 - MAP units in PSI gauge or kPa absolute, plus custom axis units in Map Sandbox.
 - Drag selection, Ctrl+click/Ctrl+drag additive selection, group editing, and clipboard transfer to and from tuning software.
 - Standard row and column smoothing, interpolation, transition rings, smoothing to surroundings, and advanced shape-preserving or edge-preserving algorithms.
+- In Fueling and Ignition Timing, Smoothing is positioned directly beside Cell Editing. Compact table names, current-file details, and live status descriptions are centered above each map.
 - Timing-region boundaries, regional profiles, and boost timing offsets calculated from each selected row's actual MAP breakpoint—even when the PSI scale is nonlinear.
 - VE setup wizard with naturally aspirated and forced-induction modes, configurable MAP sensors, preview, contour generation, and final whole-map smoothing.
 - Optional calculated lb/hr view for the Fueling table while retaining editable VE% source values.

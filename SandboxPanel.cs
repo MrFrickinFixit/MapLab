@@ -144,10 +144,10 @@ public sealed class SandboxPanel : Grid
     {
         loading = true; axisEditOriginalValues.Clear(); table.Children.Clear(); table.RowDefinitions.Clear(); table.ColumnDefinitions.Clear();
         cells = new TextBox[map.Length, rpm.Length]; mapEditors = new TextBox[map.Length]; rpmEditors = new TextBox[rpm.Length];
-        table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) }); table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(58) });
-        for (var c = 0; c < rpm.Length; c++) table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(58) });
-        for (var r = 0; r < map.Length; r++) table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(22) });
-        table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(34) }); table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(24) });
+        table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TableLayoutMetrics.YAxisTitleWidth) }); table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TableLayoutMetrics.CellWidth) });
+        for (var c = 0; c < rpm.Length; c++) table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TableLayoutMetrics.CellWidth) });
+        for (var r = 0; r < map.Length; r++) table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(TableLayoutMetrics.CellHeight) });
+        table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(TableLayoutMetrics.XAxisCellHeight) }); table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(24) });
         var mapTitle = new TextBlock { Text = YAxisTitle, Foreground = Brushes.White, FontWeight = FontWeights.Bold, LayoutTransform = new RotateTransform(-90), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         Grid.SetRowSpan(mapTitle, map.Length); table.Children.Add(mapTitle);
         for (var r = 0; r < map.Length; r++)

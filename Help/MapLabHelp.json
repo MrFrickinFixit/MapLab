@@ -20,6 +20,22 @@
       ]
     },
     {
+      "id": "table-layout-and-zoom",
+      "category": "Getting Started",
+      "title": "Table Layout and Zoom",
+      "summary": "Work with the compact 31 by 31 layout and resize the table view.",
+      "keywords": ["table size", "cell width", "cell height", "manual size", "zoom", "resize grip", "scrollbars", "31x31", "terminator"],
+      "body": [
+        "New maps use a compact 31 by 31 layout matching the Holley Terminator table dimensions. Matrix and Axes Setup can still resample a map to another X and Y size.",
+        "Value cells and editable Y-axis scale cells share the same narrow width. Data rows and Y-axis cells share the same compact height, while the X-axis scale row is slightly taller for RPM readability.",
+        "Fit to window is the default and keeps the complete map visible when space permits.",
+        "Enable Manual size to return to native-size editing. Hold Ctrl and use the mouse wheel over the table to zoom from 30 percent through 250 percent, or drag the blue grip in the lower-right corner.",
+        "Normal mouse-wheel input continues to scroll the table. Horizontal and vertical scrollbars appear whenever the manually sized table exceeds the viewport.",
+        "The Manual size control follows the scaled left edge of the Y-axis cells. The table name, current filename, and live status are centered in the viewport header.",
+        "Fueling and Ignition Timing place the Smoothing card immediately beside Cell Editing. Their black operating-region boundaries use a compact line while remaining distinct from the heat map."
+      ]
+    },
+    {
       "id": "table-relationships",
       "category": "Getting Started",
       "title": "How the Tables Relate",

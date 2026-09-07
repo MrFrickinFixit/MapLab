@@ -90,16 +90,17 @@ public sealed class FuelingPanel : Grid
         displayTrailingZeroesBox.SelectionChanged += (_, _) => ApplyDisplayPrecision();
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition()); RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         mapUnitBox = CreateMapUnitBox();
-        var title = new WrapPanel { VerticalAlignment = VerticalAlignment.Center };
-        fuelTableTitle = new TextBlock { Text = "Fuel Table — VE (%)", Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), FontSize = 25, FontWeight = FontWeights.SemiBold }; title.Children.Add(fuelTableTitle); title.Children.Add(currentFileText); CompactTableHeading.Align(title); title.HorizontalAlignment = HorizontalAlignment.Left;
+        var title = new WrapPanel { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
+        fuelTableTitle = new TextBlock { Text = "Fuel Table — VE (%)", Foreground = Brushes.White, FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(6, 3, 0, 4), VerticalAlignment = VerticalAlignment.Center }; title.Children.Add(fuelTableTitle);
+        currentFileText.Foreground = new SolidColorBrush(Color.FromRgb(190, 205, 220)); currentFileText.FontSize = 11; currentFileText.Margin = new Thickness(12, 3, 0, 4); currentFileText.VerticalAlignment = VerticalAlignment.Center; title.Children.Add(currentFileText);
         conversionViewBox = new CheckBox { Content = "View as lb/hr", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(18, 0, 0, 0), FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)) };
         conversionViewBox.Checked += (_, _) => { if (!syncingConversion) SetFuelFlowView(true); }; conversionViewBox.Unchecked += (_, _) => { if (!syncingConversion) SetFuelFlowView(false); };
 
-        status.Text = "Fuel table ready"; status.Foreground = new SolidColorBrush(Color.FromRgb(169, 201, 192)); status.FontSize = 12; status.VerticalAlignment = VerticalAlignment.Center;
-        var statusBadge = new Border { Background = new SolidColorBrush(Color.FromRgb(17, 29, 39)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 64, 53)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(14), Padding = new Thickness(12, 6, 12, 6), VerticalAlignment = VerticalAlignment.Center, Child = status };
-        statusBadge.Margin = new Thickness(16, 2, 0, 2); status.TextWrapping = TextWrapping.Wrap; status.MaxWidth = 320; title.Children.Add(statusBadge);
+        status.Text = "Fuel table ready"; status.Foreground = new SolidColorBrush(Color.FromRgb(169, 201, 192)); status.FontSize = 11; status.VerticalAlignment = VerticalAlignment.Center;
+        var statusBadge = new Border { Background = new SolidColorBrush(Color.FromRgb(17, 29, 39)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 64, 53)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(8, 2, 8, 2), VerticalAlignment = VerticalAlignment.Center, Child = status };
+        statusBadge.Margin = new Thickness(12, 1, 6, 2); status.TextWrapping = TextWrapping.Wrap; status.MaxWidth = 320; title.Children.Add(statusBadge);
 
-        var tableViewport = new TableViewport { Table = table };
+        var tableViewport = new TableViewport { Table = table, Header = title };
         tableViewport.AddViewOption(conversionViewBox);
         var frame = new Border { Background = new SolidColorBrush(Color.FromRgb(8, 13, 20)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 50, 71)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(3), Child = tableViewport };
         Grid.SetRow(frame, 2); Children.Add(frame);
@@ -111,11 +112,12 @@ public sealed class FuelingPanel : Grid
         tools.Children.Add(MatrixAxisGroup());
         tools.Children.Add(ControlGroup("CELL EDITING", Button("⧉  Copy", (_, _) => CopySelection()), Button("▣  Paste", (_, _) => PasteSelection())));
         var smoothingCard = ControlGroup("SMOOTHING", Button("⚙  Smooth Selected…", AdvancedSmooth, true), Button("↕  Columns", SmoothColumns), Button("↔  Rows", SmoothRows));
+        tools.Children.Add(smoothingCard);
         var secondaryTools = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
         var toolRows = new Grid();
         toolRows.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); toolRows.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         toolRows.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); toolRows.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        toolRows.Children.Add(tools); Grid.SetColumn(smoothingCard, 1); toolRows.Children.Add(smoothingCard);
+        toolRows.Children.Add(tools);
         Grid.SetRow(secondaryTools, 1); toolRows.Children.Add(secondaryTools); Grid.SetColumnSpan(secondaryTools, 2);
         var commandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = toolRows, Margin = new Thickness(0, 0, 0, 4) };
         Grid.SetRow(commandBar, 1); Children.Add(commandBar);
@@ -123,7 +125,6 @@ public sealed class FuelingPanel : Grid
         secondaryTools.Children.Add(DisplayPrecisionGroup());
         secondaryTools.Children.Add(ControlGroup("VIEW & OUTPUT", Button("▦  3D Map", View3D), Button("⇩  Export CSV", ExportCsv), Button("▤  Export Excel", ExportExcel, true)));
         secondaryTools.Children.Add(ControlGroup("HISTORY", Button("↶  Undo", (_, _) => Undo()), Button("↷  Redo", (_, _) => Redo())));
-        secondaryTools.Children.Add(title);
 
         PreviewKeyDown += FuelingPanel_PreviewKeyDown;
         table.PreviewMouseLeftButtonUp += (_, _) => { selecting = false; axisSelecting = false; };
@@ -495,10 +496,10 @@ public sealed class FuelingPanel : Grid
         loading = true; axisEditOriginalValues.Clear(); cells = new TextBox[map.Length, rpm.Length]; mapAxisCells = new TextBox[map.Length]; rpmAxisCells = new TextBox[rpm.Length];
         selectedMapAxis.Clear(); selectedRpmAxis.Clear(); axisSelecting = false;
         table.Children.Clear(); table.RowDefinitions.Clear(); table.ColumnDefinitions.Clear();
-        table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) }); table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(58) });
-        for (var col = 0; col < rpm.Length; col++) table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(58) });
-        for (var row = 0; row < map.Length; row++) table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(22) });
-        table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(34) }); table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(24) });
+        table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TableLayoutMetrics.YAxisTitleWidth) }); table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TableLayoutMetrics.CellWidth) });
+        for (var col = 0; col < rpm.Length; col++) table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TableLayoutMetrics.CellWidth) });
+        for (var row = 0; row < map.Length; row++) table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(TableLayoutMetrics.CellHeight) });
+        table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(TableLayoutMetrics.XAxisCellHeight) }); table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(24) });
         var mapTitle = new TextBlock { Text = mapUnit.Contains("PSI", StringComparison.OrdinalIgnoreCase) ? "MAP (PSIG)" : "MAP (kPa)", Foreground = Brushes.White, FontWeight = FontWeights.Bold, LayoutTransform = new RotateTransform(-90), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         Grid.SetRowSpan(mapTitle, map.Length); table.Children.Add(mapTitle);
         for (var row = 0; row < map.Length; row++)
@@ -928,7 +929,7 @@ public sealed class FuelingPanel : Grid
     private bool IsFuelCellSelected(int row, int col) => pinnedFuelSelection.Contains((row, col)) || Bounds(out var top, out var bottom, out var left, out var right) && row >= top && row <= bottom && col >= left && col <= right;
     private void PinActiveFuelSelection() { if (!Bounds(out var top, out var bottom, out var left, out var right)) return; for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) pinnedFuelSelection.Add((row, col)); }
     private HashSet<(int Row, int Col)> SelectedFuelCells() { var selected = new HashSet<(int Row, int Col)>(pinnedFuelSelection); if (Bounds(out var top, out var bottom, out var left, out var right)) for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) selected.Add((row, col)); return selected; }
-    private void UpdateSelection() { var selectedCells = SelectedFuelCells(); if (selectedCells.Count == 0) return; for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++) { var selected = selectedCells.Contains((row, col)); var boundary = IsBoundary(row, col); cells[row, col].BorderBrush = selected ? Brushes.White : boundary ? Brushes.Black : UiBrushCache.GridLine; cells[row, col].BorderThickness = new Thickness(selected ? 1.5 : boundary ? 3 : .5); } status.Text = $"Selected {selectedCells.Count} fuel cells"; }
+    private void UpdateSelection() { var selectedCells = SelectedFuelCells(); if (selectedCells.Count == 0) return; for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++) { var selected = selectedCells.Contains((row, col)); var boundary = IsBoundary(row, col); cells[row, col].BorderBrush = selected ? Brushes.White : boundary ? Brushes.Black : UiBrushCache.GridLine; cells[row, col].BorderThickness = new Thickness(selected ? 1.5 : boundary ? TableLayoutMetrics.BoundaryThickness : .5); } status.Text = $"Selected {selectedCells.Count} fuel cells"; }
     private void ApplyBoundaries()
     {
         idleBoundaryCol = Closest(rpm, idleBoundaryRpm); wotBoundaryRow = Closest(map, wotBoundaryMap);
@@ -939,7 +940,7 @@ public sealed class FuelingPanel : Grid
         var displayed = showFuelFlow ? DisplayValues() : ve; displayedValues = displayed;
         for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++)
         {
-            var boundary = IsBoundary(row, col); cells[row, col].BorderBrush = boundary ? Brushes.Black : UiBrushCache.GridLine; cells[row, col].BorderThickness = new Thickness(boundary ? 3 : .5);
+            var boundary = IsBoundary(row, col); cells[row, col].BorderBrush = boundary ? Brushes.Black : UiBrushCache.GridLine; cells[row, col].BorderThickness = new Thickness(boundary ? TableLayoutMetrics.BoundaryThickness : .5);
             UpdateFuelCellToolTip(row, col);
         }
         if (start is not null) UpdateSelection();

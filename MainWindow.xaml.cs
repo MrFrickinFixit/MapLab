@@ -487,11 +487,11 @@ public partial class MainWindow : Window
         axisEditOriginalValues.Clear();
         valueCells = new TextBox[RowCount, ColumnCount]; timingValues = new double[RowCount, ColumnCount]; rpmAxisCells = new TextBox[ColumnCount]; mapAxisCells = new TextBox[RowCount];
         TableGrid.Children.Clear(); TableGrid.RowDefinitions.Clear(); TableGrid.ColumnDefinitions.Clear();
-        TableGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
-        TableGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(54) });
-        for (var col = 0; col < ColumnCount; col++) TableGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(58) });
-        for (var row = 0; row < RowCount; row++) TableGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(22) });
-        TableGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(36) });
+        TableGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TableLayoutMetrics.YAxisTitleWidth) });
+        TableGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TableLayoutMetrics.CellWidth) });
+        for (var col = 0; col < ColumnCount; col++) TableGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TableLayoutMetrics.CellWidth) });
+        for (var row = 0; row < RowCount; row++) TableGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(TableLayoutMetrics.CellHeight) });
+        TableGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(TableLayoutMetrics.XAxisCellHeight) });
         TableGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(24) });
         for (var row = 0; row < RowCount; row++)
         {
@@ -752,7 +752,7 @@ public partial class MainWindow : Window
             var selected = selectedCells.Contains((row, col));
             var marker = IsRegionMarker(row, col);
             valueCells[row, col].BorderBrush = selected ? Brushes.White : RegionOrMarkerBrush(row, col);
-            valueCells[row, col].BorderThickness = new Thickness(selected ? 1.5 : marker ? 3 : .7);
+            valueCells[row, col].BorderThickness = new Thickness(selected ? 1.5 : marker ? TableLayoutMetrics.BoundaryThickness : .7);
         }
         StatusText.Text = $"Selected {selectedCells.Count} timing cells";
     }
@@ -1259,7 +1259,7 @@ public partial class MainWindow : Window
             var idlePoint = col == idleMarkerCol; var wotPoint = row == wotMarkerRow;
             UpdateTimingCellToolTip(row, col);
             valueCells[row, col].BorderBrush = idlePoint || wotPoint ? Brushes.Black : RegionBrush(row, col);
-            valueCells[row, col].BorderThickness = new Thickness(idlePoint || wotPoint ? 3 : .7);
+            valueCells[row, col].BorderThickness = new Thickness(idlePoint || wotPoint ? TableLayoutMetrics.BoundaryThickness : .7);
         }
         if (selectionStart is not null) UpdateSelection();
     }

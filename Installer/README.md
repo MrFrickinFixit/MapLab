@@ -48,6 +48,10 @@ The helper reads the version and executable name from `MapLab.csproj`, so beta
 executable names do not need to be duplicated in the installer. It refreshes only
 `artifacts\inno\publish\win-x64`, includes the existing Map Lab license and .NET
 notices, and writes `artifacts\inno\installer\MapLab-<version>-beta-win-x64-setup.exe`.
+Re-run this helper after interface, Help, or README changes so the self-contained
+payload contains the current source and documentation. The helper prints the final
+SHA-256 checksum; publish that checksum with the installer so downloads can be
+verified independently.
 The WiX MSI sources and output are left alone.
 
 For the Inno Setup Compiler IDE, first run:

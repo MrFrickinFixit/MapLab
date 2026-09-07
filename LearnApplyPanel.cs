@@ -66,11 +66,11 @@ public sealed class LearnApplyPanel : Grid
         geometryVersion = model.GeometryVersion;
         table.Children.Clear(); table.RowDefinitions.Clear(); table.ColumnDefinitions.Clear();
         cells = new TextBox[model.Map.Length, model.Rpm.Length];
-        table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
-        table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(58) });
-        for (var col = 0; col < model.Rpm.Length; col++) table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(58) });
-        for (var row = 0; row < model.Map.Length; row++) table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(22) });
-        table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(34) }); table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(24) });
+        table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TableLayoutMetrics.YAxisTitleWidth) });
+        table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TableLayoutMetrics.CellWidth) });
+        for (var col = 0; col < model.Rpm.Length; col++) table.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TableLayoutMetrics.CellWidth) });
+        for (var row = 0; row < model.Map.Length; row++) table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(TableLayoutMetrics.CellHeight) });
+        table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(TableLayoutMetrics.XAxisCellHeight) }); table.RowDefinitions.Add(new RowDefinition { Height = new GridLength(24) });
         if (model.Map.Length == 0 || model.Rpm.Length == 0) return;
         var title = AxisText(model.MapUnit.Contains("PSI") ? "MAP (PSIG)" : "MAP (kPa)"); title.LayoutTransform = new RotateTransform(-90);
         Grid.SetRowSpan(title, model.Map.Length); table.Children.Add(title);

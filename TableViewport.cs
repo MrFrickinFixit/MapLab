@@ -38,9 +38,20 @@ public sealed class TableViewport : Grid
         set => SetValue(TableProperty, value);
     }
 
+    public static readonly DependencyProperty HeaderProperty = DependencyProperty.Register(
+        nameof(Header), typeof(UIElement), typeof(TableViewport),
+        new PropertyMetadata(null, (owner, args) => ((TableViewport)owner).headerHost.Child = (UIElement?)args.NewValue));
+
+    public UIElement? Header
+    {
+        get => (UIElement?)GetValue(HeaderProperty);
+        set => SetValue(HeaderProperty, value);
+    }
+
     private readonly CheckBox manualSize;
     private readonly TextBlock zoomText;
     private readonly WrapPanel viewOptions = new();
+    private readonly Border headerHost = new() { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
     private readonly Thumb resizeHandle;
     private double zoom = 1;
     private bool changingMode;
@@ -66,7 +77,7 @@ public sealed class TableViewport : Grid
         {
             Content = "Manual size",
             Foreground = Brushes.White,
-            Margin = new Thickness(6, 4, 6, 6),
+            Margin = new Thickness(TableLayoutMetrics.YAxisTitleWidth, 4, 6, 6),
             VerticalAlignment = VerticalAlignment.Center,
             ToolTip = "Enable native-size editing. Ctrl+mouse wheel or the lower-right resize grip sets a custom zoom."
         };
@@ -91,7 +102,15 @@ public sealed class TableViewport : Grid
         };
         viewOptions.Children.Add(manualSize);
         viewOptions.Children.Add(zoomText);
-        Children.Add(viewOptions);
+        var topBar = new Grid();
+        topBar.ColumnDefinitions.Add(new ColumnDefinition());
+        topBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        topBar.ColumnDefinitions.Add(new ColumnDefinition());
+        viewOptions.HorizontalAlignment = HorizontalAlignment.Left;
+        topBar.Children.Add(viewOptions);
+        SetColumn(headerHost, 1);
+        topBar.Children.Add(headerHost);
+        Children.Add(topBar);
         SetRow(fitted, 1);
         SetRow(scrolling, 1);
         Children.Add(fitted);
@@ -116,6 +135,7 @@ public sealed class TableViewport : Grid
         SetRow(resizeHandle, 1);
         Children.Add(resizeHandle);
         PreviewMouseWheel += TableViewport_PreviewMouseWheel;
+        SizeChanged += (_, _) => UpdateToolbarAlignment();
     }
 
     private void TableViewport_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
@@ -152,6 +172,12 @@ public sealed class TableViewport : Grid
         return Math.Clamp(Math.Min(1, Math.Min(availableWidth / width, availableHeight / height)), MinimumZoom, MaximumZoom);
     }
 
+    private void UpdateToolbarAlignment()
+    {
+        var scale = manualSize.IsChecked == true ? zoom : GetFitZoom();
+        manualSize.Margin = new Thickness(TableLayoutMetrics.YAxisTitleWidth * scale, 4, 6, 6);
+    }
+
     internal void SetManualZoom(double value)
     {
         zoom = Math.Clamp(value, MinimumZoom, MaximumZoom);
@@ -182,5 +208,6 @@ public sealed class TableViewport : Grid
             fitted.Child = Table;
             zoomText.Text = "Fit to window";
         }
+        UpdateToolbarAlignment();
     }
 }
