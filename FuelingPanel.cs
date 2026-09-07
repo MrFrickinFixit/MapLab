@@ -508,7 +508,7 @@ public sealed class FuelingPanel : Grid
             AddAxisEditor(map[row], row, 1, true, row);
             for (var col = 0; col < rpm.Length; col++)
             {
-                var cell = new TextBox { Tag = (row, col), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = Brushes.Black, BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), Padding = new Thickness(1) };
+                var cell = new TextBox { Tag = (row, col), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = Brushes.Black, BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), Padding = new Thickness(1, 0, 1, 0) };
                 cell.ToolTipOpening += (_, _) => { var point = ((int Row, int Col))cell.Tag; UpdateFuelCellToolTip(point.Row, point.Col); };
                 cell.PreviewMouseLeftButtonDown += CellDown; cell.MouseEnter += CellEnter; cell.PreviewMouseRightButtonDown += CellRightClick; cell.ContextMenu = CreateContextMenu();
                 cell.GotKeyboardFocus += (_, _) =>
@@ -979,7 +979,7 @@ public sealed class FuelingPanel : Grid
             Tag = (isMap, index), Text = FormatExactAxisValue(value),
             Foreground = new SolidColorBrush(Color.FromRgb(127, 227, 208)), Background = new SolidColorBrush(isMap ? Color.FromRgb(16, 31, 45) : Color.FromRgb(15, 40, 51)),
             BorderBrush = new SolidColorBrush(Color.FromRgb(38, 58, 76)), BorderThickness = new Thickness(.5), TextAlignment = TextAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center, FontSize = isMap ? 11 : 10, FontWeight = FontWeights.Bold, Padding = new Thickness(2),
+            VerticalContentAlignment = VerticalAlignment.Center, FontSize = isMap ? 11 : 10, FontWeight = FontWeights.Bold, Padding = new Thickness(2, 0, 2, 0),
             ToolTip = isMap ? $"Edit fuel MAP breakpoint ({mapUnit})" : "Edit shared RPM breakpoint"
         };
         editor.GotKeyboardFocus += (_, _) => { start = end = null; selecting = false; RenderBoundaries(); var current = isMap ? map[index] : rpm[index]; axisEditOriginalValues[editor] = current; editor.Text = FormatExactAxisValue(current); editor.SelectAll(); };

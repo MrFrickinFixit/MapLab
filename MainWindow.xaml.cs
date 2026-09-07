@@ -520,7 +520,7 @@ public partial class MainWindow : Window
     private TextBox CreateValueCell(double value, int row, int col)
     {
         timingValues[row, col] = RoundEditableTiming(value);
-        var cell = new TextBox { Tag = (row, col), Text = FormatTimingDisplayValue(timingValues[row, col]), Foreground = Brushes.Black, Background = TimingBrush(value), BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 11, FontWeight = FontWeights.SemiBold, Padding = new Thickness(2) };
+        var cell = new TextBox { Tag = (row, col), Text = FormatTimingDisplayValue(timingValues[row, col]), Foreground = Brushes.Black, Background = TimingBrush(value), BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 11, FontWeight = FontWeights.SemiBold, Padding = new Thickness(2, 0, 2, 0) };
         cell.ToolTipOpening += (_, _) => { var point = ((int Row, int Col))cell.Tag; UpdateTimingCellToolTip(point.Row, point.Col); };
         cell.GotKeyboardFocus += (_, _) => { var point = ((int Row, int Col))cell.Tag; cell.Text = FormatStoredTimingValue(timingValues[point.Row, point.Col]); cellEditOriginalValues[cell] = cell.Text; if (IsInsideTimingSelection(point.Row, point.Col) && SelectedTimingCells().Count > 1) groupCellEditsAwaitingEnter.Add(cell); else groupCellEditsAwaitingEnter.Remove(cell); cell.Background = Brushes.White; cell.SelectAll(); }; cell.PreviewMouseLeftButtonDown += Cell_MouseDown; cell.MouseEnter += Cell_MouseEnter;
         cell.PreviewMouseRightButtonDown += TimingCell_RightClick; cell.ContextMenu = CreateTimingContextMenu();
@@ -1643,7 +1643,7 @@ public partial class MainWindow : Window
             Background = new SolidColorBrush(isMap ? Color.FromRgb(16, 31, 45) : Color.FromRgb(15, 40, 51)),
             BorderBrush = new SolidColorBrush(Color.FromRgb(38, 58, 76)), BorderThickness = new Thickness(.5),
             TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center,
-            FontSize = isMap ? 11 : 10, FontWeight = FontWeights.Bold, Padding = new Thickness(2),
+            FontSize = isMap ? 11 : 10, FontWeight = FontWeights.Bold, Padding = new Thickness(2, 0, 2, 0),
             ToolTip = isMap ? $"Edit MAP breakpoint ({MapUnit})" : "Edit RPM breakpoint"
         };
         editor.GotKeyboardFocus += (_, _) => { var current = isMap ? mapAxis[index] : rpmAxis[index]; axisEditOriginalValues[editor] = current; editor.Text = FormatExactAxisValue(current); editor.SelectAll(); };

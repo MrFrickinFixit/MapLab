@@ -79,7 +79,7 @@ public sealed class LearnApplyPanel : Grid
             AddAxis(model.Map[row], row, 1);
             for (var col = 0; col < model.Rpm.Length; col++)
             {
-                var cell = new TextBox { Tag = (row, col), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 10, FontWeight = FontWeights.SemiBold, BorderThickness = new Thickness(.5), Padding = new Thickness(1) };
+                var cell = new TextBox { Tag = (row, col), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 10, FontWeight = FontWeights.SemiBold, BorderThickness = new Thickness(.5), Padding = new Thickness(1, 0, 1, 0) };
                 cell.PreviewMouseLeftButtonDown += CellDown;
                 cell.MouseEnter += (_, e) => { if (selecting && e.LeftButton == MouseButtonState.Pressed) SelectRectangle(((int Row, int Col))cell.Tag); };
                 cell.PreviewMouseRightButtonDown += (_, _) => { var point = ((int Row, int Col))cell.Tag; if (!selected.Contains(point)) { CommitPending(); selected.Clear(); selected.Add(point); RefreshSelection(); } };

@@ -155,7 +155,7 @@ public sealed class SandboxPanel : Grid
             AddAxis(map[r], r, 1, true, r);
             for (var c = 0; c < rpm.Length; c++)
             {
-                var cell = new TextBox { Tag = (r, c), Text = FormatDisplayValue(values[r, c]), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = Brushes.Black, BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), Padding = new Thickness(1) };
+                var cell = new TextBox { Tag = (r, c), Text = FormatDisplayValue(values[r, c]), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = Brushes.Black, BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), Padding = new Thickness(1, 0, 1, 0) };
                 cell.ToolTipOpening += (_, _) => { var point = ((int Row, int Col))cell.Tag; UpdateCellToolTip(point.Row, point.Col); };
                 cell.PreviewMouseLeftButtonDown += CellDown; cell.MouseEnter += CellEnter; cell.PreviewMouseRightButtonDown += CellRight;
                 cell.GotKeyboardFocus += (_, _) => { var point = ((int Row, int Col))cell.Tag; cell.Text = FormatStoredValue(values[point.Row, point.Col]); editOriginals[cell] = cell.Text; if (IsSelected(point.Row, point.Col) && Selected().Count > 1) groupCellEditsAwaitingEnter.Add(cell); else groupCellEditsAwaitingEnter.Remove(cell); cell.Background = Brushes.White; cell.SelectAll(); };
@@ -171,7 +171,7 @@ public sealed class SandboxPanel : Grid
 
     private void AddAxis(double value, int row, int column, bool isMap, int index)
     {
-        var editor = new TextBox { Tag = (isMap, index), Text = FormatExactAxisValue(value), Foreground = new SolidColorBrush(Color.FromRgb(127, 227, 208)), Background = new SolidColorBrush(isMap ? Color.FromRgb(16, 31, 45) : Color.FromRgb(15, 40, 51)), BorderBrush = new SolidColorBrush(Color.FromRgb(38, 58, 76)), BorderThickness = new Thickness(.5), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = isMap ? 11 : 10, FontWeight = FontWeights.Bold, Padding = new Thickness(2) };
+        var editor = new TextBox { Tag = (isMap, index), Text = FormatExactAxisValue(value), Foreground = new SolidColorBrush(Color.FromRgb(127, 227, 208)), Background = new SolidColorBrush(isMap ? Color.FromRgb(16, 31, 45) : Color.FromRgb(15, 40, 51)), BorderBrush = new SolidColorBrush(Color.FromRgb(38, 58, 76)), BorderThickness = new Thickness(.5), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = isMap ? 11 : 10, FontWeight = FontWeights.Bold, Padding = new Thickness(2, 0, 2, 0) };
         editor.PreviewMouseLeftButtonDown += AxisDown; editor.MouseEnter += AxisEnter;
         editor.GotKeyboardFocus += (_, _) => { ClearCellSelection(); var current = isMap ? map[index] : rpm[index]; axisEditOriginalValues[editor] = current; editor.Text = FormatExactAxisValue(current); editor.SelectAll(); };
         editor.LostKeyboardFocus += (_, _) => CommitAxis(editor); editor.KeyDown += (_, e) => { if (e.Key == Key.Enter) { CommitAxis(editor); Keyboard.ClearFocus(); e.Handled = true; } };
