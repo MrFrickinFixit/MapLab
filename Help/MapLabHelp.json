@@ -1,6 +1,6 @@
 {
   "title": "Map Lab Help",
-  "version": "1.0.3.5-beta",
+  "version": "1.0.3.6-beta",
   "topics": [
     {
       "id": "quick-start",
@@ -279,6 +279,7 @@
         "Save writes Timing, Fueling, Learn Apply, and Sandbox tables, axes, units, boundaries, colors, display preferences, precision, smoothing choices, and VE options to the current .map file.",
         "The first Save asks for a filename. Save As creates or selects a different .map file.",
         "Open validates the complete file before replacing the current workspaces and makes the opened file the current Save target.",
+        "At startup, Map Lab automatically reopens the most recently opened or saved .map file when it is still available and valid. If it was moved, deleted, or cannot be read, Map Lab quietly falls back to recovery autosave or a new table.",
         "The current filename appears in the application title and every 2D table view. Untitled means no manual Save target has been assigned.",
         "When closing with unsaved changes, choose Yes to save, No to close without updating the file, or Cancel to keep working.",
         "Timing, Fueling, Sandbox, global map colors, and dialog settings autosave for recovery between sessions."

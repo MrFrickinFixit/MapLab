@@ -63,6 +63,7 @@ public partial class MainWindow : Window
     private readonly Stack<MapSnapshot> undoHistory = [];
     private readonly Stack<MapSnapshot> redoHistory = [];
     private static string AutosavePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimingTableCalculator", "autosave.json");
+    private static string RecentFilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimingTableCalculator", "recent-file.json");
     private string? currentMapFilePath;
     private string? savedWorkspaceFingerprint;
     private double[] rpmAxis = [];
@@ -107,7 +108,7 @@ public partial class MainWindow : Window
         {
             TableGrid.PreviewMouseLeftButtonUp += (_, _) => { selecting = false; axisSelecting = false; };
             TableGrid.PreviewMouseMove += AxisDrag_MouseMove;
-            if (!LoadState()) GenerateTable();
+            if (!TryLoadLastMapFile() && !LoadState()) GenerateTable();
             ApplyGlobalHeatColors(refreshTiming: true);
             savedWorkspaceFingerprint = CaptureWorkspaceFingerprint();
             autosaveTimer.Tick += (_, _) => SaveState(); autosaveTimer.Start();
@@ -169,7 +170,9 @@ public partial class MainWindow : Window
             };
             File.WriteAllText(filePath, JsonSerializer.Serialize(package, new JsonSerializerOptions { WriteIndented = true }));
             savedWorkspaceFingerprint = BuildWorkspaceFingerprint(timingJson, fuelingJson, sandboxJson);
-            currentMapFilePath = Path.GetFullPath(filePath); UpdateMapFilePresentation($"Saved {Path.GetFileName(currentMapFilePath)}");
+            currentMapFilePath = Path.GetFullPath(filePath);
+            RememberLastMapFile(currentMapFilePath);
+            UpdateMapFilePresentation($"Saved {Path.GetFileName(currentMapFilePath)}");
             return true;
         }
         catch (Exception ex)
@@ -183,9 +186,14 @@ public partial class MainWindow : Window
     {
         var dialog = new OpenFileDialog { Title = "Open Map Lab file", Filter = "Map Lab file (*.map)|*.map", DefaultExt = ".map", CheckFileExists = true };
         if (dialog.ShowDialog(this) != true) return;
+        _ = TryOpenMapFile(dialog.FileName, confirmReplacement: true, showErrors: true);
+    }
+
+    private bool TryOpenMapFile(string filePath, bool confirmReplacement, bool showErrors)
+    {
         try
         {
-            var package = JsonSerializer.Deserialize<MapSettingsPackage>(File.ReadAllText(dialog.FileName));
+            var package = JsonSerializer.Deserialize<MapSettingsPackage>(File.ReadAllText(filePath));
             if (package is null || !string.Equals(package.Format, "MapLab", StringComparison.Ordinal) || package.Version != 1)
                 throw new InvalidDataException("This is not a supported Map Lab settings file.");
             var timingJson = package.Timing.GetRawText();
@@ -193,18 +201,38 @@ public partial class MainWindow : Window
             var sandboxJson = package.Sandbox.GetRawText();
             if (!CanImportTimingSettings(timingJson) || !fuelingPanel.CanImportSettingsJson(fuelingJson) || !sandboxPanel.CanImportSettingsJson(sandboxJson))
                 throw new InvalidDataException("The file contains missing, damaged, or unsupported map data.");
-            if (MessageBox.Show(this, "Opening this file replaces the current Timing, Fueling, Learn Apply, and Sandbox tables. Your current work remains protected by autosave. Continue?", "Open Map Lab file", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+            if (confirmReplacement && MessageBox.Show(this, "Opening this file replaces the current Timing, Fueling, Learn Apply, and Sandbox tables. Your current work remains protected by autosave. Continue?", "Open Map Lab file", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return false;
             if (!ImportTimingSettingsJson(timingJson) || !fuelingPanel.ImportSettingsJson(fuelingJson) || !sandboxPanel.ImportSettingsJson(sandboxJson))
                 throw new InvalidDataException("Map Lab could not apply all data from this file.");
             ApplyGlobalHeatColors(refreshTiming: true);
-            currentMapFilePath = Path.GetFullPath(dialog.FileName); StatusText.Text = $"Opened {Path.GetFileName(currentMapFilePath)}";
+            currentMapFilePath = Path.GetFullPath(filePath);
+            RememberLastMapFile(currentMapFilePath);
+            StatusText.Text = $"Opened {Path.GetFileName(currentMapFilePath)}";
             savedWorkspaceFingerprint = CaptureWorkspaceFingerprint();
             UpdateMapFilePresentation($"Opened {Path.GetFileName(currentMapFilePath)}");
+            return true;
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"Map Lab could not open the file.\n\n{ex.Message}", "Open Map Lab file", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (showErrors) MessageBox.Show(this, $"Map Lab could not open the file.\n\n{ex.Message}", "Open Map Lab file", MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
         }
+    }
+
+    private bool TryLoadLastMapFile()
+    {
+        try
+        {
+            var recentMapFile = RecentMapFileStore.Read(RecentFilePath);
+            return recentMapFile is not null && File.Exists(recentMapFile) &&
+                   TryOpenMapFile(recentMapFile, confirmReplacement: false, showErrors: false);
+        }
+        catch { return false; }
+    }
+
+    private static void RememberLastMapFile(string filePath)
+    {
+        _ = RecentMapFileStore.Write(RecentFilePath, filePath);
     }
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)

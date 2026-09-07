@@ -36,7 +36,7 @@ Map Lab combines spreadsheet-style 2D tables with interactive 3D surfaces. It su
 - Independent Undo/Redo history for each table and its corresponding 3D viewer.
 - CSV and Excel export, including timing-value heat-map formatting in Excel.
 - One global heat-map palette, adjusted from Settings and shared by all 2D maps, 3D viewers, and Excel exports; each table scales the palette independently from its own minimum to maximum value.
-- `.map` workspace files, Save/Save As, recovery autosave, and a prompt for unsaved changes when closing.
+- `.map` workspace files, Save/Save As, automatic reopening of the last available file, recovery autosave, and a prompt for unsaved changes when closing.
 - Built-in Help with Contents, an alphabetical Index, live search, and `F1` access.
 
 ## Install Map Lab
@@ -115,7 +115,7 @@ pwsh -NoProfile -File .\scripts\build-inno-installer.ps1
 
 The script publishes a self-contained `win-x64` application and writes the setup program under `artifacts\inno\installer`. If Inno Setup is installed in a nonstandard location, supply `-CompilerPath` with the full path to `ISCC.exe`.
 
-The current source tree identifies the development build as **1.0.3.4-beta**. Check the [Releases page](https://github.com/MrFrickinFixit/MapLab/releases) for the latest published package.
+The current source tree identifies the development build as **1.0.3.6-beta**. Check the [Releases page](https://github.com/MrFrickinFixit/MapLab/releases) for the latest published package.
 
 ## Repository layout
 

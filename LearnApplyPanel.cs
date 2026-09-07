@@ -31,12 +31,12 @@ public sealed class LearnApplyPanel : Grid
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition());
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var heading = new Grid { Margin = new Thickness(0, 0, 0, 8) };
+        var heading = new Grid { Margin = new Thickness(0, 0, 0, 5) };
         heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.ColumnDefinitions.Add(new ColumnDefinition());
         var title = new WrapPanel { VerticalAlignment = VerticalAlignment.Center }; title.Children.Add(new TextBlock { Text = "Learn Apply Table - VE Offset (%)", FontSize = 25, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap }); title.Children.Add(currentFileText); CompactTableHeading.Align(title); Grid.SetColumn(title, 1); heading.Children.Add(title);
         status.Margin = new Thickness(16, 2, 0, 2); title.Children.Add(status); Children.Add(heading);
 
-        var tools = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
+        var tools = new WrapPanel { Margin = new Thickness(0, 0, 0, 6) };
         tools.Children.Add(Command("Copy", 0xE8C8, Copy)); tools.Children.Add(Command("Paste", 0xE77F, Paste));
         tools.Children.Add(Command("Clear selected", 0xE894, ClearSelected)); tools.Children.Add(Command("Clear table", 0xE74D, ClearTable));
         undoButton = Command("Undo", 0xE7A7, () => { CommitPending(); model.Undo(); Deselect(); });
@@ -247,7 +247,7 @@ public sealed class LearnApplyPanel : Grid
         var content = new StackPanel { Orientation = Orientation.Horizontal };
         content.Children.Add(new TextBlock { Text = ((char)icon).ToString(), FontFamily = new FontFamily("Segoe MDL2 Assets"), Margin = new Thickness(0, 0, 7, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = primary ? Brushes.White : Brushes.Black });
         content.Children.Add(new TextBlock { Text = text, Foreground = primary ? Brushes.White : Brushes.Black });
-        var button = new Button { Content = content, ToolTip = text, Padding = new Thickness(12, 7, 12, 7), Margin = new Thickness(0, 0, 7, 5), Background = primary ? Brushes.RoyalBlue : Brushes.WhiteSmoke, BorderBrush = Brushes.Silver, BorderThickness = new Thickness(1), FontWeight = FontWeights.SemiBold };
+        var button = new Button { Content = content, ToolTip = text, Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(0, 0, 7, 3), Background = primary ? Brushes.RoyalBlue : Brushes.WhiteSmoke, BorderBrush = Brushes.Silver, BorderThickness = new Thickness(1), FontWeight = FontWeights.SemiBold };
         button.Click += (_, _) => action(); return button;
     }
 }

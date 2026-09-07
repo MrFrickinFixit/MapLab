@@ -96,7 +96,7 @@ public sealed class FuelingPanel : Grid
         conversionViewBox.Checked += (_, _) => { if (!syncingConversion) SetFuelFlowView(true); }; conversionViewBox.Unchecked += (_, _) => { if (!syncingConversion) SetFuelFlowView(false); };
 
         status.Text = "Fuel table ready"; status.Foreground = new SolidColorBrush(Color.FromRgb(169, 201, 192)); status.FontSize = 12; status.VerticalAlignment = VerticalAlignment.Center;
-        var statusBadge = new Border { Background = new SolidColorBrush(Color.FromRgb(17, 29, 39)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 64, 53)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(16), Padding = new Thickness(14, 8, 14, 8), VerticalAlignment = VerticalAlignment.Center, Child = status };
+        var statusBadge = new Border { Background = new SolidColorBrush(Color.FromRgb(17, 29, 39)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 64, 53)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(14), Padding = new Thickness(12, 6, 12, 6), VerticalAlignment = VerticalAlignment.Center, Child = status };
         statusBadge.Margin = new Thickness(16, 2, 0, 2); status.TextWrapping = TextWrapping.Wrap; status.MaxWidth = 320; title.Children.Add(statusBadge);
 
         var tableViewport = new TableViewport { Table = table };
@@ -111,13 +111,13 @@ public sealed class FuelingPanel : Grid
         tools.Children.Add(MatrixAxisGroup());
         tools.Children.Add(ControlGroup("CELL EDITING", Button("⧉  Copy", (_, _) => CopySelection()), Button("▣  Paste", (_, _) => PasteSelection())));
         var smoothingCard = ControlGroup("SMOOTHING", Button("⚙  Smooth Selected…", AdvancedSmooth, true), Button("↕  Columns", SmoothColumns), Button("↔  Rows", SmoothRows));
-        var secondaryTools = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        var secondaryTools = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
         var toolRows = new Grid();
         toolRows.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); toolRows.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         toolRows.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); toolRows.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         toolRows.Children.Add(tools); Grid.SetColumn(smoothingCard, 1); toolRows.Children.Add(smoothingCard);
         Grid.SetRow(secondaryTools, 1); toolRows.Children.Add(secondaryTools); Grid.SetColumnSpan(secondaryTools, 2);
-        var commandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = toolRows, Margin = new Thickness(0, 0, 0, 6) };
+        var commandBar = new ScrollViewer { HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, Content = toolRows, Margin = new Thickness(0, 0, 0, 4) };
         Grid.SetRow(commandBar, 1); Children.Add(commandBar);
 
         secondaryTools.Children.Add(DisplayPrecisionGroup());
@@ -215,7 +215,7 @@ public sealed class FuelingPanel : Grid
 
     private ComboBox CreateMapUnitBox()
     {
-        var box = new ComboBox { Width = 112, Height = 32, Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(Color.FromRgb(184, 184, 184)), Padding = new Thickness(6, 3, 6, 3), SelectedIndex = 0 };
+        var box = new ComboBox { Width = 112, Height = 28, Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(Color.FromRgb(184, 184, 184)), Padding = new Thickness(6, 2, 6, 2), SelectedIndex = 0 };
         box.Items.Add(new ComboBoxItem { Content = "kPa absolute", Foreground = Brushes.Black }); box.Items.Add(new ComboBoxItem { Content = "PSI gauge", Foreground = Brushes.Black }); box.SelectedIndex = 0;
         box.SelectionChanged += (_, _) => { if (!syncingMapUnit && box.SelectedIndex >= 0) ChangeFuelMapUnit(box.SelectedIndex); };
         return box;
@@ -1108,7 +1108,7 @@ public sealed class FuelingPanel : Grid
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         foreach (var control in controls) row.Children.Add(control);
         content.Children.Add(row);
-        return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(6, 4, 6, 4), Margin = new Thickness(0, 0, 7, 0), Child = content };
+        return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(6, 3, 6, 3), Margin = new Thickness(0, 0, 7, 0), Child = content };
     }
     private static TextBlock FileNameTextBlock() => new() { Text = "Current file: Untitled", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, Margin = new Thickness(0, 3, 0, 0) };
     private Border DisplayPrecisionGroup()
@@ -1121,18 +1121,18 @@ public sealed class FuelingPanel : Grid
         }
         StackPanel Row(string section, UIElement leading, UIElement trailing, UIElement zeroes)
         {
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, section == "DISPLAY" ? 5 : 0) };
+            var row = new StackPanel { Orientation = Orientation.Horizontal };
             row.Children.Add(new TextBlock { Text = section, Width = 58, Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 10, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
             row.Children.Add(leading); row.Children.Add(trailing); row.Children.Add(zeroes); return row;
         }
         var content = new StackPanel();
         content.Children.Add(new TextBlock { Text = "VE DECIMAL PRECISION", Foreground = new SolidColorBrush(Color.FromRgb(94, 94, 94)), FontSize = 11, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 2) });
         content.Children.Add(Row("DISPLAY", Field("LEADING", leadingPrecisionBox, "Leading-digit threshold used only to display VE values."), Field("TRAILING", trailingPrecisionBox, "Maximum decimal precision used for displayed values."), Field("ZEROES", displayTrailingZeroesBox, "Minimum decimal places shown by padding trailing zeroes.")));
-        return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(6, 4, 6, 4), Margin = new Thickness(0, 0, 7, 0), Child = content };
+        return new Border { Background = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(209, 209, 209)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(6, 3, 6, 3), Margin = new Thickness(0, 0, 7, 0), Child = content };
     }
     private static ComboBox PrecisionBox(int minimum, int maximum, int selected)
     {
-        var box = new ComboBox { Width = 48, Height = 30, Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(Color.FromRgb(184, 184, 184)), Padding = new Thickness(6, 3, 6, 3) };
+        var box = new ComboBox { Width = 48, Height = 28, Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(Color.FromRgb(184, 184, 184)), Padding = new Thickness(6, 2, 6, 2) };
         for (var value = minimum; value <= maximum; value++) box.Items.Add(new ComboBoxItem { Content = value.ToString(CultureInfo.InvariantCulture), Tag = value, Foreground = Brushes.Black });
         box.SelectedIndex = Math.Clamp(selected - minimum, 0, box.Items.Count - 1); return box;
     }
@@ -1146,8 +1146,8 @@ public sealed class FuelingPanel : Grid
         leadingDisplayDigits = displayLeading; trailingDisplayDecimals = displayTrailing; displayTrailingZeroPlaces = displayZeroes;
         if (ve.Length > 0) { Save(); RefreshAll(); ApplyBoundaries(); status.Text = $"VE display {leadingDisplayDigits}/{trailingDisplayDecimals}  •  trailing zeroes {displayTrailingZeroPlaces}  •  stored values unchanged"; }
     }
-    private static Button Button(string text, RoutedEventHandler click, bool primary = false) { var button = new Button { Content = text, Padding = new Thickness(12, 7, 12, 7), Margin = new Thickness(0, 0, 7, 0), Background = new SolidColorBrush(primary ? Color.FromRgb(0, 103, 192) : Color.FromRgb(249, 249, 249)), Foreground = primary ? Brushes.White : new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(primary ? Color.FromRgb(0, 90, 170) : Color.FromRgb(190, 190, 190)), BorderThickness = new Thickness(1), FontWeight = FontWeights.SemiBold, FontFamily = new FontFamily("Segoe UI") }; button.Click += click; return button; }
-    private static TextBox MatrixSizeBox(string text) => new() { Text = text, Width = 44, Padding = new Thickness(6), Margin = new Thickness(0, 0, 6, 0), TextAlignment = TextAlignment.Center, Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(Color.FromRgb(184, 184, 184)), BorderThickness = new Thickness(1) };
+    private static Button Button(string text, RoutedEventHandler click, bool primary = false) { var button = new Button { Content = text, Padding = new Thickness(12, 5, 12, 5), Margin = new Thickness(0, 0, 7, 0), Background = new SolidColorBrush(primary ? Color.FromRgb(0, 103, 192) : Color.FromRgb(249, 249, 249)), Foreground = primary ? Brushes.White : new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(primary ? Color.FromRgb(0, 90, 170) : Color.FromRgb(190, 190, 190)), BorderThickness = new Thickness(1), FontWeight = FontWeights.SemiBold, FontFamily = new FontFamily("Segoe UI") }; button.Click += click; return button; }
+    private static TextBox MatrixSizeBox(string text) => new() { Text = text, Width = 44, Height = 28, Padding = new Thickness(6, 3, 6, 3), Margin = new Thickness(0, 0, 6, 0), TextAlignment = TextAlignment.Center, Background = Brushes.White, Foreground = new SolidColorBrush(Color.FromRgb(32, 32, 32)), BorderBrush = new SolidColorBrush(Color.FromRgb(184, 184, 184)), BorderThickness = new Thickness(1) };
     private static Color Heat(double t) => Hsl(Math.Clamp(t, 0, 1) * 300, .96, .52);
     private static Color Hsl(double h, double s, double l) { var c = (1 - Math.Abs(2 * l - 1)) * s; var x = c * (1 - Math.Abs(h / 60 % 2 - 1)); var m = l - c / 2; var (r, g, b) = h switch { < 60 => (c, x, 0d), < 120 => (x, c, 0d), < 180 => (0d, c, x), < 240 => (0d, x, c), < 300 => (x, 0d, c), _ => (c, 0d, x) }; return Color.FromRgb((byte)((r + m) * 255), (byte)((g + m) * 255), (byte)((b + m) * 255)); }
     private static double Ease(double x) { var t = Math.Clamp(x, 0, 1); return t * t * (3 - 2 * t); }
