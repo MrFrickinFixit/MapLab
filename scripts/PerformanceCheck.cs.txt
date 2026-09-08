@@ -96,6 +96,15 @@ public static class MapLabPerformanceCheck
             Call(fuel, "SetFuelFlowView", true);
             Measure(size, "Math: VE to lb/hr", () => Call(fuel, "DisplayValues"), 30);
             Measure(size, "Fuel: lb/hr refresh and layout", () => { Call(fuel, "RefreshAll"); Drain(host); });
+            Call(fuel, "SetFuelFlowView", false);
+            var pasteRowA = string.Join('\t', Enumerable.Repeat("78.125", size));
+            var pasteRowB = string.Join('\t', Enumerable.Repeat("82.375", size));
+            var fuelPasteA = string.Join('\n', Enumerable.Repeat(pasteRowA, size));
+            var fuelPasteB = string.Join('\n', Enumerable.Repeat(pasteRowB, size));
+            var pasteToggle = false;
+            Measure(size, "Fuel: full matrix paste, save, refresh, layout", () => {
+                pasteToggle = !pasteToggle; Call(fuel, "PasteValuesText", pasteToggle ? fuelPasteA : fuelPasteB, 0, size - 1, 0, size - 1); Drain(host);
+            });
             var selected = (HashSet<(int, int)>)Field(fuel, "pinnedFuelSelection");
             var toggle = false;
             Measure(size, "Fuel: changing full selection and layout", () => {

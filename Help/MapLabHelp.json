@@ -1,6 +1,6 @@
 {
   "title": "Map Lab Help",
-  "version": "1.0.3.6-beta",
+  "version": "1.0.3.7-beta",
   "topics": [
     {
       "id": "quick-start",
@@ -75,7 +75,7 @@
         "The Display Leading threshold takes priority over Display Trailing and Display Zeroes. With Display Leading set to 3, values below 100 can show the selected decimal precision, while values with three or more leading digits are displayed as rounded whole numbers. This display-only rounding does not alter the actual stored value.",
         "Display controls change only how values appear and never rewrite the underlying table values. Lowering Display precision can hide digits; raising it again reveals the original stored digits.",
         "Pasted values and direct single-cell or selected-group edits are stored as entered and are not rounded by display formatting or autosave. Select or focus a cell to see its underlying value.",
-        "Fueling, Timing, and Sandbox smoothing, interpolation, and offsets calculate from the full stored values. Their results are also stored independently of the selected Display precision.",
+        "Fueling, Timing, and Sandbox smoothing, auto-population, and offsets calculate from the full stored values. Their results are also stored independently of the selected Display precision.",
         "The display format is also used by the 3D value scale, 3D tooltip, and Excel number formatting. Clipboard and CSV data use the underlying stored values."
       ]
     },
@@ -92,7 +92,7 @@
         "Right-click one solid rectangular selection and choose Select transition ring to select an adjustable-width perimeter band while leaving its center unselected.",
         "Choose Highlight region of interest to retain a red rectangular outline after the normal selection is cleared.",
         "In Timing, Fueling, Learn Apply, or Sandbox, right-click a solid selected row, column, or rectangular block and choose Auto-populate selected cells. Rows interpolate between their left and right endpoints, columns interpolate between their top and bottom endpoints, and rectangular blocks create a surface anchored by their four corner values. Physical X/RPM and Y/MAP breakpoint spacing is respected.",
-        "Right-click a selection for Copy, Paste, Offset Selection, Auto-populate, smoothing, and clear commands.",
+        "Right-click a selection for Copy, Paste, Offset Selection, Auto-populate, smoothing, and Clear Selection. Clear Selection only deselects cells; it never changes table values.",
         "Offset Selection uses Numerical mode to add or subtract the entered table units. Percentage of value multiplies every selected cell by 1 plus or minus the entered percentage; for example, increasing 80 by 10% produces 88, while increasing it numerically by 10 produces 90. Offset results retain their underlying precision regardless of the Display settings, and each arrow click applies another offset to the current values.",
         "After pasting a complete table of cells, the selection is cleared."
       ]
@@ -119,13 +119,13 @@
       "category": "Smoothing",
       "title": "Rows, Columns, and Smooth Selected",
       "summary": "Choose the smoothing operation that matches the shape of the selection.",
-      "keywords": ["smooth", "rows", "columns", "smooth selected", "selection", "anchors", "interpolate"],
+        "keywords": ["smooth", "rows", "columns", "smooth selected", "selection", "anchors", "auto-populate"],
       "body": [
         "Smooth Rows reshapes every selected row between its left and right endpoints. It needs at least three columns and leaves the endpoint columns unchanged.",
         "Smooth Columns reshapes every selected column between its top and bottom endpoints. It needs at least three rows and leaves the endpoint rows unchanged.",
         "Smooth Selected opens Advanced Smoothing and operates on the exact selected cells, including separated Ctrl-selected areas.",
         "Rows and Columns operate across the rectangular selection bounds; use Advanced Smoothing for irregular selections.",
-        "Interpolate replaces selected interior values with transitions derived from the selected outer values while preserving the applicable anchors.",
+        "For a direct endpoint- or corner-anchored fill, right-click a solid selection and choose Auto-populate selected cells.",
         "All operations create an Undo step in the active table."
       ]
     },
@@ -211,7 +211,7 @@
         "VE Setup uses engine information and VE targets to create a preview before values are committed.",
         "Forced-induction setup displays MAP inputs in PSI and enables one-, two-, three-bar, or custom MAP sensor selection.",
         "The selected sensor rating proposes an editable maximum boost range. Apply MAP Range rescales only the Fueling MAP breakpoints.",
-        "When enabled, final wizard smoothing runs Smooth Columns and Smooth Rows after all contour generation and before preview.",
+        "When enabled, final wizard smoothing runs Smooth Rows and then Smooth Columns after all contour generation and before preview.",
         "Always review generated values before applying them to an ECU."
       ]
     },
@@ -248,15 +248,18 @@
       "category": "3D View",
       "title": "3D Viewing, Selection, and Sculpting",
       "summary": "Orbit, inspect, select, edit, and sculpt map surfaces.",
-      "keywords": ["3d", "orbit", "rotate", "zoom", "crosshair", "tooltip", "sculpt", "raise", "lower", "flatten", "surface"],
+      "keywords": ["3d", "orbit", "rotate", "pan", "zoom", "mouse", "touchpad", "laptop", "crosshair", "tooltip", "sculpt", "raise", "lower", "flatten", "surface"],
       "body": [
-        "Right-drag to orbit, use the mouse wheel to zoom, and stationary right-click to open selected-cell tools.",
+        "Use the Select, Orbit, and Pan controls at the top of every 3D viewer. The chosen mode assigns that action to left-drag, which makes the same tools practical with a mouse or laptop touchpad.",
+        "Choose Desktop mouse or Laptop touchpad in the viewer or Settings. The preference is global, is saved between sessions, and updates every open 3D viewer.",
+        "Desktop mouse shortcuts: right-drag orbits, middle-drag or Shift+right-drag pans, and the wheel zooms. A stationary right-click opens selected-cell tools.",
+        "Laptop touchpad shortcuts: Alt+left-drag orbits, Shift+left-drag pans, and two-finger scrolling zooms. The explicit Orbit and Pan modes work when modifier gestures are inconvenient.",
         "The lower-left orientation widget is a miniature surface using the same values, colors, contours, and rotation.",
         "Open 3D Map with no 2D selection to view the full table, or select one rectangular area of at least two rows by two columns to open a focused workspace.",
         "Hover for the live X/Y/value tooltip and crosshair. Left-click or left-drag selects surface cells; hold Ctrl to add separated cells or areas.",
         "Raise, Lower, Smooth, and Flatten sculpt while left-dragging. Radius follows actual breakpoint spacing and Strength controls blending.",
         "Sculpt changes preview during the drag and commit on mouse-up as one source-table Undo step. Press Escape before mouse-up to cancel.",
-        "Clear Selection or Return to Rotation deselects the 3D cells. Closing the viewer clears the corresponding 2D selection.",
+        "Clear Selection deselects cells without changing their values. The same non-destructive command appears in the 2D and 3D right-click menus. Closing the viewer clears the corresponding 2D selection.",
         "3D Undo and Redo operate on the viewer's source table."
       ]
     },
@@ -282,6 +285,7 @@
       "keywords": ["copy", "paste", "clipboard", "csv", "excel", "xlsx", "export", "conditional formatting"],
       "body": [
         "Copied cells use tab-separated rows and can be moved between Map Lab tables and compatible tuning software.",
+        "A full matrix paste is validated before any table value changes, commits as one Undo step, and clears the selection when complete.",
         "Select an axis starting point before pasting a copied row or column of breakpoints.",
         "CSV and Excel place the X or RPM scale at the bottom of the table.",
         "Excel includes heat-map conditional formatting matching the application and does not add header filters.",

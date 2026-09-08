@@ -29,17 +29,28 @@ Map Lab combines spreadsheet-style 2D tables with interactive 3D surfaces. It su
 - Adjustable matrix dimensions with independently editable X/RPM and Y/MAP breakpoint scales.
 - MAP units in PSI gauge or kPa absolute, plus custom axis units in Map Sandbox.
 - Drag selection, Ctrl+click/Ctrl+drag additive selection, group editing, and clipboard transfer to and from tuning software.
-- Standard row and column smoothing, interpolation, transition rings, smoothing to surroundings, and advanced shape-preserving or edge-preserving algorithms.
+- Standard row and column smoothing, transition rings, smoothing to surroundings, and advanced shape-preserving or edge-preserving algorithms.
 - In Fueling and Ignition Timing, Smoothing is positioned directly beside Cell Editing. Compact table names, current-file details, and live status descriptions are centered above each map.
 - Timing-region boundaries, regional profiles, and boost timing offsets calculated from each selected row's actual MAP breakpoint—even when the PSI scale is nonlinear.
 - VE setup wizard with naturally aspirated and forced-induction modes, configurable MAP sensors, preview, contour generation, and final whole-map smoothing.
 - Optional calculated lb/hr view for the Fueling table while retaining editable VE% source values.
-- Interactive 3D selection, crosshairs, tooltips, sculpting, and flatten/smooth-between-points tools.
+- Interactive 3D selection, crosshairs, tooltips, sculpting, flatten/smooth-between-points tools, focused workspaces, and persistent desktop-mouse or laptop-touchpad navigation profiles with explicit Select, Orbit, and Pan modes.
 - Independent Undo/Redo history for each table and its corresponding 3D viewer.
 - CSV and Excel export, including timing-value heat-map formatting in Excel.
 - One global heat-map palette, adjusted from Settings and shared by all 2D maps, 3D viewers, and Excel exports; each table scales the palette independently from its own minimum to maximum value.
 - `.map` workspace files, Save/Save As, automatic reopening of the last available file, recovery autosave, and a prompt for unsaved changes when closing.
 - Built-in Help with Contents, an alphabetical Index, live search, and `F1` access.
+
+## What's new in 1.0.3.7-beta
+
+- Added the Learn Apply table for signed VE corrections, optional smoothing during transfer, clearing choices, and complete Undo/Redo integration.
+- Added 3D Raise, Lower, Smooth, and Flatten sculpting, two-point path tools, and focused 3D workspaces opened from a selected rectangular area of a 2D table.
+- Expanded smoothing with transition-ring selection, Smooth to Surroundings, directional controls, and advanced algorithms for wrinkles, spikes, edges, and broad contours.
+- Streamlined the VE Setup wizard, corrected VE and estimated fuel-flow calculations, retained advanced VE targets, and made optional final smoothing match Smooth Rows followed by Smooth Columns.
+- Added an independent MAP unit control for Ignition Timing and improved table sizing, zooming, recent-file recovery, display precision, and clipboard-selection behavior.
+- Optimized full-matrix paste and Learn Apply rendering by validating and applying data in batches, reducing redraw work, and preserving a single atomic Undo step.
+
+See [CHANGELOG.md](CHANGELOG.md) for release details.
 
 ## Install Map Lab
 
@@ -61,7 +72,7 @@ The installer contains a self-contained 64-bit Windows build, so a separate .NET
 1. Choose **Fueling**, **Ignition Timing**, or **Map Sandbox**.
 2. Set the matrix dimensions and edit or paste the X and Y breakpoint scales.
 3. Paste a map, or drag across cells to select an area and enter values manually.
-4. Use the smoothing and interpolation tools where needed.
+4. Use the smoothing and auto-population tools where needed.
 5. Inspect the surface with **3D View**.
 6. Save the complete workspace as a `.map` file, or export an individual table to CSV or Excel.
 
@@ -87,9 +98,11 @@ For axis setup, select a continuous range or Ctrl-click its beginning and ending
 | `Enter` | Commit a cell or axis edit |
 | `Escape` | Cancel boundary selection or an active 3D sculpt preview |
 
+In each 3D viewer, choose **Select**, **Orbit**, or **Pan** to assign that action to left-drag. The global input profile can be changed in the viewer or Settings and is retained between sessions. Desktop mouse shortcuts are right-drag to orbit, middle-drag or Shift+right-drag to pan, and wheel to zoom. Laptop touchpad shortcuts are Alt+left-drag to orbit, Shift+left-drag to pan, and two-finger scroll to zoom. **Clear Selection** in a table or 3D right-click menu only deselects cells; it does not clear their values.
+
 ## Clipboard interoperability
 
-Map Lab accepts tab-, comma-, semicolon-, or whitespace-delimited numeric data. A complete copied table can be pasted into a selected block, while a single copied row or column can be pasted directly into a selected axis range. Pasted values and direct table-cell edits are retained as entered and are not rounded by display formatting or autosave. Display Leading, Display Trailing, and Display Zeroes control only how values appear; lowering and later restoring display precision reveals the original stored digits. The Display Leading threshold overrides decimal display settings: at the default value of 3, values with three or more leading digits appear rounded to a whole number without changing their actual stored value. Smoothing, interpolation, and offsets use and retain the underlying stored values. PSI axes can use one decimal place, while kPa and RPM normally use whole-number formatting.
+Map Lab accepts tab-, comma-, semicolon-, or whitespace-delimited numeric data. A complete copied table can be pasted into a selected block, while a single copied row or column can be pasted directly into a selected axis range. Full table pastes are validated before values change, applied as one Undo operation, and clear the selection after completion. Pasted values and direct table-cell edits are retained as entered and are not rounded by display formatting or autosave. Display Leading, Display Trailing, and Display Zeroes control only how values appear; lowering and later restoring display precision reveals the original stored digits. The Display Leading threshold overrides decimal display settings: at the default value of 3, values with three or more leading digits appear rounded to a whole number without changing their actual stored value. Smoothing, auto-population, and offsets use and retain the underlying stored values. PSI axes can use one decimal place, while kPa and RPM normally use whole-number formatting.
 
 The axis orientation used by Map Lab is:
 
@@ -121,7 +134,7 @@ pwsh -NoProfile -File .\scripts\build-inno-installer.ps1
 
 The script publishes a self-contained `win-x64` application and writes the setup program under `artifacts\inno\installer`. If Inno Setup is installed in a nonstandard location, supply `-CompilerPath` with the full path to `ISCC.exe`.
 
-The current source tree identifies the development build as **1.0.3.6-beta**. Check the [Releases page](https://github.com/MrFrickinFixit/MapLab/releases) for the latest published package.
+The current source tree identifies the development build as **1.0.3.7-beta**. Check the [Releases page](https://github.com/MrFrickinFixit/MapLab/releases) for the latest published package.
 
 ## Repository layout
 
@@ -133,6 +146,7 @@ The current source tree identifies the development build as **1.0.3.6-beta**. Ch
 | `Surface3DWindow.cs` | Interactive 3D surface viewer and editor |
 | `AdvancedSmoother.cs` | Advanced smoothing implementations |
 | `Help/MapLabHelp.json` | Searchable in-application help content |
+| `CHANGELOG.md` | Versioned release notes and performance highlights |
 | `Installer/MapLab.iss` | Full Inno Setup installer definition |
 | `scripts/` | Build, validation, performance, and feature test scripts |
 

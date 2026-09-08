@@ -9,6 +9,8 @@ namespace TimingTableCalculator;
 
 public enum SurfaceSelectionAction { Undo, Redo, Copy, Paste, Offset, SelectRing, Smooth, Refine, Advanced, SmoothRows, SmoothColumns, FlattenPath, SmoothPath, Clear }
 
+internal enum SurfaceNavigationMode { Select, Orbit, Pan }
+
 public sealed class Surface3DWindow : Window
 {
     private readonly PerspectiveCamera camera;
@@ -16,8 +18,14 @@ public sealed class Surface3DWindow : Window
     private readonly AxisAngleRotation3D pitch = new(new Vector3D(1, 0, 0), 0);
     private readonly Viewport3D viewport;
     private readonly Canvas overlayLayer = new() { IsHitTestVisible = false, ClipToBounds = true };
-    private Point lastPoint, orbitStartPoint;
-    private bool rotating, orbitDragged, suppressNextContextMenu, selectingSurface;
+    private Point lastPoint, navigationStartPoint;
+    private bool rotating, panning, navigationDragged, suppressNextContextMenu, selectingSurface;
+    private Point3D cameraTarget = new(0, 3, 0);
+    private SurfaceNavigationMode navigationMode = SurfaceNavigationMode.Select;
+    private Surface3DInputProfile inputProfile;
+    private readonly Dictionary<SurfaceNavigationMode, ToggleButton> navigationButtons = [];
+    private ComboBox inputProfileBox = null!;
+    private TextBlock navigationHelp = null!;
     private readonly double[,] values;
     private readonly int rows, cols;
     private readonly double[] rpmAxis, mapAxis;
@@ -77,15 +85,19 @@ public sealed class Surface3DWindow : Window
         var heading = new StackPanel { Margin = new Thickness(4, 0, 0, 14) };
         heading.Children.Add(new TextBlock { Text = windowTitle.ToUpperInvariant(), Foreground = new SolidColorBrush(Color.FromRgb(85, 214, 190)), FontSize = 12, FontWeight = FontWeights.Bold });
         heading.Children.Add(new TextBlock { Text = $"{rpm.First().ToString(rpmFormat)}–{rpm.Last().ToString(rpmFormat)} {rpmAxisTitle}  •  {FormatMap(map.Last())}–{FormatMap(map.First())} {mapUnit}", Foreground = Brushes.White, FontSize = 22, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 0) });
-        var selectionControls = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
+        inputProfile = Surface3DNavigationPreferences.Current;
+        Surface3DNavigationPreferences.Changed += ApplyInputProfilePreference;
+        Closed += (_, _) => Surface3DNavigationPreferences.Changed -= ApplyInputProfilePreference;
+        heading.Children.Add(CreateNavigationControls());
+        var selectionControls = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 7, 0, 0) };
         var undoButton = new Button { Content = "↶  Undo", Padding = new Thickness(12, 6, 12, 6), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White };
         var redoButton = new Button { Content = "↷  Redo", Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(8, 0, 0, 0), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White };
-        selectButton = new Button { Content = "Clear selection", Padding = new Thickness(12, 6, 12, 6), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White, ToolTip = "Clear all selected surface cells. Left-drag selects; right-drag rotates." };
+        selectButton = new Button { Content = "Clear Selection", Padding = new Thickness(12, 6, 12, 6), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White, ToolTip = "Deselect all surface cells without changing their values." };
         selectButton.Margin = new Thickness(16, 0, 0, 0);
         smoothButton = new Button { Content = "Smooth selected…", Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(8, 0, 0, 0), Background = new SolidColorBrush(Color.FromRgb(54, 199, 173)), Foreground = Brushes.Black, FontWeight = FontWeights.Bold, IsEnabled = false };
         flattenPathButton = new Button { Content = "↗  Flatten path", Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(8, 0, 0, 0), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(72, 82, 95)), ToolTip = "Select exactly two cells. Interior cells become a straight value ramp; endpoints stay fixed." };
         smoothPathButton = new Button { Content = "∿  Smooth path", Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(8, 0, 0, 0), Background = new SolidColorBrush(Color.FromRgb(28, 38, 53)), Foreground = Brushes.White, BorderBrush = new SolidColorBrush(Color.FromRgb(72, 82, 95)), ToolTip = "Select exactly two cells. Smooth only the cells along the path; endpoints stay fixed." };
-        selectionStatus = new TextBlock { Text = "Left-drag selects  •  right-drag rotates", Foreground = new SolidColorBrush(Color.FromRgb(143, 161, 184)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
+        selectionStatus = new TextBlock { Text = NavigationStatusText(), Foreground = new SolidColorBrush(Color.FromRgb(143, 161, 184)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0) };
         undoButton.IsEnabled = redoButton.IsEnabled = selectionAction is not null;
         undoButton.Click += (_, _) => RunHistoryAction(SurfaceSelectionAction.Undo); redoButton.Click += (_, _) => RunHistoryAction(SurfaceSelectionAction.Redo);
         selectButton.Click += (_, _) => ClearSurfaceSelection();
@@ -101,9 +113,11 @@ public sealed class Surface3DWindow : Window
         if (selectionAction is not null) viewport.ContextMenu = CreateSelectionContextMenu();
         viewport.ContextMenuOpening += (_, e) => { if (suppressNextContextMenu) { suppressNextContextMenu = false; e.Handled = true; } };
         viewport.MouseLeftButtonDown += (_, e) => BeginLeftPointer(viewport, e);
-        viewport.MouseLeftButtonUp += (_, _) => EndLeftPointer(viewport);
-        viewport.MouseRightButtonDown += (_, e) => BeginOrbit(viewport, e);
-        viewport.MouseRightButtonUp += (_, e) => EndOrbit(viewport, e);
+        viewport.MouseLeftButtonUp += (_, e) => EndLeftPointer(viewport, e);
+        viewport.MouseRightButtonDown += (_, e) => { if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0) BeginPan(viewport, e); else BeginOrbit(viewport, e); };
+        viewport.MouseRightButtonUp += (_, e) => EndNavigation(viewport, e, true);
+        viewport.MouseDown += (_, e) => { if (e.ChangedButton == MouseButton.Middle) BeginPan(viewport, e); };
+        viewport.MouseUp += (_, e) => { if (e.ChangedButton == MouseButton.Middle) EndNavigation(viewport, e, false); };
         viewport.MouseMove += (_, e) => { MovePointer(viewport, e); UpdateHover(viewport, e.GetPosition(viewport)); };
         viewport.MouseLeave += (_, _) => ClearHover();
         viewport.MouseWheel += (_, e) => Zoom(e.Delta);
@@ -136,8 +150,8 @@ public sealed class Surface3DWindow : Window
         var viewportHost = new Grid(); viewportHost.Children.Add(viewport); viewportHost.Children.Add(overlayLayer);
         var frame = new Border { Background = new SolidColorBrush(Color.FromRgb(10, 16, 25)), BorderBrush = new SolidColorBrush(Color.FromRgb(36, 50, 71)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Child = viewportHost };
         Grid.SetRow(frame, 1); root.Children.Add(frame);
-        var help = new TextBlock { Text = "Left-drag selects  •  Right-drag rotates  •  Ctrl+click or Ctrl+drag adds another area  •  Right-click opens tools  •  Wheel zooms", Foreground = new SolidColorBrush(Color.FromRgb(118, 135, 156)), FontSize = 12, Margin = new Thickness(4, 12, 0, 0) };
-        Grid.SetRow(help, 2); root.Children.Add(help); Content = root;
+        navigationHelp = new TextBlock { Text = NavigationHelpText(), Foreground = new SolidColorBrush(Color.FromRgb(118, 135, 156)), FontSize = 12, Margin = new Thickness(4, 12, 0, 0), TextWrapping = TextWrapping.Wrap };
+        Grid.SetRow(navigationHelp, 2); root.Children.Add(navigationHelp); Content = root;
         viewport.Loaded += (_, _) => UpdateScaleOverlayPositions();
         viewport.SizeChanged += (_, _) => UpdateScaleOverlayPositions();
     }
@@ -189,7 +203,9 @@ public sealed class Surface3DWindow : Window
         menu.Items.Add(ActionItem("Flatten between two selected points", SurfaceSelectionAction.FlattenPath));
         menu.Items.Add(ActionItem("Smooth between two selected points", SurfaceSelectionAction.SmoothPath));
         menu.Items.Add(new Separator());
-        menu.Items.Add(ActionItem("Clear selected", SurfaceSelectionAction.Clear));
+        var clearSelection = new MenuItem { Header = "Clear Selection" };
+        clearSelection.Click += (_, _) => ClearSurfaceSelection();
+        menu.Items.Add(clearSelection);
         menu.Opened += (_, _) => menu.IsOpen = SelectedSurfaceCells().Count > 0;
         return menu;
     }
@@ -554,9 +570,10 @@ public sealed class Surface3DWindow : Window
     {
         CancelSculptStroke();
         var enable = sculptMode != mode;
-        selectingSurface = rotating = false;
+        selectingSurface = rotating = panning = false;
+        if (enable) { navigationMode = SurfaceNavigationMode.Select; UpdateNavigationButtons(); }
         SetSculptMode(enable ? mode : null);
-        selectionStatus.Text = enable ? $"{mode} sculpt ready  •  left-drag on the surface  •  right-drag rotates" : "Left-drag selects  •  right-drag rotates";
+        selectionStatus.Text = enable ? $"{mode} sculpt ready  •  left-drag on the surface  •  right-drag rotates" : NavigationStatusText();
     }
 
     private void SetSculptMode(SurfaceSculptMode? mode)
@@ -607,8 +624,9 @@ public sealed class Surface3DWindow : Window
         selectionStatus.Text = $"{sculptMode} sculpt preview  •  {sculptedCells.Count} cells  •  {range}";
     }
 
-    private void EndLeftPointer(Viewport3D target)
+    private void EndLeftPointer(Viewport3D target, MouseButtonEventArgs e)
     {
+        if (rotating || panning) { EndNavigation(target, e, false); return; }
         if (sculptingSurface) FinishSculptStroke();
         selectingSurface = false;
         if (ReferenceEquals(Mouse.Captured, target)) target.ReleaseMouseCapture();
@@ -654,8 +672,79 @@ public sealed class Surface3DWindow : Window
         CancelSculptStroke();
         selectionStart = selectionEnd = null; pinnedSurfaceSelection.Clear(); selectingSurface = false;
         selectionVisual.Content = null; UpdateSelectionActionState(); UpdateSculptSelectionState();
-        selectionStatus.Text = sculptMode is null ? "Selection cleared  •  left-drag selects  •  right-drag rotates" : $"Selection cleared  •  {sculptMode} sculpt ready";
+        selectionStatus.Text = sculptMode is null ? $"Selection cleared  •  {NavigationStatusText().ToLowerInvariant()}" : $"Selection cleared  •  {sculptMode} sculpt ready";
     }
+
+    private FrameworkElement CreateNavigationControls()
+    {
+        var panel = new WrapPanel { Margin = new Thickness(0, 9, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        panel.Children.Add(new TextBlock { Text = "3D NAVIGATION", Foreground = UiBrushCache.Cruise, FontSize = 11, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 9, 4) });
+        foreach (var mode in Enum.GetValues<SurfaceNavigationMode>())
+        {
+            var button = new ToggleButton { Content = mode == SurfaceNavigationMode.Select ? "▦  Select" : mode == SurfaceNavigationMode.Orbit ? "⟳  Orbit" : "✥  Pan", MinWidth = 76, Height = 29, Padding = new Thickness(9, 3, 9, 3), Margin = new Thickness(0, 0, 5, 4), Foreground = Brushes.White, Background = UiBrushCache.GridLine, BorderBrush = UiBrushCache.AxisLine, ToolTip = $"Use left-drag to {mode.ToString().ToLowerInvariant()} in the 3D view." };
+            button.Click += (_, _) => SetNavigationMode(mode);
+            navigationButtons[mode] = button; panel.Children.Add(button);
+        }
+        inputProfileBox = new ComboBox { Width = 156, Height = 29, Margin = new Thickness(8, 0, 0, 4), Padding = new Thickness(5, 2, 5, 2), Background = Brushes.White, Foreground = Brushes.Black, ToolTip = "Choose mouse-friendly or touchpad-friendly shortcut hints. This preference is remembered." };
+        inputProfileBox.Items.Add("Desktop mouse"); inputProfileBox.Items.Add("Laptop touchpad");
+        inputProfileBox.SelectedIndex = inputProfile == Surface3DInputProfile.DesktopMouse ? 0 : 1;
+        inputProfileBox.SelectionChanged += (_, _) =>
+        {
+            inputProfile = inputProfileBox.SelectedIndex == 1 ? Surface3DInputProfile.LaptopTouchpad : Surface3DInputProfile.DesktopMouse;
+            Surface3DNavigationPreferences.Current = inputProfile;
+            UpdateNavigationPresentation();
+        };
+        panel.Children.Add(inputProfileBox);
+        UpdateNavigationButtons();
+        return panel;
+    }
+
+    private void ApplyInputProfilePreference(Surface3DInputProfile profile)
+    {
+        inputProfile = profile;
+        if (inputProfileBox is not null)
+        {
+            var selectedIndex = profile == Surface3DInputProfile.DesktopMouse ? 0 : 1;
+            if (inputProfileBox.SelectedIndex != selectedIndex) inputProfileBox.SelectedIndex = selectedIndex;
+        }
+        UpdateNavigationPresentation();
+    }
+
+    private void SetNavigationMode(SurfaceNavigationMode mode)
+    {
+        CancelSculptStroke();
+        if (sculptMode is not null) SetSculptMode(null);
+        selectingSurface = rotating = panning = false;
+        navigationMode = mode;
+        UpdateNavigationButtons();
+        UpdateNavigationPresentation();
+    }
+
+    private void UpdateNavigationButtons()
+    {
+        foreach (var (mode, button) in navigationButtons)
+        {
+            button.IsChecked = mode == navigationMode;
+            button.Background = mode == navigationMode ? new SolidColorBrush(Color.FromRgb(0, 103, 192)) : UiBrushCache.GridLine;
+        }
+    }
+
+    private void UpdateNavigationPresentation()
+    {
+        if (selectionStatus is not null && sculptMode is null) selectionStatus.Text = NavigationStatusText();
+        if (navigationHelp is not null) navigationHelp.Text = NavigationHelpText();
+    }
+
+    private string NavigationStatusText() => navigationMode switch
+    {
+        SurfaceNavigationMode.Orbit => "Orbit mode  •  left-drag rotates",
+        SurfaceNavigationMode.Pan => "Pan mode  •  left-drag moves the view",
+        _ => inputProfile == Surface3DInputProfile.DesktopMouse ? "Select mode  •  right-drag rotates  •  middle-drag pans" : "Select mode  •  use Orbit or Pan for touchpad dragging"
+    };
+
+    private string NavigationHelpText() => inputProfile == Surface3DInputProfile.DesktopMouse
+        ? "Select mode: left-drag cells  •  Right-drag orbit  •  Middle-drag or Shift+right-drag pan  •  Ctrl adds another selection  •  Wheel zoom"
+        : "Touchpad: choose Select, Orbit, or Pan, then left-drag  •  Alt+left-drag orbits  •  Shift+left-drag pans  •  Two-finger scroll zooms";
 
     internal void SetHeatColors(bool enabled, Color low, Color high)
     {
@@ -665,6 +754,14 @@ public sealed class Surface3DWindow : Window
 
     private void BeginLeftPointer(Viewport3D viewport, MouseButtonEventArgs e)
     {
+        if (navigationMode == SurfaceNavigationMode.Orbit || (Keyboard.Modifiers & ModifierKeys.Alt) != 0)
+        {
+            BeginOrbit(viewport, e); e.Handled = true; return;
+        }
+        if (navigationMode == SurfaceNavigationMode.Pan || (Keyboard.Modifiers & ModifierKeys.Shift) != 0)
+        {
+            BeginPan(viewport, e); e.Handled = true; return;
+        }
         var point = e.GetPosition(viewport);
         if (sculptMode is not null)
         {
@@ -684,17 +781,27 @@ public sealed class Surface3DWindow : Window
     private void BeginOrbit(Viewport3D target, MouseButtonEventArgs e)
     {
         CancelSculptStroke();
-        orbitStartPoint = lastPoint = e.GetPosition(target); orbitDragged = false; suppressNextContextMenu = false; rotating = true;
+        navigationStartPoint = lastPoint = e.GetPosition(target); navigationDragged = false; suppressNextContextMenu = false; rotating = true; panning = false;
         target.CaptureMouse();
     }
 
-    private void EndOrbit(Viewport3D target, MouseButtonEventArgs e)
+    private void BeginPan(Viewport3D target, MouseButtonEventArgs e)
     {
-        rotating = false;
+        CancelSculptStroke();
+        navigationStartPoint = lastPoint = e.GetPosition(target); navigationDragged = false; suppressNextContextMenu = false; panning = true; rotating = false;
+        target.CaptureMouse();
+    }
+
+    private void EndNavigation(Viewport3D target, MouseButtonEventArgs e, bool mayOpenContextMenu)
+    {
+        var wasRotating = rotating; var wasPanning = panning;
+        rotating = panning = false;
         if (ReferenceEquals(Mouse.Captured, target)) target.ReleaseMouseCapture();
-        if (!orbitDragged) return;
-        suppressNextContextMenu = true; e.Handled = true;
-        selectionStatus.Text = sculptMode is null ? "View rotated  •  left-drag selects" : $"View rotated  •  {sculptMode} sculpt remains active";
+        if (!navigationDragged) return;
+        if (mayOpenContextMenu) suppressNextContextMenu = true;
+        e.Handled = true;
+        var action = wasPanning ? "panned" : wasRotating ? "rotated" : "changed";
+        selectionStatus.Text = sculptMode is null ? $"View {action}  •  {NavigationStatusText().ToLowerInvariant()}" : $"View {action}  •  {sculptMode} sculpt remains active";
     }
 
     private void MovePointer(Viewport3D viewport, MouseEventArgs e)
@@ -702,8 +809,13 @@ public sealed class Surface3DWindow : Window
         var point = e.GetPosition(viewport);
         if (rotating)
         {
-            if (!orbitDragged && (Math.Abs(point.X - orbitStartPoint.X) >= SystemParameters.MinimumHorizontalDragDistance || Math.Abs(point.Y - orbitStartPoint.Y) >= SystemParameters.MinimumVerticalDragDistance)) orbitDragged = true;
+            if (!navigationDragged && (Math.Abs(point.X - navigationStartPoint.X) >= SystemParameters.MinimumHorizontalDragDistance || Math.Abs(point.Y - navigationStartPoint.Y) >= SystemParameters.MinimumVerticalDragDistance)) navigationDragged = true;
             Rotate(point);
+        }
+        else if (panning)
+        {
+            if (!navigationDragged && (Math.Abs(point.X - navigationStartPoint.X) >= SystemParameters.MinimumHorizontalDragDistance || Math.Abs(point.Y - navigationStartPoint.Y) >= SystemParameters.MinimumVerticalDragDistance)) navigationDragged = true;
+            Pan(point);
         }
         else if (sculptingSurface)
         {
@@ -853,6 +965,20 @@ public sealed class Surface3DWindow : Window
         pitch.Angle = Math.Clamp(pitch.Angle, -80, 80); lastPoint = point; UpdateScaleOverlayPositions();
     }
 
+    private void Pan(Point point)
+    {
+        if (!panning || viewport.ActualHeight <= 0) return;
+        var forward = camera.LookDirection; if (forward.Length < .001) return; forward.Normalize();
+        var up = camera.UpDirection; if (up.Length < .001) return; up.Normalize();
+        var right = Vector3D.CrossProduct(forward, up); if (right.Length < .001) return; right.Normalize();
+        var trueUp = Vector3D.CrossProduct(right, forward); trueUp.Normalize();
+        var distance = (camera.Position - cameraTarget).Length;
+        var unitsPerPixel = 2 * distance * Math.Tan(camera.FieldOfView * Math.PI / 360) / viewport.ActualHeight;
+        var shift = right * (-(point.X - lastPoint.X) * unitsPerPixel) + trueUp * ((point.Y - lastPoint.Y) * unitsPerPixel);
+        camera.Position += shift; cameraTarget += shift; camera.LookDirection = cameraTarget - camera.Position;
+        lastPoint = point; UpdateScaleOverlayPositions();
+    }
+
     private TextBlock AddScaleOverlay(string text, Point3D localPosition, bool title = false)
     {
         var label = new TextBlock
@@ -997,10 +1123,10 @@ public sealed class Surface3DWindow : Window
 
     private void Zoom(int delta)
     {
-        var direction = camera.Position - new Point3D(0, 3, 0); var scale = delta > 0 ? .88 : 1.12;
-        var next = new Point3D(direction.X * scale, 3 + direction.Y * scale, direction.Z * scale);
-        if ((next - new Point3D(0, 3, 0)).Length is > 13 and < 55) camera.Position = next;
-        camera.LookDirection = new Point3D(0, 3, 0) - camera.Position;
+        var direction = camera.Position - cameraTarget; var scale = delta > 0 ? .88 : 1.12;
+        var next = cameraTarget + direction * scale;
+        if ((next - cameraTarget).Length is > 13 and < 55) camera.Position = next;
+        camera.LookDirection = cameraTarget - camera.Position;
         UpdateScaleOverlayPositions();
     }
 }

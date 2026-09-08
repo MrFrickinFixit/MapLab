@@ -508,7 +508,7 @@ public sealed class FuelingPanel : Grid
             AddAxisEditor(map[row], row, 1, true, row);
             for (var col = 0; col < rpm.Length; col++)
             {
-                var cell = new TextBox { Tag = (row, col), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = Brushes.Black, BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), Padding = new Thickness(1, 0, 1, 0) };
+                var cell = new TextBox { Tag = (row, col), ToolTip = "", TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = Brushes.Black, BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), Padding = new Thickness(1, 0, 1, 0) };
                 cell.ToolTipOpening += (_, _) => { var point = ((int Row, int Col))cell.Tag; UpdateFuelCellToolTip(point.Row, point.Col); };
                 cell.PreviewMouseLeftButtonDown += CellDown; cell.MouseEnter += CellEnter; cell.PreviewMouseRightButtonDown += CellRightClick; cell.ContextMenu = CreateContextMenu();
                 cell.GotKeyboardFocus += (_, _) =>
@@ -563,7 +563,7 @@ public sealed class FuelingPanel : Grid
     {
         var menu = new ContextMenu(); menu.Items.Add(Item("Copy selected", (_, _) => CopySelection())); menu.Items.Add(Item("Paste", (_, _) => PasteSelection())); menu.Items.Add(Item("Offset selection…", OffsetSelection)); menu.Items.Add(Item("Auto-populate selected cells", AutoPopulateFuelCells)); menu.Items.Add(Item("Select transition ring…", SelectTransitionRing)); menu.Items.Add(Item("Highlight region of interest", HighlightRegionOfInterest)); menu.Items.Add(Item("Clear region of interest", ClearRegionOfInterest)); menu.Items.Add(new Separator());
         menu.Items.Add(Item("Smooth selected…", AdvancedSmooth)); menu.Items.Add(Item("Smooth rows", SmoothRows)); menu.Items.Add(Item("Smooth columns", SmoothColumns));
-        menu.Items.Add(new Separator()); menu.Items.Add(Item("Clear selected", ClearSelected)); return menu;
+        menu.Items.Add(new Separator()); menu.Items.Add(Item("Clear Selection", (_, _) => ClearFuelSelection())); return menu;
     }
     private void AutoPopulateFuelCells(object? sender, RoutedEventArgs e)
     {
@@ -679,26 +679,38 @@ public sealed class FuelingPanel : Grid
         if (showFuelFlow) { Info("Pasting is available in VE% view. Clear 'View as lb/hr' before pasting fuel-table values."); return; }
         if (!Bounds(out var top, out var bottom, out var left, out var right)) { Info("Select the first destination fuel cell or destination area."); return; }
         string text; try { if (!Clipboard.ContainsText()) return; text = Clipboard.GetText().Trim(); } catch { Info("The clipboard is currently unavailable."); return; }
+        PasteValuesText(text, top, bottom, left, right);
+    }
+
+    internal void PasteValuesText(string text, int top, int bottom, int left, int right)
+    {
+        if (showFuelFlow) { Info("Pasting is available in VE% view. Clear 'View as lb/hr' before pasting fuel-table values."); return; }
+        if (top < 0 || bottom < top || bottom >= map.Length || left < 0 || right < left || right >= rpm.Length) { Info("Select the first destination fuel cell or destination area."); return; }
         var rows = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(line => line.Split(line.Contains('\t') ? '\t' : ',', StringSplitOptions.TrimEntries)).ToArray();
         if (rows.Length == 0) return;
-        PushUndo();
+        var parsed = new double[rows.Length][];
+        for (var sourceRow = 0; sourceRow < rows.Length; sourceRow++)
+        {
+            parsed[sourceRow] = new double[rows[sourceRow].Length];
+            for (var sourceCol = 0; sourceCol < rows[sourceRow].Length; sourceCol++)
+                if (!double.TryParse(rows[sourceRow][sourceCol], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed[sourceRow][sourceCol]) || !double.IsFinite(parsed[sourceRow][sourceCol]))
+                { Info("Clipboard cells must contain numeric values."); return; }
+        }
+        PushUndo(); var changed = 0;
         if (rows.Length == 1 && rows[0].Length == 1)
         {
-            if (!double.TryParse(rows[0][0], NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || !double.IsFinite(value)) { Info("Clipboard cells must contain numeric values."); return; }
-            for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) ve[row, col] = value;
+            for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) { ve[row, col] = parsed[0][0]; changed++; }
         }
         else
         {
             for (var sourceRow = 0; sourceRow < rows.Length && top + sourceRow < map.Length; sourceRow++)
             for (var sourceCol = 0; sourceCol < rows[sourceRow].Length && left + sourceCol < rpm.Length; sourceCol++)
             {
-                if (!double.TryParse(rows[sourceRow][sourceCol], NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || !double.IsFinite(value)) { Info("Clipboard cells must contain numeric values."); return; }
-                var row = top + sourceRow; var col = left + sourceCol; ve[row, col] = value;
+                var row = top + sourceRow; var col = left + sourceCol; ve[row, col] = parsed[sourceRow][sourceCol]; changed++;
             }
-            end = (Math.Min(map.Length - 1, top + rows.Length - 1), Math.Min(rpm.Length - 1, left + rows.Max(row => row.Length) - 1));
         }
-        Save(); RefreshAll(); ClearFuelSelection(); status.Text = "Fuel values pasted exactly as supplied  •  selection cleared";
+        Save(); pinnedFuelSelection.Clear(); start = end = null; selecting = false; RefreshAllAndBoundaries(); status.Text = $"Pasted {changed} fuel values exactly as supplied  •  selection cleared";
     }
 
     private void ClearFuelSelection()
@@ -920,15 +932,20 @@ public sealed class FuelingPanel : Grid
         ve = (double[,])snapshot.Values.Clone();
     }
 
-    private void RefreshAll()
+    private void RefreshAll() => RefreshAllCore(false);
+    private void RefreshAllAndBoundaries() => RefreshAllCore(true);
+    private void RefreshAllCore(bool refreshBorders)
     {
         if (cells.Length == 0) return;
         loading = true; var displayed = showFuelFlow ? DisplayValues() : ve; displayedValues = displayed; var (min, max) = ValueRange(displayed); var span = Math.Max(.1, max - min);
         for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++)
         {
-            var value = displayed[row, col]; cells[row, col].Text = showFuelFlow ? value.ToString("0.0", CultureInfo.InvariantCulture) : FormatVeDisplayValue(value);
-            cells[row, col].IsReadOnly = showFuelFlow; cells[row, col].Background = heatPalette[(int)Math.Round(Math.Clamp((value - min) / span, 0, 1) * (heatPalette.Length - 1))];
-            UpdateFuelCellToolTip(row, col);
+            var value = displayed[row, col]; var text = showFuelFlow ? value.ToString("0.0", CultureInfo.InvariantCulture) : FormatVeDisplayValue(value);
+            if (cells[row, col].Text != text) cells[row, col].Text = text;
+            if (cells[row, col].IsReadOnly != showFuelFlow) cells[row, col].IsReadOnly = showFuelFlow;
+            var background = heatPalette[(int)Math.Round(Math.Clamp((value - min) / span, 0, 1) * (heatPalette.Length - 1))];
+            if (!ReferenceEquals(cells[row, col].Background, background)) cells[row, col].Background = background;
+            if (refreshBorders) { var boundary = IsBoundary(row, col); cells[row, col].BorderBrush = boundary ? Brushes.Black : UiBrushCache.GridLine; cells[row, col].BorderThickness = new Thickness(boundary ? TableLayoutMetrics.BoundaryThickness : .5); }
         }
         loading = false;
     }
@@ -936,7 +953,7 @@ public sealed class FuelingPanel : Grid
     private bool IsFuelCellSelected(int row, int col) => pinnedFuelSelection.Contains((row, col)) || Bounds(out var top, out var bottom, out var left, out var right) && row >= top && row <= bottom && col >= left && col <= right;
     private void PinActiveFuelSelection() { if (!Bounds(out var top, out var bottom, out var left, out var right)) return; for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) pinnedFuelSelection.Add((row, col)); }
     private HashSet<(int Row, int Col)> SelectedFuelCells() { var selected = new HashSet<(int Row, int Col)>(pinnedFuelSelection); if (Bounds(out var top, out var bottom, out var left, out var right)) for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) selected.Add((row, col)); return selected; }
-    private void UpdateSelection() { var selectedCells = SelectedFuelCells(); if (selectedCells.Count == 0) return; for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++) { var selected = selectedCells.Contains((row, col)); var boundary = IsBoundary(row, col); cells[row, col].BorderBrush = selected ? Brushes.White : boundary ? Brushes.Black : UiBrushCache.GridLine; cells[row, col].BorderThickness = new Thickness(selected ? 1.5 : boundary ? TableLayoutMetrics.BoundaryThickness : .5); } status.Text = $"Selected {selectedCells.Count} fuel cells"; }
+    private void UpdateSelection() { var selectedCells = SelectedFuelCells(); if (selectedCells.Count == 0) return; for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++) { var selected = selectedCells.Contains((row, col)); var boundary = IsBoundary(row, col); var brush = selected ? Brushes.White : boundary ? Brushes.Black : UiBrushCache.GridLine; var thickness = new Thickness(selected ? 1.5 : boundary ? TableLayoutMetrics.BoundaryThickness : .5); if (!ReferenceEquals(cells[row, col].BorderBrush, brush)) cells[row, col].BorderBrush = brush; if (cells[row, col].BorderThickness != thickness) cells[row, col].BorderThickness = thickness; } status.Text = $"Selected {selectedCells.Count} fuel cells"; }
     private void ApplyBoundaries()
     {
         idleBoundaryCol = Closest(rpm, idleBoundaryRpm); wotBoundaryRow = Closest(map, wotBoundaryMap);
@@ -948,7 +965,6 @@ public sealed class FuelingPanel : Grid
         for (var row = 0; row < map.Length; row++) for (var col = 0; col < rpm.Length; col++)
         {
             var boundary = IsBoundary(row, col); cells[row, col].BorderBrush = boundary ? Brushes.Black : UiBrushCache.GridLine; cells[row, col].BorderThickness = new Thickness(boundary ? TableLayoutMetrics.BoundaryThickness : .5);
-            UpdateFuelCellToolTip(row, col);
         }
         if (start is not null) UpdateSelection();
     }

@@ -2,7 +2,7 @@
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$assemblyPath = Join-Path $root 'bin\Release\net8.0-windows\MapLab-1.0.3.6-beta.dll'
+$assemblyPath = Join-Path $root 'bin\Release\net8.0-windows\MapLab-1.0.3.7-beta.dll'
 if (-not (Test-Path -LiteralPath $assemblyPath)) { throw "Release build is missing: $assemblyPath" }
 
 $assembly = [Reflection.Assembly]::LoadFrom($assemblyPath)
