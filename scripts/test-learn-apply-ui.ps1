@@ -34,12 +34,17 @@ $fuel.UpdateAxes($rpm,$map,'kPa absolute',1500,80)
 $model = $fuel.GetType().GetProperty('LearnApply',$flags).GetValue($fuel)
 $ve = [double[,]]::new(8,8)
 for ($r=0;$r -lt 8;$r++) { for ($c=0;$c -lt 8;$c++) { $ve[$r,$c]=80 } }
-$fuel.GetType().GetField('ve',$flags).SetValue($fuel,$ve)
+$fuel.GetType().GetField('ve',$flags).SetValue($fuel,$ve.Clone())
+$fuelPaste = $fuel.GetType().GetMethod('PasteValuesText',$flags)
+$fuelPaste.Invoke($fuel,@("81.125`t82.25`n83.375`t84.5",2,3,3,4)) | Out-Null
+$pastedVe = $fuel.GetType().GetField('ve',$flags).GetValue($fuel)
+$fuelUndo = $fuel.GetType().GetField('undoHistory',$flags).GetValue($fuel)
+if ($pastedVe[2,3] -ne 81.125 -or $pastedVe[2,4] -ne 82.25 -or $pastedVe[3,3] -ne 83.375 -or $pastedVe[3,4] -ne 84.5 -or $fuelUndo.Count -ne 1) { throw 'Batched fuel paste or its Undo snapshot failed' }
+$fuel.GetType().GetField('ve',$flags).SetValue($fuel,$ve.Clone()); $fuelUndo.Clear()
 $currentWithExternalEdit = $ve.Clone(); $currentWithExternalEdit[7,7] = 90; $fuel.GetType().GetField('ve',$flags).SetValue($fuel,$currentWithExternalEdit)
 $sculptedVe = $ve.Clone(); $sculptedVe[0,0] = 81.23456
 $sculptedCells = [ValueTuple[int,int][]]@([ValueTuple[int,int]]::new(0,0))
 $committedSculpt = $fuel.GetType().GetMethod('CommitFuel3DSculpt',$flags).Invoke($fuel,@($sculptedVe,$sculptedCells))
-$fuelUndo = $fuel.GetType().GetField('undoHistory',$flags).GetValue($fuel)
 $fuelUndoValues = $fuelUndo.Peek().Values
 if ($committedSculpt[0,0] -ne 81.23456 -or $committedSculpt[7,7] -ne 90 -or $fuelUndo.Count -ne 1 -or $fuelUndoValues[0,0] -ne 80 -or $fuelUndoValues[7,7] -ne 90) { throw "3D fuel sculpt mismatch: changed=$($committedSculpt[0,0]), unrelated=$($committedSculpt[7,7]), undo=$($fuelUndo.Count), undoChanged=$($fuelUndoValues[0,0]), undoUnrelated=$($fuelUndoValues[7,7])" }
 $fuel.GetType().GetMethod('CommitFuel3DSculpt',$flags).Invoke($fuel,@($committedSculpt,$sculptedCells)) | Out-Null
@@ -165,4 +170,4 @@ try {
 [xml]$xaml = Get-Content -LiteralPath (Join-Path $root 'MainWindow.xaml')
 $tabs = @($xaml.Window.TabControl.TabItem)
 if ($tabs[0].Header -ne 'FUELING' -or $tabs[1].Header -ne 'LEARN APPLY TABLE') { throw 'Incorrect tab placement' }
-'Learn Apply integration passed: full-precision fuel sculpt/history, partial/full pastes, deselection, underlying VE in lb/hr view, conversion refresh, full-table fuel Undo/Redo for plain and smoothed transfers even after clearing learn offsets, autosave/restore, .map validation, legacy import, MAP/precision sync, independent learn clear/Undo, dialog options and tab order.'
+'Learn Apply integration passed: batched fuel paste, full-precision fuel sculpt/history, partial/full learn pastes, deselection, underlying VE in lb/hr view, conversion refresh, full-table fuel Undo/Redo for plain and smoothed transfers even after clearing learn offsets, autosave/restore, .map validation, legacy import, MAP/precision sync, independent learn clear/Undo, dialog options and tab order.'

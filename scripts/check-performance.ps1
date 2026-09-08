@@ -9,7 +9,7 @@ if (-not (Test-Path -LiteralPath $assemblyPath)) { throw 'Build Release into art
 if (-not $Sizes.Count -or ($Sizes | Where-Object { $_ -lt 8 -or $_ -gt 64 })) { throw 'Sizes must be between 8 and 64.' }
 if ([IO.Path]::GetFileName($OutputName) -ne $OutputName) { throw 'OutputName must be a filename, not a path.' }
 $runnerProject = Join-Path $PSScriptRoot 'PerformanceCheck.csproj'
-dotnet build $runnerProject --configuration Release "-p:MapLabAssembly=$assemblyPath" -p:UseAppHost=false
+dotnet build $runnerProject --configuration Release --no-incremental "-p:MapLabAssembly=$assemblyPath" -p:UseAppHost=false
 if ($LASTEXITCODE -ne 0) { throw 'Performance runner build failed.' }
 $runner = Join-Path $root 'artifacts/performance-runner/Release/net8.0-windows/PerformanceCheck.dll'
 dotnet $runner (Join-Path $build $OutputName) @Sizes

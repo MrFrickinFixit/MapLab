@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $output = Join-Path $root "bin\$Configuration\net8.0-windows"
 [AppContext]::SetData('APP_CONTEXT_BASE_DIRECTORY', $output + [IO.Path]::DirectorySeparatorChar)
-$assemblyPath = Join-Path $output 'MapLab-1.0.3.6-beta.dll'
+$assemblyPath = Join-Path $output 'MapLab-1.0.3.7-beta.dll'
 if (-not (Test-Path -LiteralPath $assemblyPath)) { throw "Build Map Lab first: $assemblyPath" }
 
 $assembly = [Reflection.Assembly]::LoadFrom($assemblyPath)

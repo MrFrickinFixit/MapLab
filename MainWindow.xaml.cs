@@ -520,7 +520,7 @@ public partial class MainWindow : Window
     private TextBox CreateValueCell(double value, int row, int col)
     {
         timingValues[row, col] = RoundEditableTiming(value);
-        var cell = new TextBox { Tag = (row, col), Text = FormatTimingDisplayValue(timingValues[row, col]), Foreground = Brushes.Black, Background = TimingBrush(value), BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 11, FontWeight = FontWeights.SemiBold, Padding = new Thickness(2, 0, 2, 0) };
+        var cell = new TextBox { Tag = (row, col), ToolTip = "", Text = FormatTimingDisplayValue(timingValues[row, col]), Foreground = Brushes.Black, Background = TimingBrush(value), BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 11, FontWeight = FontWeights.SemiBold, Padding = new Thickness(2, 0, 2, 0) };
         cell.ToolTipOpening += (_, _) => { var point = ((int Row, int Col))cell.Tag; UpdateTimingCellToolTip(point.Row, point.Col); };
         cell.GotKeyboardFocus += (_, _) => { var point = ((int Row, int Col))cell.Tag; cell.Text = FormatStoredTimingValue(timingValues[point.Row, point.Col]); cellEditOriginalValues[cell] = cell.Text; if (IsInsideTimingSelection(point.Row, point.Col) && SelectedTimingCells().Count > 1) groupCellEditsAwaitingEnter.Add(cell); else groupCellEditsAwaitingEnter.Remove(cell); cell.Background = Brushes.White; cell.SelectAll(); }; cell.PreviewMouseLeftButtonDown += Cell_MouseDown; cell.MouseEnter += Cell_MouseEnter;
         cell.PreviewMouseRightButtonDown += TimingCell_RightClick; cell.ContextMenu = CreateTimingContextMenu();
@@ -761,8 +761,9 @@ public partial class MainWindow : Window
         {
             var selected = selectedCells.Contains((row, col));
             var marker = IsRegionMarker(row, col);
-            valueCells[row, col].BorderBrush = selected ? Brushes.White : RegionOrMarkerBrush(row, col);
-            valueCells[row, col].BorderThickness = new Thickness(selected ? 1.5 : marker ? TableLayoutMetrics.BoundaryThickness : .7);
+            var brush = selected ? Brushes.White : RegionOrMarkerBrush(row, col); var thickness = new Thickness(selected ? 1.5 : marker ? TableLayoutMetrics.BoundaryThickness : .7);
+            if (!ReferenceEquals(valueCells[row, col].BorderBrush, brush)) valueCells[row, col].BorderBrush = brush;
+            if (valueCells[row, col].BorderThickness != thickness) valueCells[row, col].BorderThickness = thickness;
         }
         StatusText.Text = $"Selected {selectedCells.Count} timing cells";
     }
@@ -1126,28 +1127,32 @@ public partial class MainWindow : Window
         var rows = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(line => line.Split(line.Contains('\t') ? '\t' : ',', StringSplitOptions.TrimEntries)).ToArray();
         if (rows.Length == 0 || rows.Any(row => row.Length == 0)) return;
+        var parsed = new double[rows.Length][];
+        for (var sourceRow = 0; sourceRow < rows.Length; sourceRow++)
+        {
+            parsed[sourceRow] = new double[rows[sourceRow].Length];
+            for (var sourceCol = 0; sourceCol < rows[sourceRow].Length; sourceCol++)
+                if (!double.TryParse(rows[sourceRow][sourceCol], NumberStyles.Float, CultureInfo.InvariantCulture, out parsed[sourceRow][sourceCol]) || !double.IsFinite(parsed[sourceRow][sourceCol]))
+                { ShowPasteFormatError(); return; }
+        }
 
         // A single clipboard value fills the entire selected rectangle; a matrix starts at its upper-left cell.
         var fillSelection = rows.Length == 1 && rows[0].Length == 1;
-        PushUndo();
-        var changed = 0;
+        var pastedCells = new bool[RowCount, ColumnCount]; PushUndo(); var changed = 0;
         if (fillSelection)
         {
-            if (!double.TryParse(rows[0][0], NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) { ShowPasteFormatError(); return; }
-            if (!double.IsFinite(value)) { ShowPasteFormatError(); return; }
-            for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) { SetPastedCellValue(row, col, value); changed++; }
+            for (var row = top; row <= bottom; row++) for (var col = left; col <= right; col++) { timingValues[row, col] = parsed[0][0]; pastedCells[row, col] = true; changed++; }
         }
         else
         {
             for (var sourceRow = 0; sourceRow < rows.Length && top + sourceRow < RowCount; sourceRow++)
             for (var sourceCol = 0; sourceCol < rows[sourceRow].Length && left + sourceCol < ColumnCount; sourceCol++)
             {
-                if (!double.TryParse(rows[sourceRow][sourceCol], NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || !double.IsFinite(value)) { ShowPasteFormatError(); return; }
-                SetPastedCellValue(top + sourceRow, left + sourceCol, value); changed++;
+                var row = top + sourceRow; var col = left + sourceCol;
+                timingValues[row, col] = parsed[sourceRow][sourceCol]; pastedCells[row, col] = true; changed++;
             }
-            selectionEnd = (Math.Min(RowCount - 1, top + rows.Length - 1), Math.Min(ColumnCount - 1, left + rows.Max(row => row.Length) - 1));
         }
-        SaveState(); ClearTimingSelection(); StatusText.Text = $"Pasted {changed} cells exactly as supplied  •  selection cleared";
+        ClearTimingSelection(false); RefreshTimingAfterPaste(pastedCells); SaveState(); StatusText.Text = $"Pasted {changed} cells exactly as supplied  •  selection cleared";
     }
 
     private bool TryGetSelectionBounds(out int top, out int bottom, out int left, out int right)
@@ -1178,6 +1183,20 @@ public partial class MainWindow : Window
         timingValues[row, col] = value;
         valueCells[row, col].Text = FormatTimingDisplayValue(value);
         RefreshCellColor(valueCells[row, col]);
+    }
+
+    private void RefreshTimingAfterPaste(bool[,] pastedCells)
+    {
+        idleMarkerCol = ClosestIndex(rpmAxis, idleTransitionRpm); wotMarkerRow = ClosestIndex(mapAxis, wotTransitionMap); UpdateTimingHeatRange();
+        for (var row = 0; row < RowCount; row++) for (var col = 0; col < ColumnCount; col++)
+        {
+            var cell = valueCells[row, col];
+            if (pastedCells[row, col]) cell.Text = FormatTimingDisplayValue(timingValues[row, col]);
+            cell.Background = TimingBrush(timingValues[row, col]);
+            var marker = col == idleMarkerCol || row == wotMarkerRow;
+            cell.BorderBrush = marker ? Brushes.Black : RegionBrush(row, col);
+            cell.BorderThickness = new Thickness(marker ? TableLayoutMetrics.BoundaryThickness : .7);
+        }
     }
 
     private static void ShowPasteFormatError() => MessageBox.Show("Clipboard cells must contain numeric timing values separated by tabs or commas.", "Cannot paste cells", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -1743,12 +1762,12 @@ public partial class MainWindow : Window
         return -1;
     }
 
-    private void ClearTimingSelection()
+    private void ClearTimingSelection(bool refreshVisuals = true)
     {
         if (selectionStart is null && selectionEnd is null && pinnedTimingSelection.Count == 0) return;
         pinnedTimingSelection.Clear();
         selectionStart = selectionEnd = null; selecting = false;
-        ApplyRegionVisualization();
+        if (refreshVisuals) ApplyRegionVisualization();
     }
 
     private void SelectAllMap_Click(object sender, RoutedEventArgs e) => SelectEntireAxis(true);

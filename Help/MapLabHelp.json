@@ -1,6 +1,6 @@
 {
   "title": "Map Lab Help",
-  "version": "1.0.3.6-beta",
+  "version": "1.0.3.7-beta",
   "topics": [
     {
       "id": "quick-start",
@@ -75,7 +75,7 @@
         "The Display Leading threshold takes priority over Display Trailing and Display Zeroes. With Display Leading set to 3, values below 100 can show the selected decimal precision, while values with three or more leading digits are displayed as rounded whole numbers. This display-only rounding does not alter the actual stored value.",
         "Display controls change only how values appear and never rewrite the underlying table values. Lowering Display precision can hide digits; raising it again reveals the original stored digits.",
         "Pasted values and direct single-cell or selected-group edits are stored as entered and are not rounded by display formatting or autosave. Select or focus a cell to see its underlying value.",
-        "Fueling, Timing, and Sandbox smoothing, interpolation, and offsets calculate from the full stored values. Their results are also stored independently of the selected Display precision.",
+        "Fueling, Timing, and Sandbox smoothing, auto-population, and offsets calculate from the full stored values. Their results are also stored independently of the selected Display precision.",
         "The display format is also used by the 3D value scale, 3D tooltip, and Excel number formatting. Clipboard and CSV data use the underlying stored values."
       ]
     },
@@ -119,13 +119,13 @@
       "category": "Smoothing",
       "title": "Rows, Columns, and Smooth Selected",
       "summary": "Choose the smoothing operation that matches the shape of the selection.",
-      "keywords": ["smooth", "rows", "columns", "smooth selected", "selection", "anchors", "interpolate"],
+        "keywords": ["smooth", "rows", "columns", "smooth selected", "selection", "anchors", "auto-populate"],
       "body": [
         "Smooth Rows reshapes every selected row between its left and right endpoints. It needs at least three columns and leaves the endpoint columns unchanged.",
         "Smooth Columns reshapes every selected column between its top and bottom endpoints. It needs at least three rows and leaves the endpoint rows unchanged.",
         "Smooth Selected opens Advanced Smoothing and operates on the exact selected cells, including separated Ctrl-selected areas.",
         "Rows and Columns operate across the rectangular selection bounds; use Advanced Smoothing for irregular selections.",
-        "Interpolate replaces selected interior values with transitions derived from the selected outer values while preserving the applicable anchors.",
+        "For a direct endpoint- or corner-anchored fill, right-click a solid selection and choose Auto-populate selected cells.",
         "All operations create an Undo step in the active table."
       ]
     },
@@ -211,7 +211,7 @@
         "VE Setup uses engine information and VE targets to create a preview before values are committed.",
         "Forced-induction setup displays MAP inputs in PSI and enables one-, two-, three-bar, or custom MAP sensor selection.",
         "The selected sensor rating proposes an editable maximum boost range. Apply MAP Range rescales only the Fueling MAP breakpoints.",
-        "When enabled, final wizard smoothing runs Smooth Columns and Smooth Rows after all contour generation and before preview.",
+        "When enabled, final wizard smoothing runs Smooth Rows and then Smooth Columns after all contour generation and before preview.",
         "Always review generated values before applying them to an ECU."
       ]
     },
@@ -282,6 +282,7 @@
       "keywords": ["copy", "paste", "clipboard", "csv", "excel", "xlsx", "export", "conditional formatting"],
       "body": [
         "Copied cells use tab-separated rows and can be moved between Map Lab tables and compatible tuning software.",
+        "A full matrix paste is validated before any table value changes, commits as one Undo step, and clears the selection when complete.",
         "Select an axis starting point before pasting a copied row or column of breakpoints.",
         "CSV and Excel place the X or RPM scale at the bottom of the table.",
         "Excel includes heat-map conditional formatting matching the application and does not add header filters.",

@@ -19,7 +19,10 @@ public sealed class AboutPanel : Grid
 
     public AboutPanel()
     {
-        var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0";
+        var assembly = Assembly.GetExecutingAssembly();
+        var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
+            ?? assembly.GetName().Version?.ToString()
+            ?? "1.0.0-beta";
         var dataPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimingTableCalculator");
         var root = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         var content = new StackPanel { MaxWidth = 920, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(20, 18, 20, 30) }; root.Content = content; Children.Add(root);

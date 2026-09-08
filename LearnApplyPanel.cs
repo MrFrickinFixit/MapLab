@@ -9,6 +9,8 @@ namespace TimingTableCalculator;
 
 public sealed class LearnApplyPanel : Grid
 {
+    private static readonly Brush[] PositivePalette = UiBrushCache.CreateLinearPalette(Color.FromRgb(245, 247, 249), Color.FromRgb(85, 200, 175));
+    private static readonly Brush[] NegativePalette = UiBrushCache.CreateLinearPalette(Color.FromRgb(245, 247, 249), Color.FromRgb(240, 115, 139));
     private readonly LearnApplyTable model;
     private readonly Func<bool, int> transfer;
     private readonly Grid table = new() { Background = UiBrushCache.GridLine, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
@@ -79,7 +81,8 @@ public sealed class LearnApplyPanel : Grid
             AddAxis(model.Map[row], row, 1);
             for (var col = 0; col < model.Rpm.Length; col++)
             {
-                var cell = new TextBox { Tag = (row, col), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 10, FontWeight = FontWeights.SemiBold, BorderThickness = new Thickness(.5), Padding = new Thickness(1, 0, 1, 0) };
+                var cell = new TextBox { Tag = (row, col), ToolTip = "", TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 10, FontWeight = FontWeights.SemiBold, BorderThickness = new Thickness(.5), Padding = new Thickness(1, 0, 1, 0) };
+                cell.ToolTipOpening += (_, _) => { var point = ((int Row, int Col))cell.Tag; UpdateCellToolTip(point.Row, point.Col); };
                 cell.PreviewMouseLeftButtonDown += CellDown;
                 cell.MouseEnter += (_, e) => { if (selecting && e.LeftButton == MouseButtonState.Pressed) SelectRectangle(((int Row, int Col))cell.Tag); };
                 cell.PreviewMouseRightButtonDown += (_, _) => { var point = ((int Row, int Col))cell.Tag; if (!selected.Contains(point)) { CommitPending(); selected.Clear(); selected.Add(point); RefreshSelection(); } };
@@ -98,21 +101,24 @@ public sealed class LearnApplyPanel : Grid
     private void Refresh()
     {
         if (geometryVersion != model.GeometryVersion) Build();
-        var max = Math.Max(1, model.ActiveCells().Select(point => Math.Abs(model.GetValue(point.Row, point.Col))).DefaultIfEmpty(0).Max());
+        var active = model.ActiveCells();
+        var max = Math.Max(1, active.Select(point => Math.Abs(model.GetValue(point.Row, point.Col))).DefaultIfEmpty(0).Max());
         for (var row = 0; row < model.Map.Length; row++) for (var col = 0; col < model.Rpm.Length; col++)
         {
             var value = model.GetValue(row, col); var cell = cells[row, col];
-            if (!ReferenceEquals(cell, pendingCell)) cell.Text = model.Format(value);
+            if (!ReferenceEquals(cell, pendingCell)) { var text = model.Format(value); if (cell.Text != text) cell.Text = text; }
             var t = Math.Min(1, Math.Abs(value) / max);
-            cell.Background = new SolidColorBrush(value >= 0 ? Color.FromRgb((byte)(245 - 160 * t), (byte)(247 - 47 * t), (byte)(249 - 74 * t)) : Color.FromRgb((byte)(245 - 5 * t), (byte)(247 - 132 * t), (byte)(249 - 110 * t)));
-            cell.Foreground = Brushes.Black;
-            cell.ToolTip = $"{model.Rpm[col]:0.########} RPM | {model.Map[row]:0.########} {model.MapUnit} | {Editable(value)}% VE offset";
+            var background = (value >= 0 ? PositivePalette : NegativePalette)[(int)Math.Round(t * (PositivePalette.Length - 1))];
+            if (!ReferenceEquals(cell.Background, background)) cell.Background = background;
+            if (!ReferenceEquals(cell.Foreground, Brushes.Black)) cell.Foreground = Brushes.Black;
         }
         RefreshSelection();
         undoButton.IsEnabled = model.CanUndo; redoButton.IsEnabled = model.CanRedo; transferButton.IsEnabled = model.Map.Length > 0 && model.Rpm.Length > 0;
-        summary.Text = $"{model.Rpm.Length} columns x {model.Map.Length} rows | {model.MapUnit} | {model.ActiveCount} nonzero offsets | Fueling precision: {model.TrailingDecimals} decimals below {model.LeadingDigits} leading digits";
+        summary.Text = $"{model.Rpm.Length} columns x {model.Map.Length} rows | {model.MapUnit} | {active.Count} nonzero offsets | Fueling precision: {model.TrailingDecimals} decimals below {model.LeadingDigits} leading digits";
         if (model.UnmatchedCount > 0) summary.Text += $" | {model.UnmatchedCount} retained offsets do not match the current axes and will not transfer";
     }
+
+    private void UpdateCellToolTip(int row, int col) => cells[row, col].ToolTip = $"{model.Rpm[col]:0.########} RPM | {model.Map[row]:0.########} {model.MapUnit} | {Editable(model.GetValue(row, col))}% VE offset";
 
     private void CellDown(object sender, MouseButtonEventArgs e)
     {
@@ -133,9 +139,13 @@ public sealed class LearnApplyPanel : Grid
     private void RefreshSelection()
     {
         for (var row = 0; row < cells.GetLength(0); row++) for (var col = 0; col < cells.GetLength(1); col++)
-        { cells[row, col].BorderBrush = selected.Contains((row, col)) ? Brushes.DodgerBlue : UiBrushCache.GridLine; cells[row, col].BorderThickness = new Thickness(selected.Contains((row, col)) ? 1.5 : .5); }
+        {
+            var isSelected = selected.Contains((row, col)); var brush = isSelected ? Brushes.DodgerBlue : UiBrushCache.GridLine; var thickness = new Thickness(isSelected ? 1.5 : .5);
+            if (!ReferenceEquals(cells[row, col].BorderBrush, brush)) cells[row, col].BorderBrush = brush;
+            if (cells[row, col].BorderThickness != thickness) cells[row, col].BorderThickness = thickness;
+        }
     }
-    private void Deselect() { pendingCell = null; selected.Clear(); selecting = false; Keyboard.ClearFocus(); Refresh(); }
+    private void Deselect() { pendingCell = null; selected.Clear(); selecting = false; Keyboard.ClearFocus(); RefreshSelection(); }
     private bool CommitPending()
     {
         var cell = pendingCell; pendingCell = null;

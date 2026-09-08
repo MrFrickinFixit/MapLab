@@ -155,7 +155,7 @@ public sealed class SandboxPanel : Grid
             AddAxis(map[r], r, 1, true, r);
             for (var c = 0; c < rpm.Length; c++)
             {
-                var cell = new TextBox { Tag = (r, c), Text = FormatDisplayValue(values[r, c]), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = Brushes.Black, BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), Padding = new Thickness(1, 0, 1, 0) };
+                var cell = new TextBox { Tag = (r, c), ToolTip = "", Text = FormatDisplayValue(values[r, c]), TextAlignment = TextAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 10, FontWeight = FontWeights.SemiBold, Foreground = Brushes.Black, BorderBrush = new SolidColorBrush(Color.FromRgb(29, 42, 57)), BorderThickness = new Thickness(.5), Padding = new Thickness(1, 0, 1, 0) };
                 cell.ToolTipOpening += (_, _) => { var point = ((int Row, int Col))cell.Tag; UpdateCellToolTip(point.Row, point.Col); };
                 cell.PreviewMouseLeftButtonDown += CellDown; cell.MouseEnter += CellEnter; cell.PreviewMouseRightButtonDown += CellRight;
                 cell.GotKeyboardFocus += (_, _) => { var point = ((int Row, int Col))cell.Tag; cell.Text = FormatStoredValue(values[point.Row, point.Col]); editOriginals[cell] = cell.Text; if (IsSelected(point.Row, point.Col) && Selected().Count > 1) groupCellEditsAwaitingEnter.Add(cell); else groupCellEditsAwaitingEnter.Remove(cell); cell.Background = Brushes.White; cell.SelectAll(); };
@@ -434,7 +434,7 @@ public sealed class SandboxPanel : Grid
         if (parsed.Any(row => row.Length != parsed[0].Length) || parsed.SelectMany(row => row).Any(token => !double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || !double.IsFinite(value))) { Info("Clipboard data must be a rectangular table of finite numbers."); return; }
         var origin = Bounds(out var t, out _, out var l, out _) ? (Row: t, Col: l) : (Row: 0, Col: 0); if (origin.Row + parsed.Length > map.Length || origin.Col + parsed[0].Length > rpm.Length) { Info("The pasted table does not fit from the selected cell."); return; }
         PushUndo(); for (var r = 0; r < parsed.Length; r++) for (var c = 0; c < parsed[r].Length; c++) values[origin.Row + r, origin.Col + c] = double.Parse(parsed[r][c], CultureInfo.InvariantCulture);
-        ClearCellSelection(); Changed($"Pasted {parsed[0].Length} × {parsed.Length} sandbox cells exactly as supplied", normalize: false);
+        start = end = null; pinned.Clear(); selecting = false; Changed($"Pasted {parsed[0].Length} × {parsed.Length} sandbox cells exactly as supplied", normalize: false);
     }
 
     private void ExportCsv(object? sender, RoutedEventArgs e) { var dialog = new SaveFileDialog { Filter = "CSV file (*.csv)|*.csv", FileName = "map-sandbox.csv" }; if (dialog.ShowDialog(Window.GetWindow(this)) != true) return; var csv = new StringBuilder(); for (var r = 0; r < map.Length; r++) { csv.Append(FormatExactAxisValue(map[r])); for (var c = 0; c < rpm.Length; c++) csv.Append(',').Append(FormatStoredValue(values[r, c])); csv.AppendLine(); } csv.Append(XAxisTitle); foreach (var value in rpm) csv.Append(',').Append(FormatExactAxisValue(value)); File.WriteAllText(dialog.FileName, csv.ToString()); status.Text = $"Saved {Path.GetFileName(dialog.FileName)}"; }
@@ -527,7 +527,7 @@ public sealed class SandboxPanel : Grid
         loading = true; var min = double.PositiveInfinity; var max = double.NegativeInfinity;
         for (var r = 0; r < map.Length; r++) for (var c = 0; c < rpm.Length; c++) { var value = values[r, c]; if (value < min) min = value; if (value > max) max = value; }
         var span = Math.Max(.001, max - min);
-        for (var r = 0; r < map.Length; r++) for (var c = 0; c < rpm.Length; c++) { cells[r, c].Text = FormatDisplayValue(values[r, c]); cells[r, c].Background = heatPalette[(int)Math.Round(Math.Clamp((values[r, c] - min) / span, 0, 1) * (heatPalette.Length - 1))]; UpdateCellToolTip(r, c); }
+        for (var r = 0; r < map.Length; r++) for (var c = 0; c < rpm.Length; c++) { var text = FormatDisplayValue(values[r, c]); if (cells[r, c].Text != text) cells[r, c].Text = text; var background = heatPalette[(int)Math.Round(Math.Clamp((values[r, c] - min) / span, 0, 1) * (heatPalette.Length - 1))]; if (!ReferenceEquals(cells[r, c].Background, background)) cells[r, c].Background = background; }
         loading = false;
     }
     private void UpdateCellToolTip(int row, int col)
@@ -547,9 +547,9 @@ public sealed class SandboxPanel : Grid
         // briefly differ from the replacement axis dimensions.
         for (var r = 0; r < cells.GetLength(0); r++) for (var c = 0; c < cells.GetLength(1); c++)
         {
-            var isSelected = selected.Contains((r, c));
-            cells[r, c].BorderBrush = isSelected ? Brushes.White : UiBrushCache.GridLine;
-            cells[r, c].BorderThickness = new Thickness(isSelected ? 2 : .5);
+            var isSelected = selected.Contains((r, c)); var brush = isSelected ? Brushes.White : UiBrushCache.GridLine; var thickness = new Thickness(isSelected ? 2 : .5);
+            if (!ReferenceEquals(cells[r, c].BorderBrush, brush)) cells[r, c].BorderBrush = brush;
+            if (cells[r, c].BorderThickness != thickness) cells[r, c].BorderThickness = thickness;
         }
     }
     private void ClearCellSelection() { start = end = null; pinned.Clear(); selecting = false; UpdateSelection(); }
